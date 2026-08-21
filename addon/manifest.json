@@ -1,50 +1,30 @@
 {
   "id": "pt.filipe.nuvio.tvhub",
-  "version": "3.0.1",
-  "name": "PT•TV HUB",
-  "description": "PT•TV HUB — IPTV, Filmes e Séries. Um hub português de entretenimento para Nuvio e Stremio.",
+  "version": "2.0.0",
+  "name": "PT TV Hub",
+  "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes e fontes autorizadas.",
   "logo": "https://pt-tv-filme-e-series.onrender.com/assets/logo.svg",
   "background": "https://pt-tv-filme-e-series.onrender.com/assets/background.svg",
-
   "resources": [
     "catalog",
     "meta",
-    "stream"
+    "stream",
+    "addon_catalog"
   ],
-
   "types": [
     "channel",
-    "movie",
-    "series"
+    "tv"
   ],
-
   "catalogs": [
     {
       "type": "channel",
-      "id": "iptv",
-      "name": "📺 IPTV",
-      "extra": [
-        {
-          "name": "search",
-          "isRequired": false
-        }
-      ]
+      "id": "pt-services",
+      "name": "TV Portugal"
     },
     {
-      "type": "movie",
-      "id": "pt-movies",
-      "name": "🎬 Filmes",
-      "extra": [
-        {
-          "name": "search",
-          "isRequired": false
-        }
-      ]
-    },
-    {
-      "type": "series",
-      "id": "pt-series",
-      "name": "📺 Séries",
+      "type": "channel",
+      "id": "m3u",
+      "name": "Minha IPTV",
       "extra": [
         {
           "name": "search",
@@ -53,13 +33,18 @@
       ]
     }
   ],
-
-  "idPrefixes": [
-    "m3u:",
-    "xtream:",
-    "tmdb:"
+  "addonCatalogs": [
+    {
+      "type": "addon",
+      "id": "recommended",
+      "name": "Add-ons recomendados"
+    }
   ],
-
+  "idPrefixes": [
+    "pttv:",
+    "m3u:",
+    "xtream:"
+  ],
   "behaviorHints": {
     "configurable": true,
     "configurationRequired": false,
