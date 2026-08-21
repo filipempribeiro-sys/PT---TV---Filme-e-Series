@@ -1,8 +1,8 @@
+
 {
   "name": "pt-tv-hub",
-  "version": "3.0.1",
-  "private": true,
-  "description": "PT•TV HUB — IPTV, Filmes e Séries para Nuvio e Stremio.",
+  "version": "2.0.0",
+  "description": "PT TV Hub - IPTV M3U/Xtream para Nuvio e Stremio",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
