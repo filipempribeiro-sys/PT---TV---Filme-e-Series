@@ -1,0 +1,30 @@
+[
+  {
+    "id": "pttv:vodafone",
+    "name": "Vodafone TV",
+    "description": "Acesso oficial à Vodafone TV para clientes Vodafone TV.",
+    "url": "https://www.vodafone.pt/pacotes/televisao/em-todos-ecras.html",
+    "logo": "https://www.vodafone.pt/content/dam/digital/vodafone/images/logos/vodafone-logo-red.svg"
+  },
+  {
+    "id": "pttv:digi",
+    "name": "DIGI TV",
+    "description": "Acesso oficial à DIGI TV para clientes DIGI.",
+    "url": "https://www.digi.pt/tv/",
+    "logo": "https://www.digi.pt/favicon.ico"
+  },
+  {
+    "id": "pttv:meogo",
+    "name": "MEO Go",
+    "description": "Acesso oficial ao MEO Go.",
+    "url": "https://tv.meo.pt/pt",
+    "logo": "https://www.meo.pt/favicon.ico"
+  },
+  {
+    "id": "pttv:nos",
+    "name": "NOS TV",
+    "description": "Acesso oficial à NOS TV.",
+    "url": "https://www.nos.pt/tv/app-nos-tv",
+    "logo": "https://www.nos.pt/favicon.ico"
+  }
+]

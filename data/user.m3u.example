@@ -1,0 +1,3 @@
+#EXTM3U
+#EXTINF:-1 tvg-name="Canal Demo" group-title="Exemplo",Canal Demo
+https://example.invalid/stream.m3u8

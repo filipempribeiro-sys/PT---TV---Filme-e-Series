@@ -1,0 +1,25 @@
+[
+  {
+    "id": "pt-iptv-template",
+    "name": "PT IPTV (lista própria)",
+    "description": "Template Nuvio para uma fonte IPTV que o utilizador tenha autorização para usar. Desativado até ser configurado.",
+    "version": "1.0.0",
+    "author": "Filipe / template",
+    "supportedTypes": [
+      "tv"
+    ],
+    "filename": "providers/pt-iptv-template.js",
+    "enabled": false,
+    "logo": "",
+    "contentLanguage": [
+      "pt"
+    ],
+    "formats": [
+      "m3u8",
+      "mp4"
+    ],
+    "limited": true,
+    "disabledPlatforms": [],
+    "supportsExternalPlayer": true
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Streaming Catalogs",
+    "status": "reference",
+    "url": "https://github.com/markflaisz/stremio-catalog"
+  },
+  {
+    "name": "OpenSubtitles",
+    "status": "reference",
+    "url": "https://opensubtitles.strem.io/stremio/v1/manifest.json"
+  },
+  {
+    "name": "Torrentio",
+    "status": "reference",
+    "url": "https://torrentio.strem.fun/manifest.json"
+  },
+  {
+    "name": "TorrentsDB",
+    "status": "reference",
+    "url": "https://beta.stremio-addons.net/addons/torrentsdb/manifest.json"
+  }
+]

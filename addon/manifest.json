@@ -1,0 +1,44 @@
+{
+  "id": "pt.filipe.nuvio.tvhub",
+  "version": "1.0.0",
+  "name": "PT TV Hub",
+  "description": "Hub para serviços de TV em Portugal e listas M3U fornecidas pelo utilizador. Não contorna autenticação, DRM ou proteção de conteúdos.",
+  "logo": "https://www.stremio.com/website/stremio-logo-small.png",
+  "resources": [
+    "catalog",
+    "meta",
+    "stream",
+    "addon_catalog"
+  ],
+  "types": [
+    "channel",
+    "tv"
+  ],
+  "catalogs": [
+    {
+      "type": "channel",
+      "id": "pt-services",
+      "name": "TV Portugal"
+    },
+    {
+      "type": "channel",
+      "id": "m3u",
+      "name": "Minha IPTV"
+    }
+  ],
+  "addonCatalogs": [
+    {
+      "type": "addon",
+      "id": "recommended",
+      "name": "Add-ons recomendados"
+    }
+  ],
+  "idPrefixes": [
+    "pttv:",
+    "m3u:"
+  ],
+  "behaviorHints": {
+    "configurable": false,
+    "p2p": false
+  }
+}
