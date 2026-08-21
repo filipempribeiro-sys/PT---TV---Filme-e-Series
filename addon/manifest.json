@@ -1,19 +1,22 @@
 {
   "id": "pt.filipe.nuvio.tvhub",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "PT TV Hub",
-  "description": "Hub para serviços de TV em Portugal e listas M3U fornecidas pelo utilizador. Não contorna autenticação, DRM ou proteção de conteúdos.",
+  "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes e fontes autorizadas.",
   "logo": "https://www.stremio.com/website/stremio-logo-small.png",
+
   "resources": [
     "catalog",
     "meta",
     "stream",
     "addon_catalog"
   ],
+
   "types": [
     "channel",
     "tv"
   ],
+
   "catalogs": [
     {
       "type": "channel",
@@ -26,6 +29,7 @@
       "name": "Minha IPTV"
     }
   ],
+
   "addonCatalogs": [
     {
       "type": "addon",
@@ -33,12 +37,66 @@
       "name": "Add-ons recomendados"
     }
   ],
+
   "idPrefixes": [
     "pttv:",
-    "m3u:"
+    "m3u:",
+    "xtream:"
   ],
+
   "behaviorHints": {
-    "configurable": false,
+    "configurable": true,
+    "configurationRequired": false,
     "p2p": false
-  }
+  },
+
+  "config": [
+    {
+      "key": "iptv_name",
+      "type": "text",
+      "title": "Nome da IPTV",
+      "default": "Minha IPTV"
+    },
+    {
+      "key": "iptv_type",
+      "type": "select",
+      "title": "Tipo de IPTV",
+      "options": [
+        "Nenhuma",
+        "M3U URL",
+        "Xtream Codes"
+      ],
+      "default": "Nenhuma"
+    },
+    {
+      "key": "m3u_url",
+      "type": "text",
+      "title": "URL da lista M3U",
+      "default": ""
+    },
+    {
+      "key": "xtream_url",
+      "type": "text",
+      "title": "Xtream Server URL",
+      "default": ""
+    },
+    {
+      "key": "xtream_username",
+      "type": "text",
+      "title": "Xtream Username",
+      "default": ""
+    },
+    {
+      "key": "xtream_password",
+      "type": "password",
+      "title": "Xtream Password",
+      "default": ""
+    },
+    {
+      "key": "epg_url",
+      "type": "text",
+      "title": "EPG URL (opcional)",
+      "default": ""
+    }
+  ]
 }
