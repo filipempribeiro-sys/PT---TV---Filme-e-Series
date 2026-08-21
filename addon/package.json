@@ -1,10 +1,9 @@
 {
   "name": "pt-tv-hub",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "dependencies": {
-    "express": "^4.21.2",
-    "stremio-addon-sdk": "^1.6.0"
+    "stremio-addon-sdk": "^1.6.10"
   },
   "scripts": {
     "start": "node server.js"
