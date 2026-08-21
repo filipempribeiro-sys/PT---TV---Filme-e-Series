@@ -1,16 +1,46 @@
 {
-  "name": "pt-tv-hub",
+  "id": "pt.filipe.nuvio.tvhub",
   "version": "1.3.1",
-  "private": true,
-  "description": "PT TV Hub - IPTV M3U, Xtream Codes e serviços TV Portugal para Stremio.",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "engines": {
-    "node": ">=18"
-  },
-  "dependencies": {
-    "express": "^4.21.2"
+  "name": "PT TV Hub",
+  "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes e fontes autorizadas.",
+  "logo": "https://www.stremio.com/website/stremio-logo-small.png",
+  "resources": [
+    "catalog",
+    "meta",
+    "stream",
+    "addon_catalog"
+  ],
+  "types": [
+    "channel",
+    "tv"
+  ],
+  "catalogs": [
+    {
+      "type": "channel",
+      "id": "pt-services",
+      "name": "TV Portugal"
+    },
+    {
+      "type": "channel",
+      "id": "m3u",
+      "name": "Minha IPTV"
+    }
+  ],
+  "addonCatalogs": [
+    {
+      "type": "addon",
+      "id": "recommended",
+      "name": "Add-ons recomendados"
+    }
+  ],
+  "idPrefixes": [
+    "pttv:",
+    "m3u:",
+    "xtream:"
+  ],
+  "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": false,
+    "p2p": false
   }
 }
