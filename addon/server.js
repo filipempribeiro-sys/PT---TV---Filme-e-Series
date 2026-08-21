@@ -2,19 +2,31 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 
+const {
+  addonBuilder,
+  serveHTTP
+} = require("stremio-addon-sdk");
+
 const app = express();
+
 const PORT = process.env.PORT || 7000;
 const BASE = __dirname;
 
 // ============================================================
 // CORS
-// Permite que Stremio / Stremio Web aceda ao addon
 // ============================================================
 
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, OPTIONS"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
+
   next();
 });
 
@@ -26,65 +38,71 @@ app.options("*", (req, res) => {
 // CARREGAR DADOS
 // ============================================================
 
-const servicesFile = path.join(
-  BASE,
-  "..",
-  "data",
-  "services.json"
-);
+function loadJSON(file) {
+  try {
+    return JSON.parse(
+      fs.readFileSync(file, "utf8")
+    );
+  } catch (error) {
+    console.error(
+      `Erro ao carregar ${file}:`,
+      error.message
+    );
 
-const addonsFile = path.join(
-  BASE,
-  "..",
-  "data",
-  "addons.json"
-);
-
-let services = [];
-let addons = [];
-
-try {
-  services = JSON.parse(
-    fs.readFileSync(servicesFile, "utf8")
-  );
-} catch (error) {
-  console.error("Erro ao carregar services.json:", error.message);
+    return [];
+  }
 }
 
-try {
-  addons = JSON.parse(
-    fs.readFileSync(addonsFile, "utf8")
-  );
-} catch (error) {
-  console.error("Erro ao carregar addons.json:", error.message);
-}
+const services = loadJSON(
+  path.join(
+    BASE,
+    "..",
+    "data",
+    "services.json"
+  )
+);
+
+const addons = loadJSON(
+  path.join(
+    BASE,
+    "..",
+    "data",
+    "addons.json"
+  )
+);
 
 // ============================================================
-// FUNÇÕES AUXILIARES
+// M3U PARSER
 // ============================================================
 
 function parseM3U(text) {
+
   const lines = text.split(/\r?\n/);
+
   const channels = [];
 
   let current = null;
 
   for (const line0 of lines) {
+
     const line = line0.trim();
 
     if (!line) {
       continue;
     }
 
-    // Informação do canal
     if (line.startsWith("#EXTINF")) {
+
       const attrs = {};
 
-      const attrRe = /([\w-]+)="([^"]*)"/g;
+      const attrRegex =
+        /([\w-]+)="([^"]*)"/g;
 
       let match;
 
-      while ((match = attrRe.exec(line)) !== null) {
+      while (
+        (match = attrRegex.exec(line)) !== null
+      ) {
         attrs[match[1]] = match[2];
       }
 
@@ -97,20 +115,28 @@ function parseM3U(text) {
 
       current = {
         title,
-        group: attrs["group-title"] || "IPTV",
-        logo: attrs["tvg-logo"] || ""
+        group:
+          attrs["group-title"] || "IPTV",
+        logo:
+          attrs["tvg-logo"] || "",
+        tvgId:
+          attrs["tvg-id"] || ""
       };
 
       continue;
     }
 
-    // URL do canal
-    if (!line.startsWith("#") && current) {
+    if (
+      !line.startsWith("#") &&
+      current
+    ) {
+
       current.url = line;
 
       current.id =
         "m3u:" +
-        Buffer.from(line)
+        Buffer
+          .from(line)
           .toString("base64url")
           .slice(0, 24);
 
@@ -124,31 +150,35 @@ function parseM3U(text) {
 }
 
 // ============================================================
-// CARREGAR M3U DO UTILIZADOR
+// FETCH M3U
 // ============================================================
 
-function loadUserM3U() {
-  const file = path.join(
-    BASE,
-    "..",
-    "data",
-    "user.m3u"
-  );
+async function fetchM3U(url) {
 
-  if (!fs.existsSync(file)) {
+  if (!url) {
     return [];
   }
 
   try {
-    const text = fs.readFileSync(
-      file,
-      "utf8"
-    );
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+
+      throw new Error(
+        `HTTP ${response.status}`
+      );
+    }
+
+    const text =
+      await response.text();
 
     return parseM3U(text);
+
   } catch (error) {
+
     console.error(
-      "Erro ao carregar user.m3u:",
+      "Erro ao obter M3U:",
       error.message
     );
 
@@ -157,347 +187,584 @@ function loadUserM3U() {
 }
 
 // ============================================================
-// HEALTH CHECK
+// XTREAM API
 // ============================================================
 
-app.get("/", (req, res) => {
-  res.type("html").send(`
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>PT TV Hub</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 800px;
-      margin: 50px auto;
-      padding: 20px;
-      line-height: 1.6;
+function cleanXtreamUrl(url) {
+
+  if (!url) {
+    return "";
+  }
+
+  return url
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+async function xtreamRequest(
+  config,
+  action = ""
+) {
+
+  const server =
+    cleanXtreamUrl(
+      config.xtream_url
+    );
+
+  const username =
+    config.xtream_username || "";
+
+  const password =
+    config.xtream_password || "";
+
+  if (
+    !server ||
+    !username ||
+    !password
+  ) {
+    return null;
+  }
+
+  const url =
+    `${server}/player_api.php` +
+    `?username=${encodeURIComponent(username)}` +
+    `&password=${encodeURIComponent(password)}` +
+    (action
+      ? `&action=${encodeURIComponent(action)}`
+      : "");
+
+  try {
+
+    const response =
+      await fetch(url);
+
+    if (!response.ok) {
+
+      throw new Error(
+        `HTTP ${response.status}`
+      );
     }
 
-    code {
-      background: #eee;
-      padding: 3px 6px;
-      border-radius: 4px;
+    return await response.json();
+
+  } catch (error) {
+
+    console.error(
+      "Erro Xtream:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
+// ============================================================
+// XTREAM CHANNELS
+// ============================================================
+
+async function getXtreamChannels(
+  config
+) {
+
+  const data =
+    await xtreamRequest(
+      config,
+      "get_live_streams"
+    );
+
+  if (!Array.isArray(data)) {
+    return [];
+  }
+
+  const server =
+    cleanXtreamUrl(
+      config.xtream_url
+    );
+
+  const username =
+    config.xtream_username;
+
+  const password =
+    config.xtream_password;
+
+  return data.map(
+    channel => {
+
+      const extension =
+        channel.container_extension ||
+        "ts";
+
+      const streamUrl =
+        `${server}/live/` +
+        `${encodeURIComponent(username)}/` +
+        `${encodeURIComponent(password)}/` +
+        `${channel.stream_id}.${extension}`;
+
+      return {
+
+        id:
+          `xtream:${channel.stream_id}`,
+
+        title:
+          channel.name ||
+          `Canal ${channel.stream_id}`,
+
+        group:
+          channel.category_name ||
+          "TV",
+
+        logo:
+          channel.stream_icon ||
+          "",
+
+        tvgId:
+          channel.epg_channel_id ||
+          "",
+
+        url:
+          streamUrl
+      };
     }
-  </style>
-</head>
+  );
+}
 
-<body>
+// ============================================================
+// IPTV CHANNEL LOADER
+// ============================================================
 
-<h1>PT TV Hub</h1>
+async function getIPTVChannels(
+  config
+) {
 
-<p>O serviço está online.</p>
+  if (!config) {
+    return [];
+  }
 
-<p>
-  <strong>Stremio Manifest:</strong><br>
-  <code>/manifest.json</code>
-</p>
+  const type =
+    config.iptv_type;
 
-<p>
-  <strong>Configuração:</strong><br>
-  <code>/configure</code>
-</p>
+  if (type === "M3U URL") {
 
-</body>
-</html>
-  `);
-});
+    return await fetchM3U(
+      config.m3u_url
+    );
+  }
+
+  if (type === "Xtream Codes") {
+
+    return await getXtreamChannels(
+      config
+    );
+  }
+
+  return [];
+}
 
 // ============================================================
 // MANIFEST
 // ============================================================
 
-app.get("/manifest.json", (req, res) => {
-  try {
-    const manifest = JSON.parse(
-      fs.readFileSync(
-        path.join(BASE, "manifest.json"),
-        "utf8"
-      )
-    );
-
-    res.json(manifest);
-  } catch (error) {
-    console.error(
-      "Erro ao carregar manifest.json:",
-      error.message
-    );
-
-    res.status(500).json({
-      error: "Não foi possível carregar o manifest.json"
-    });
-  }
-});
+const manifest =
+  require("./manifest.json");
 
 // ============================================================
-// CATÁLOGO — SERVIÇOS TV PORTUGAL
+// STREMIO ADDON
 // ============================================================
 
-app.get(
-  "/catalog/channel/pt-services.json",
-  (req, res) => {
+const builder =
+  new addonBuilder(manifest);
 
-    const metas = services.map(service => ({
-      id: service.id,
-      type: "channel",
-      name: service.name,
-      poster: service.logo || "",
-      description:
-        service.description ||
-        "Serviço oficial.",
-      posterShape: "square"
-    }));
+// ============================================================
+// CATALOG HANDLER
+// ============================================================
 
-    res.json({
-      metas
-    });
+builder.defineCatalogHandler(
+  async args => {
+
+    if (
+      args.type === "channel" &&
+      args.id === "pt-services"
+    ) {
+
+      return {
+
+        metas:
+          services.map(
+            service => ({
+
+              id: service.id,
+
+              type: "channel",
+
+              name:
+                service.name,
+
+              poster:
+                service.logo || "",
+
+              description:
+                service.description ||
+                "Serviço oficial.",
+
+              posterShape:
+                "square"
+            })
+          )
+      };
+    }
+
+    if (
+      args.type === "channel" &&
+      args.id === "m3u"
+    ) {
+
+      const config =
+        args.config || {};
+
+      const channels =
+        await getIPTVChannels(
+          config
+        );
+
+      return {
+
+        metas:
+          channels.map(
+            channel => ({
+
+              id:
+                channel.id,
+
+              type:
+                "channel",
+
+              name:
+                channel.title,
+
+              poster:
+                channel.logo || "",
+
+              description:
+                channel.group ||
+                "IPTV",
+
+              posterShape:
+                "square"
+            })
+          )
+      };
+    }
+
+    if (
+      args.type === "addon" &&
+      args.id === "recommended"
+    ) {
+
+      return {
+
+        metas:
+          addons.map(
+            (addon, index) => ({
+
+              id:
+                `addon:${index}`,
+
+              type:
+                "addon",
+
+              name:
+                addon.name,
+
+              description:
+                "Recurso externo. " +
+                "A instalação/configuração é feita pelo utilizador.",
+
+              website:
+                addon.url,
+
+              posterShape:
+                "square"
+            })
+          )
+      };
+    }
+
+    return {
+      metas: []
+    };
   }
 );
 
 // ============================================================
-// CATÁLOGO — M3U
+// META HANDLER
 // ============================================================
 
-app.get(
-  "/catalog/channel/m3u.json",
-  (req, res) => {
+builder.defineMetaHandler(
+  async args => {
 
-    const channels = loadUserM3U();
+    const id =
+      args.id;
 
-    const metas = channels.map(channel => ({
-      id: channel.id,
-      type: "channel",
-      name: channel.title,
-      poster: channel.logo || "",
-      description:
-        channel.group || "IPTV",
-      posterShape: "square"
-    }));
-
-    res.json({
-      metas
-    });
-  }
-);
-
-// ============================================================
-// META — CANAIS
-// ============================================================
-
-app.get(
-  "/meta/channel/:id.json",
-  (req, res) => {
-
-    const id = decodeURIComponent(
-      req.params.id
-    );
-
-    // Serviço oficial
-    const service = services.find(
-      item => item.id === id
-    );
+    const service =
+      services.find(
+        item => item.id === id
+      );
 
     if (service) {
-      return res.json({
+
+      return {
+
         meta: {
-          id: service.id,
-          type: "channel",
-          name: service.name,
-          poster: service.logo || "",
+
+          id:
+            service.id,
+
+          type:
+            "channel",
+
+          name:
+            service.name,
+
+          poster:
+            service.logo || "",
+
           description:
             service.description ||
             "Serviço oficial.",
-          posterShape: "square"
+
+          posterShape:
+            "square"
         }
-      });
+      };
     }
 
-    // Canal M3U
-    const channel = loadUserM3U().find(
-      item => item.id === id
-    );
+    const config =
+      args.config || {};
+
+    const channels =
+      await getIPTVChannels(
+        config
+      );
+
+    const channel =
+      channels.find(
+        item => item.id === id
+      );
 
     if (channel) {
-      return res.json({
+
+      return {
+
         meta: {
-          id: channel.id,
-          type: "channel",
-          name: channel.title,
-          poster: channel.logo || "",
+
+          id:
+            channel.id,
+
+          type:
+            "channel",
+
+          name:
+            channel.title,
+
+          poster:
+            channel.logo || "",
+
           description:
-            channel.group || "IPTV",
-          posterShape: "square"
+            channel.group ||
+            "IPTV",
+
+          posterShape:
+            "square"
         }
-      });
+      };
     }
 
-    return res.json({
+    if (
+      id.startsWith("addon:")
+    ) {
+
+      const index =
+        Number(
+          id.replace(
+            "addon:",
+            ""
+          )
+        );
+
+      const addon =
+        addons[index];
+
+      if (!addon) {
+
+        return {
+          meta: null
+        };
+      }
+
+      return {
+
+        meta: {
+
+          id:
+            `addon:${index}`,
+
+          type:
+            "addon",
+
+          name:
+            addon.name,
+
+          description:
+            addon.url,
+
+          website:
+            addon.url
+        }
+      };
+    }
+
+    return {
       meta: null
-    });
+    };
   }
 );
 
 // ============================================================
-// STREAM — CANAIS
+// STREAM HANDLER
 // ============================================================
 
-app.get(
-  "/stream/channel/:id.json",
-  (req, res) => {
+builder.defineStreamHandler(
+  async args => {
 
-    const id = decodeURIComponent(
-      req.params.id
-    );
+    const id =
+      args.id;
 
-    // Serviço oficial
-    const service = services.find(
-      item => item.id === id
-    );
+    // --------------------------------------------------------
+    // OPERADORES
+    // --------------------------------------------------------
+
+    const service =
+      services.find(
+        item => item.id === id
+      );
 
     if (service) {
 
-      return res.json({
+      return {
+
         streams: [
+
           {
-            name: service.name,
+
+            name:
+              service.name,
 
             description:
               "Abrir serviço oficial. " +
               "O login e as permissões são tratados pelo operador.",
 
-            externalUrl: service.url
+            externalUrl:
+              service.url
           }
+
         ]
-      });
+      };
     }
 
-    // Canal M3U
-    const channel = loadUserM3U().find(
-      item => item.id === id
-    );
+    // --------------------------------------------------------
+    // IPTV
+    // --------------------------------------------------------
+
+    const config =
+      args.config || {};
+
+    const channels =
+      await getIPTVChannels(
+        config
+      );
+
+    const channel =
+      channels.find(
+        item => item.id === id
+      );
 
     if (channel) {
 
-      return res.json({
+      return {
+
         streams: [
+
           {
-            name: channel.title,
-            title: channel.group,
-            url: channel.url
+
+            name:
+              channel.title,
+
+            title:
+              channel.group,
+
+            description:
+              "Fonte IPTV configurada pelo utilizador.",
+
+            url:
+              channel.url
+
           }
+
         ]
-      });
+      };
     }
 
-    return res.json({
-      streams: []
-    });
-  }
-);
+    // --------------------------------------------------------
+    // ADDONS
+    // --------------------------------------------------------
 
-// ============================================================
-// CATÁLOGO — ADDONS RECOMENDADOS
-// ============================================================
+    if (
+      id.startsWith("addon:")
+    ) {
 
-app.get(
-  "/catalog/addon/recommended.json",
-  (req, res) => {
+      const index =
+        Number(
+          id.replace(
+            "addon:",
+            ""
+          )
+        );
 
-    const metas = addons.map(
-      (addon, index) => ({
-        id: "addon:" + index,
+      const addon =
+        addons[index];
 
-        type: "addon",
+      if (!addon) {
 
-        name: addon.name,
-
-        description:
-          "Manifest/recurso externo. " +
-          "A instalação e configuração são feitas pelo utilizador.",
-
-        website: addon.url,
-
-        posterShape: "square"
-      })
-    );
-
-    res.json({
-      metas
-    });
-  }
-);
-
-// ============================================================
-// META — ADDONS
-// ============================================================
-
-app.get(
-  "/meta/addon/:id.json",
-  (req, res) => {
-
-    const id = req.params.id;
-
-    const index = Number(
-      id.replace("addon:", "")
-    );
-
-    const addon = addons[index];
-
-    if (!addon) {
-      return res.json({
-        meta: null
-      });
-    }
-
-    return res.json({
-      meta: {
-        id: "addon:" + index,
-        type: "addon",
-        name: addon.name,
-        description: addon.url,
-        website: addon.url
+        return {
+          streams: []
+        };
       }
-    });
-  }
-);
 
-// ============================================================
-// STREAM — ADDONS
-// ============================================================
+      return {
 
-app.get(
-  "/stream/addon/:id.json",
-  (req, res) => {
+        streams: [
 
-    const id = req.params.id;
+          {
 
-    const index = Number(
-      id.replace("addon:", "")
-    );
+            name:
+              addon.name,
 
-    const addon = addons[index];
+            externalUrl:
+              addon.url
+          }
 
-    if (!addon) {
-      return res.json({
-        streams: []
-      });
+        ]
+      };
     }
 
-    return res.json({
-      streams: [
-        {
-          name: addon.name,
-          externalUrl: addon.url
-        }
-      ]
-    });
+    return {
+      streams: []
+    };
   }
 );
 
 // ============================================================
-// CONFIGURAÇÃO
+// CONFIGURAÇÃO CUSTOMIZADA
 // ============================================================
 
 app.get(
@@ -505,6 +772,7 @@ app.get(
   (req, res) => {
 
     res.type("html").send(`
+
 <!doctype html>
 
 <html>
@@ -513,33 +781,68 @@ app.get(
 
 <meta charset="utf-8">
 
-<title>PT TV Hub</title>
+<title>PT TV Hub — Configuração</title>
+
+<meta
+  name="viewport"
+  content="width=device-width,initial-scale=1"
+/>
 
 <style>
 
 body {
   font-family: Arial, sans-serif;
-  max-width: 800px;
-  margin: 40px auto;
+  max-width: 850px;
+  margin: 30px auto;
   padding: 20px;
-  line-height: 1.6;
+  background: #f5f5f5;
 }
 
-code {
-  background: #eee;
-  padding: 3px 6px;
-  border-radius: 4px;
+.card {
+  background: white;
+  padding: 25px;
+  margin-bottom: 20px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
 }
 
 h1 {
-  margin-bottom: 5px;
+  margin-top: 0;
 }
 
-.box {
-  background: #f5f5f5;
-  padding: 15px;
-  border-radius: 8px;
+h2 {
+  margin-top: 0;
+}
+
+label {
+  display: block;
+  font-weight: bold;
+  margin-top: 15px;
+}
+
+input,
+select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px;
+  margin-top: 6px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+button {
   margin-top: 20px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.notice {
+  background: #fff3cd;
+  padding: 12px;
+  border-radius: 6px;
 }
 
 </style>
@@ -548,69 +851,227 @@ h1 {
 
 <body>
 
-<h1>PT TV Hub</h1>
+<div class="card">
+
+<h1>📺 PT TV Hub</h1>
 
 <p>
-Hub para serviços de TV em Portugal e listas M3U
-fornecidas pelo utilizador.
+Configure aqui a sua fonte IPTV.
 </p>
 
-<div class="box">
+<div class="notice">
 
-<h2>IPTV própria / autorizada</h2>
+<strong>Privacidade:</strong>
 
-<p>
-Coloque a sua lista M3U em:
-</p>
-
-<code>data/user.m3u</code>
+As credenciais IPTV são fornecidas pelo próprio
+utilizador e usadas apenas para aceder à fonte
+configurada.
 
 </div>
 
-<div class="box">
+</div>
 
-<h2>Privacidade</h2>
+<div class="card">
 
-<p>
-O PT TV Hub não recolhe nem guarda credenciais
-Vodafone, DIGI, MEO ou NOS.
-</p>
+<h2>📡 IPTV</h2>
 
-<p>
-O sistema não contorna autenticação,
-DRM ou outras proteções de conteúdos.
-</p>
+<label>Nome</label>
+
+<input
+  id="name"
+  value="Minha IPTV"
+/>
+
+<label>Tipo</label>
+
+<select id="type">
+
+<option>Nenhuma</option>
+
+<option>M3U URL</option>
+
+<option>Xtream Codes</option>
+
+</select>
+
+<div id="m3u">
+
+<label>M3U URL</label>
+
+<input
+  id="m3uUrl"
+  placeholder="https://exemplo.com/lista.m3u"
+/>
 
 </div>
+
+<div id="xtream">
+
+<label>Xtream Server URL</label>
+
+<input
+  id="xtreamUrl"
+  placeholder="http://servidor:8080"
+/>
+
+<label>Username</label>
+
+<input
+  id="username"
+/>
+
+<label>Password</label>
+
+<input
+  id="password"
+  type="password"
+/>
+
+</div>
+
+<label>EPG URL (opcional)</label>
+
+<input
+  id="epg"
+  placeholder="https://exemplo.com/epg.xml"
+/>
+
+<button onclick="installAddon()">
+  Adicionar PT TV Hub ao Stremio
+</button>
+
+</div>
+
+<script>
+
+const type =
+  document.getElementById("type");
+
+const m3u =
+  document.getElementById("m3u");
+
+const xtream =
+  document.getElementById("xtream");
+
+function updateFields() {
+
+  m3u.style.display =
+    type.value === "M3U URL"
+      ? "block"
+      : "none";
+
+  xtream.style.display =
+    type.value === "Xtream Codes"
+      ? "block"
+      : "none";
+}
+
+type.addEventListener(
+  "change",
+  updateFields
+);
+
+updateFields();
+
+function installAddon() {
+
+  const config = {
+
+    iptv_name:
+      document.getElementById("name").value,
+
+    iptv_type:
+      document.getElementById("type").value,
+
+    m3u_url:
+      document.getElementById("m3uUrl").value,
+
+    xtream_url:
+      document.getElementById("xtreamUrl").value,
+
+    xtream_username:
+      document.getElementById("username").value,
+
+    xtream_password:
+      document.getElementById("password").value,
+
+    epg_url:
+      document.getElementById("epg").value
+  };
+
+  const encoded =
+    btoa(
+      unescape(
+        encodeURIComponent(
+          JSON.stringify(config)
+        )
+      )
+    )
+    .replace(/\\+/g, "-")
+    .replace(/\\//g, "_")
+    .replace(/=+$/, "");
+
+  const url =
+    window.location.origin +
+    "/c/" +
+    encoded +
+    "/manifest.json";
+
+  const stremio =
+    "stremio://" +
+    url.replace(
+      /^https?:\\/\\//,
+      ""
+    );
+
+  window.location.href =
+    stremio;
+}
+
+</script>
 
 </body>
 
 </html>
+
     `);
   }
 );
 
 // ============================================================
-// TRATAMENTO DE ERROS
+// CONFIGURATED MANIFEST
 // ============================================================
 
-app.use(
-  (err, req, res, next) => {
+app.get(
+  "/c/:config/manifest.json",
+  (req, res) => {
 
-    console.error(
-      "Erro no servidor:",
-      err
-    );
+    res.json({
+      ...manifest,
 
-    res.status(500).json({
-      error: "Erro interno do PT TV Hub"
+      id:
+        `${manifest.id}.${req.params.config.slice(0, 12)}`,
+
+      behaviorHints: {
+        ...manifest.behaviorHints,
+        configurable: true
+      }
     });
   }
 );
 
 // ============================================================
-// ARRANQUE
+// START
 // ============================================================
+
+app.use(
+  (req, res, next) => {
+
+    res.status(404).json({
+      error: "Endpoint não encontrado"
+    });
+  }
+);
 
 app.listen(
   PORT,
@@ -618,12 +1079,11 @@ app.listen(
   () => {
 
     console.log(
-      `PT TV Hub em http://0.0.0.0:${PORT}`
+      `PT TV Hub em 0.0.0.0:${PORT}`
     );
 
     console.log(
-      `Manifest: /manifest.json`
+      "PT TV Hub pronto."
     );
-
   }
 );
