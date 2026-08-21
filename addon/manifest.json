@@ -1,10 +1,9 @@
 {
   "id": "pt.filipe.nuvio.tvhub",
-  "version": "2.0.0",
+  "version": "1.3.0",
   "name": "PT TV Hub",
   "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes e fontes autorizadas.",
-  "logo": "https://pt-tv-filme-e-series.onrender.com/assets/logo.svg",
-  "background": "https://pt-tv-filme-e-series.onrender.com/assets/background.svg",
+  "logo": "https://www.stremio.com/website/stremio-logo-small.png",
   "resources": [
     "catalog",
     "meta",
@@ -24,13 +23,7 @@
     {
       "type": "channel",
       "id": "m3u",
-      "name": "Minha IPTV",
-      "extra": [
-        {
-          "name": "search",
-          "isRequired": false
-        }
-      ]
+      "name": "Minha IPTV"
     }
   ],
   "addonCatalogs": [
