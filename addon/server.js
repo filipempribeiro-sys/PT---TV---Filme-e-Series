@@ -1,96 +1,132 @@
-const express = require("express");
 const fs = require("fs");
 const path = require("path");
 
-const app = express();
+const {
+  addonBuilder,
+  serveHTTP
+} = require("stremio-addon-sdk");
 
-const PORT = process.env.PORT || 7000;
+const manifest = require("./manifest.json");
+
 const BASE = __dirname;
 
 // ============================================================
-// CORS
-// ============================================================
-
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  next();
-});
-
-// ============================================================
-// HELPERS
+// DADOS
 // ============================================================
 
 function loadJSON(file) {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    return JSON.parse(
+      fs.readFileSync(file, "utf8")
+    );
   } catch (error) {
-    console.error(`Erro ao carregar ${file}:`, error.message);
+    console.error(
+      `Erro ao carregar ${file}:`,
+      error.message
+    );
     return [];
   }
 }
 
 const services = loadJSON(
-  path.join(BASE, "..", "data", "services.json")
+  path.join(
+    BASE,
+    "..",
+    "data",
+    "services.json"
+  )
 );
 
 const addons = loadJSON(
-  path.join(BASE, "..", "data", "addons.json")
+  path.join(
+    BASE,
+    "..",
+    "data",
+    "addons.json"
+  )
 );
-
-const manifest = require("./manifest.json");
 
 // ============================================================
 // M3U
 // ============================================================
 
 function parseM3U(text) {
-  const lines = text.split(/\r?\n/);
+
+  const lines =
+    text.split(/\r?\n/);
+
   const channels = [];
+
   let current = null;
 
   for (const raw of lines) {
+
     const line = raw.trim();
 
     if (!line) continue;
 
     if (line.startsWith("#EXTINF")) {
+
       const attrs = {};
-      const regex = /([\w-]+)="([^"]*)"/g;
+
+      const regex =
+        /([\w-]+)="([^"]*)"/g;
+
       let match;
 
-      while ((match = regex.exec(line)) !== null) {
+      while (
+        (match = regex.exec(line)) !== null
+      ) {
         attrs[match[1]] = match[2];
       }
 
-      const comma = line.indexOf(",");
+      const comma =
+        line.indexOf(",");
 
       const title =
         comma >= 0
           ? line.slice(comma + 1).trim()
-          : attrs["tvg-name"] || "Canal";
+          : (
+              attrs["tvg-name"] ||
+              "Canal"
+            );
 
       current = {
+
         title,
-        group: attrs["group-title"] || "IPTV",
-        logo: attrs["tvg-logo"] || "",
-        tvgId: attrs["tvg-id"] || ""
+
+        group:
+          attrs["group-title"] ||
+          "IPTV",
+
+        logo:
+          attrs["tvg-logo"] ||
+          "",
+
+        tvgId:
+          attrs["tvg-id"] ||
+          ""
       };
 
       continue;
     }
 
-    if (!line.startsWith("#") && current) {
+    if (
+      !line.startsWith("#") &&
+      current
+    ) {
+
       current.url = line;
 
       current.id =
         "m3u:" +
-        Buffer.from(line)
+        Buffer
+          .from(line)
           .toString("base64url")
           .slice(0, 24);
 
       channels.push(current);
+
       current = null;
     }
   }
@@ -103,19 +139,35 @@ function parseM3U(text) {
 // ============================================================
 
 async function fetchM3U(url) {
-  if (!url) return [];
+
+  if (!url) {
+    return [];
+  }
 
   try {
-    const response = await fetch(url);
+
+    const response =
+      await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+
+      throw new Error(
+        `HTTP ${response.status}`
+      );
     }
 
-    return parseM3U(await response.text());
+    const text =
+      await response.text();
+
+    return parseM3U(text);
 
   } catch (error) {
-    console.error("Erro M3U:", error.message);
+
+    console.error(
+      "Erro ao obter M3U:",
+      error.message
+    );
+
     return [];
   }
 }
@@ -125,18 +177,33 @@ async function fetchM3U(url) {
 // ============================================================
 
 function cleanXtreamUrl(url) {
+
   return String(url || "")
     .trim()
     .replace(/\/+$/, "");
 }
 
-async function xtreamRequest(config, action = "") {
+async function xtreamRequest(
+  config,
+  action = ""
+) {
 
-  const server = cleanXtreamUrl(config.xtream_url);
-  const username = config.xtream_username || "";
-  const password = config.xtream_password || "";
+  const server =
+    cleanXtreamUrl(
+      config.xtream_url
+    );
 
-  if (!server || !username || !password) {
+  const username =
+    config.xtream_username || "";
+
+  const password =
+    config.xtream_password || "";
+
+  if (
+    !server ||
+    !username ||
+    !password
+  ) {
     return null;
   }
 
@@ -144,38 +211,60 @@ async function xtreamRequest(config, action = "") {
     `${server}/player_api.php` +
     `?username=${encodeURIComponent(username)}` +
     `&password=${encodeURIComponent(password)}` +
-    (action
-      ? `&action=${encodeURIComponent(action)}`
-      : "");
+    (
+      action
+        ? `&action=${encodeURIComponent(action)}`
+        : ""
+    );
 
   try {
-    const response = await fetch(url);
+
+    const response =
+      await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+
+      throw new Error(
+        `HTTP ${response.status}`
+      );
     }
 
     return await response.json();
 
   } catch (error) {
-    console.error("Erro Xtream:", error.message);
+
+    // NÃO imprimir username/password
+    console.error(
+      "Erro na ligação Xtream:",
+      error.message
+    );
+
     return null;
   }
 }
 
-async function getXtreamChannels(config) {
+// ============================================================
+// XTREAM — CANAIS
+// ============================================================
 
-  const data = await xtreamRequest(
-    config,
-    "get_live_streams"
-  );
+async function getXtreamChannels(
+  config
+) {
+
+  const data =
+    await xtreamRequest(
+      config,
+      "get_live_streams"
+    );
 
   if (!Array.isArray(data)) {
     return [];
   }
 
   const server =
-    cleanXtreamUrl(config.xtream_url);
+    cleanXtreamUrl(
+      config.xtream_url
+    );
 
   const username =
     config.xtream_username;
@@ -186,10 +275,13 @@ async function getXtreamChannels(config) {
   return data.map(channel => {
 
     const extension =
-      channel.container_extension || "ts";
+      channel.container_extension ||
+      "ts";
 
     return {
-      id: `xtream:${channel.stream_id}`,
+
+      id:
+        `xtream:${channel.stream_id}`,
 
       title:
         channel.name ||
@@ -200,10 +292,12 @@ async function getXtreamChannels(config) {
         "TV",
 
       logo:
-        channel.stream_icon || "",
+        channel.stream_icon ||
+        "",
 
       tvgId:
-        channel.epg_channel_id || "",
+        channel.epg_channel_id ||
+        "",
 
       url:
         `${server}/live/` +
@@ -218,102 +312,147 @@ async function getXtreamChannels(config) {
 // IPTV
 // ============================================================
 
-async function getIPTVChannels(config) {
+async function getIPTVChannels(
+  config
+) {
 
-  if (!config) return [];
-
-  if (config.iptv_type === "M3U URL") {
-    return fetchM3U(config.m3u_url);
+  if (!config) {
+    return [];
   }
 
-  if (config.iptv_type === "Xtream Codes") {
-    return getXtreamChannels(config);
+  if (
+    config.iptv_type ===
+    "M3U URL"
+  ) {
+
+    return await fetchM3U(
+      config.m3u_url
+    );
+  }
+
+  if (
+    config.iptv_type ===
+    "Xtream Codes"
+  ) {
+
+    return await getXtreamChannels(
+      config
+    );
   }
 
   return [];
 }
 
 // ============================================================
-// MANIFEST
+// BUILDER
 // ============================================================
 
-app.get("/manifest.json", (req, res) => {
-  res.json(manifest);
-});
+const builder =
+  new addonBuilder(
+    manifest
+  );
 
 // ============================================================
-// HEALTH CHECK
+// CATALOG
 // ============================================================
 
-app.get("/", (req, res) => {
-  res.type("html").send(`
-    <!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>PT TV Hub</title>
-      </head>
-      <body style="font-family:Arial;max-width:800px;margin:40px auto">
-        <h1>📺 PT TV Hub</h1>
-        <p>Servidor online.</p>
-        <p>Versão: ${manifest.version}</p>
-        <p>
-          <a href="/manifest.json">
-            Abrir manifest.json
-          </a>
-        </p>
-      </body>
-    </html>
-  `);
-});
+builder.defineCatalogHandler(
+  async args => {
 
-// ============================================================
-// CATALOG — TV PORTUGAL
-// ============================================================
+    // ------------------------------
+    // TV PORTUGAL
+    // ------------------------------
 
-app.get(
-  "/catalog/channel/pt-services.json",
-  (req, res) => {
+    if (
+      args.type === "channel" &&
+      args.id === "pt-services"
+    ) {
 
-    res.json({
-      metas: services.map(service => ({
-        id: service.id,
-        type: "channel",
-        name: service.name,
-        poster: service.logo || "",
-        description:
-          service.description ||
-          "Serviço oficial.",
-        posterShape: "square"
-      }))
-    });
-  }
-);
+      return {
 
-// ============================================================
-// CATALOG — IPTV
-// ============================================================
+        metas:
+          services.map(
+            service => ({
 
-app.get(
-  "/catalog/channel/m3u.json",
-  async (req, res) => {
+              id:
+                service.id,
 
-    const config = req.query || {};
+              type:
+                "channel",
 
-    const channels =
-      await getIPTVChannels(config);
+              name:
+                service.name,
 
-    res.json({
-      metas: channels.map(channel => ({
-        id: channel.id,
-        type: "channel",
-        name: channel.title,
-        poster: channel.logo || "",
-        description:
-          channel.group || "IPTV",
-        posterShape: "square"
-      }))
-    });
+              poster:
+                service.logo || "",
+
+              description:
+                service.description ||
+                "Serviço oficial.",
+
+              posterShape:
+                "square"
+            })
+          )
+      };
+    }
+
+    // ------------------------------
+    // IPTV
+    // ------------------------------
+
+    if (
+      args.type === "channel" &&
+      args.id === "m3u"
+    ) {
+
+      const config =
+        args.config || {};
+
+      console.log(
+        "Pedido IPTV:",
+        config.iptv_type ||
+        "Nenhuma"
+      );
+
+      const channels =
+        await getIPTVChannels(
+          config
+        );
+
+      return {
+
+        metas:
+          channels.map(
+            channel => ({
+
+              id:
+                channel.id,
+
+              type:
+                "channel",
+
+              name:
+                channel.title,
+
+              poster:
+                channel.logo ||
+                "",
+
+              description:
+                channel.group ||
+                "IPTV",
+
+              posterShape:
+                "square"
+            })
+          )
+      };
+    }
+
+    return {
+      metas: []
+    };
   }
 );
 
@@ -321,12 +460,11 @@ app.get(
 // META
 // ============================================================
 
-app.get(
-  "/meta/channel/:id.json",
-  async (req, res) => {
+builder.defineMetaHandler(
+  async args => {
 
     const id =
-      decodeURIComponent(req.params.id);
+      args.id;
 
     const service =
       services.find(
@@ -335,25 +473,40 @@ app.get(
 
     if (service) {
 
-      return res.json({
+      return {
+
         meta: {
-          id: service.id,
-          type: "channel",
-          name: service.name,
-          poster: service.logo || "",
+
+          id:
+            service.id,
+
+          type:
+            "channel",
+
+          name:
+            service.name,
+
+          poster:
+            service.logo ||
+            "",
+
           description:
             service.description ||
             "Serviço oficial.",
-          posterShape: "square"
+
+          posterShape:
+            "square"
         }
-      });
+      };
     }
 
     const config =
-      req.query || {};
+      args.config || {};
 
     const channels =
-      await getIPTVChannels(config);
+      await getIPTVChannels(
+        config
+      );
 
     const channel =
       channels.find(
@@ -362,22 +515,36 @@ app.get(
 
     if (channel) {
 
-      return res.json({
+      return {
+
         meta: {
-          id: channel.id,
-          type: "channel",
-          name: channel.title,
-          poster: channel.logo || "",
+
+          id:
+            channel.id,
+
+          type:
+            "channel",
+
+          name:
+            channel.title,
+
+          poster:
+            channel.logo ||
+            "",
+
           description:
-            channel.group || "IPTV",
-          posterShape: "square"
+            channel.group ||
+            "IPTV",
+
+          posterShape:
+            "square"
         }
-      });
+      };
     }
 
-    res.json({
+    return {
       meta: null
-    });
+    };
   }
 );
 
@@ -385,12 +552,15 @@ app.get(
 // STREAM
 // ============================================================
 
-app.get(
-  "/stream/channel/:id.json",
-  async (req, res) => {
+builder.defineStreamHandler(
+  async args => {
 
     const id =
-      decodeURIComponent(req.params.id);
+      args.id;
+
+    // ------------------------------
+    // OPERADORES
+    // ------------------------------
 
     const service =
       services.find(
@@ -399,24 +569,39 @@ app.get(
 
     if (service) {
 
-      return res.json({
+      return {
+
         streams: [
+
           {
-            name: service.name,
+
+            name:
+              service.name,
+
             description:
               "Abrir serviço oficial. " +
-              "O login e as permissões são tratados pelo operador.",
-            externalUrl: service.url
+              "O login e as permissões " +
+              "são tratados pelo operador.",
+
+            externalUrl:
+              service.url
           }
+
         ]
-      });
+      };
     }
 
+    // ------------------------------
+    // IPTV
+    // ------------------------------
+
     const config =
-      req.query || {};
+      args.config || {};
 
     const channels =
-      await getIPTVChannels(config);
+      await getIPTVChannels(
+        config
+      );
 
     const channel =
       channels.find(
@@ -425,212 +610,112 @@ app.get(
 
     if (channel) {
 
-      return res.json({
+      return {
+
         streams: [
+
           {
-            name: channel.title,
-            title: channel.group,
+
+            name:
+              channel.title,
+
+            title:
+              channel.group,
+
             description:
               "Fonte IPTV configurada pelo utilizador.",
-            url: channel.url
+
+            url:
+              channel.url
           }
+
         ]
-      });
+      };
     }
 
-    res.json({
+    return {
       streams: []
-    });
+    };
   }
 );
 
 // ============================================================
-// ADDONS
+// ADDON CATALOG
 // ============================================================
 
-app.get(
-  "/catalog/addon/recommended.json",
-  (req, res) => {
+builder.defineResourceHandler(
+  "addon_catalog",
+  async args => {
 
-    res.json({
-      metas: addons.map((addon, index) => ({
-        id: `addon:${index}`,
-        type: "addon",
-        name: addon.name,
-        description:
-          "Recurso externo.",
-        website: addon.url,
-        posterShape: "square"
-      }))
-    });
-  }
-);
+    if (
+      args.type !== "addon"
+    ) {
 
-app.get(
-  "/meta/addon/:id.json",
-  (req, res) => {
-
-    const index =
-      Number(
-        req.params.id.replace("addon:", "")
-      );
-
-    const addon = addons[index];
-
-    if (!addon) {
-      return res.json({
-        meta: null
-      });
+      return {
+        addons: []
+      };
     }
 
-    res.json({
-      meta: {
-        id: `addon:${index}`,
-        type: "addon",
-        name: addon.name,
-        description: addon.url,
-        website: addon.url
-      }
-    });
-  }
-);
+    return {
 
-app.get(
-  "/stream/addon/:id.json",
-  (req, res) => {
+      addons:
+        addons.map(
+          addon => ({
 
-    const index =
-      Number(
-        req.params.id.replace("addon:", "")
-      );
+            transportName:
+              "http",
 
-    const addon = addons[index];
+            transportUrl:
+              addon.url,
 
-    res.json({
-      streams: addon
-        ? [
-            {
-              name: addon.name,
-              externalUrl: addon.url
+            manifest: {
+
+              id:
+                `external.${Buffer
+                  .from(addon.name)
+                  .toString("hex")
+                  .slice(0, 20)}`,
+
+              version:
+                "1.0.0",
+
+              name:
+                addon.name,
+
+              description:
+                "Addon externo.",
+
+              catalogs: [],
+
+              resources: [
+                "catalog",
+                "meta",
+                "stream"
+              ],
+
+              types: [
+                "movie",
+                "series"
+              ]
             }
-          ]
-        : []
-    });
+          })
+        )
+    };
   }
 );
 
 // ============================================================
-// CONFIGURAÇÃO
+// SERVIDOR
 // ============================================================
 
-app.get("/configure", (req, res) => {
-
-  res.type("html").send(`
-<!doctype html>
-
-<html>
-
-<head>
-
-<meta charset="utf-8">
-
-<meta
-  name="viewport"
-  content="width=device-width,initial-scale=1"
->
-
-<title>PT TV Hub</title>
-
-<style>
-
-body {
-  font-family: Arial, sans-serif;
-  max-width: 800px;
-  margin: 40px auto;
-  padding: 20px;
-}
-
-input,
-select {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 12px;
-  margin: 6px 0 16px;
-}
-
-button {
-  padding: 12px 20px;
-  cursor: pointer;
-}
-
-.card {
-  border: 1px solid #ddd;
-  padding: 20px;
-  margin-bottom: 20px;
-  border-radius: 10px;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<h1>📺 PT TV Hub</h1>
-
-<div class="card">
-
-<h2>📡 IPTV</h2>
-
-<p>
-Esta página será utilizada para configurar
-as fontes IPTV na próxima versão.
-</p>
-
-<p>
-<strong>Tipos previstos:</strong>
-</p>
-
-<ul>
-<li>M3U URL</li>
-<li>Xtream Codes</li>
-<li>EPG</li>
-</ul>
-
-</div>
-
-</body>
-
-</html>
-  `);
-});
-
-// ============================================================
-// 404
-// ============================================================
-
-app.use((req, res) => {
-
-  res.status(404).json({
-    error: "Endpoint não encontrado"
-  });
-});
-
-// ============================================================
-// START
-// ============================================================
-
-app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-
-    console.log(
-      `PT TV Hub em 0.0.0.0:${PORT}`
-    );
-
-    console.log(
-      `Manifest disponível em /manifest.json`
-    );
+serveHTTP(
+  builder.getInterface(),
+  {
+    port:
+      process.env.PORT || 7000
   }
+);
+
+console.log(
+  "PT TV Hub iniciado."
 );
