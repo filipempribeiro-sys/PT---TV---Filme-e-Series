@@ -82,9 +82,9 @@ const baseManifest = loadJSON(
   ),
   {
     id: "pt.filipe.nuvio.tvhub",
-    version: "1.3.3",
-    name: "PT•HUB",
-    description: "PT•HUB de entretenimento português com IPTV, filmes e séries.",
+    version: "1.3.1",
+    name: "PT TV Hub",
+    description: "PT TV Hub",
     resources: [
       "catalog",
       "meta",
@@ -303,7 +303,7 @@ async function fetchM3U(url) {
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-TV-Hub/1.3.3"
+              "PT-TV-Hub/1.3.1"
           }
         }
       );
@@ -406,7 +406,7 @@ async function xtreamRequest(
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-TV-Hub/1.3.3"
+              "PT-TV-Hub/1.3.1"
           }
         }
       );
@@ -693,7 +693,7 @@ function renderConfigure(
   content="width=device-width, initial-scale=1.0"
 >
 
-<title>PT•HUB</title>
+<title>PT TV Hub</title>
 
 <style>
 
@@ -939,7 +939,7 @@ button:hover {
 
 <div class="logo">📺</div>
 
-<h1>PT•HUB</h1>
+<h1>PT TV Hub</h1>
 
 <div class="subtitle">
 Configuração da fonte IPTV
@@ -1104,7 +1104,7 @@ EPG preparado para a próxima etapa.
 
 <div class="info">
 
-<b>PT•HUB</b><br><br>
+<b>PT TV Hub</b><br><br>
 
 Configura uma fonte M3U ou Xtream Codes
 autorizada e instala-a diretamente no
@@ -1737,21 +1737,21 @@ app.get(
 
       version:
         baseManifest.version ||
-        "1.3.3",
+        "1.3.1",
 
       name:
         config.iptv_name
-          ? PT•HUB - ${config.iptv_name}
+          ? PT TV Hub - ${config.iptv_name}
           : baseManifest.name,
 
       description:
         errors.length > 0
-          ? "PT•HUB - configuração inválida."
+          ? "PT TV Hub - configuração inválida."
           : (
               config.iptv_type ===
               "Xtream Codes"
-                ? "PT•HUB - Xtream Codes"
-                : "PT•HUB - M3U"
+                ? "PT TV Hub - Xtream Codes"
+                : "PT TV Hub - M3U"
             ),
 
       behaviorHints: {
@@ -2201,7 +2201,7 @@ app.get(
   content="width=device-width, initial-scale=1.0"
 >
 
-<title>PT•HUB</title>
+<title>PT TV Hub</title>
 
 <style>
 
@@ -2258,7 +2258,7 @@ a {
 <div class="box">
 
 <h1>
-📺 PT•HUB
+📺 PT TV Hub
 </h1>
 
 <p class="ok">
@@ -2269,7 +2269,7 @@ a {
 Versão:
 ${escapeHtml(
   baseManifest.version ||
-  "1.3.3"
+  "1.3.1"
 )}
 </p>
 
@@ -2333,7 +2333,7 @@ app.listen(
   () => {
 
     console.log(
-      PT•HUB em http://localhost:${PORT}
+      PT TV Hub em http://localhost:${PORT}
     );
 
     console.log(
