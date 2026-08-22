@@ -8,6 +8,9 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
+const PT_HUB_LOGO =
+  "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
+
 // ============================================================
 // MIDDLEWARE
 // ============================================================
@@ -47,7 +50,7 @@ function loadJSON(filePath, fallback) {
     );
   } catch (error) {
     console.error(
-      Erro ao carregar ${filePath}:,
+      `Erro ao carregar ${filePath}:`,
       error.message
     );
 
@@ -82,9 +85,10 @@ const baseManifest = loadJSON(
   ),
   {
     id: "pt.filipe.nuvio.tvhub",
-    version: "1.3.1",
-    name: "PT TV Hub",
-    description: "PT TV Hub",
+    version: "1.3.4",
+    name: "PT•HUB",
+    description: "PT•HUB",
+    logo: PT_HUB_LOGO,
     resources: [
       "catalog",
       "meta",
@@ -96,6 +100,9 @@ const baseManifest = loadJSON(
     catalogs: []
   }
 );
+
+// Garantir logo PT•HUB mesmo que o manifest carregado não o tenha.
+baseManifest.logo = PT_HUB_LOGO;
 
 // ============================================================
 // CONFIGURAÇÃO
@@ -303,7 +310,7 @@ async function fetchM3U(url) {
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-TV-Hub/1.3.1"
+              "PT-HUB/1.3.4"
           }
         }
       );
@@ -312,7 +319,7 @@ async function fetchM3U(url) {
 
     if (!response.ok) {
       throw new Error(
-        HTTP ${response.status}
+        `HTTP ${response.status}`
       );
     }
 
@@ -375,17 +382,17 @@ async function xtreamRequest(
   }
 
   let url =
-    ${server}/player_api.php;
+    `${server}/player_api.php`;
 
   url +=
-    ?username=${encodeURIComponent(username)};
+    `?username=${encodeURIComponent(username)}`;
 
   url +=
-    &password=${encodeURIComponent(password)};
+    `&password=${encodeURIComponent(password)}`;
 
   if (action) {
     url +=
-      &action=${encodeURIComponent(action)};
+      `&action=${encodeURIComponent(action)}`;
   }
 
   try {
@@ -406,7 +413,7 @@ async function xtreamRequest(
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-TV-Hub/1.3.1"
+              "PT-HUB/1.3.4"
           }
         }
       );
@@ -415,7 +422,7 @@ async function xtreamRequest(
 
     if (!response.ok) {
       throw new Error(
-        HTTP ${response.status}
+        `HTTP ${response.status}`
       );
     }
 
@@ -483,11 +490,11 @@ async function getXtreamChannels(
 
       return {
         id:
-          xtream:${streamId},
+          `xtream:${streamId}`,
 
         title:
           channel.name ||
-          Canal ${streamId},
+          `Canal ${streamId}`,
 
         group:
           channel.category_name ||
@@ -502,10 +509,10 @@ async function getXtreamChannels(
           "",
 
         url:
-          ${server}/live/ +
-          ${encodeURIComponent(username)}/ +
-          ${encodeURIComponent(password)}/ +
-          ${streamId}.${extension}
+          `${server}/live/` +
+          `${encodeURIComponent(username)}/` +
+          `${encodeURIComponent(password)}/` +
+          `${streamId}.${extension}`
       };
     })
     .filter(Boolean);
@@ -680,8 +687,10 @@ function renderConfigure(
 
   res.type("html");
 
-  res.send(
+  res.send(`
+
 <!DOCTYPE html>
+
 <html lang="pt-PT">
 
 <head>
@@ -693,7 +702,7 @@ function renderConfigure(
   content="width=device-width, initial-scale=1.0"
 >
 
-<title>PT TV Hub</title>
+<title>PT•HUB</title>
 
 <style>
 
@@ -750,8 +759,13 @@ body {
 }
 
 .logo {
-  font-size: 50px;
-  margin-bottom: 8px;
+  margin-bottom: 15px;
+}
+
+.logo img {
+  width: 110px;
+  max-width: 60%;
+  height: auto;
 }
 
 h1 {
@@ -937,18 +951,29 @@ button:hover {
 
 <div class="header">
 
-<div class="logo">📺</div>
+<div class="logo">
 
-<h1>PT TV Hub</h1>
+<img
+  src="${PT_HUB_LOGO}"
+  alt="PT•HUB"
+>
+
+</div>
+
+<h1>PT•HUB</h1>
 
 <div class="subtitle">
+
 Configuração da fonte IPTV
+
 </div>
 
 </div>
 
 <label for="iptv_name">
+
 Nome da fonte
+
 </label>
 
 <input
@@ -958,7 +983,9 @@ Nome da fonte
 >
 
 <label for="iptv_type">
+
 Tipo de IPTV
+
 </label>
 
 <select id="iptv_type">
@@ -996,7 +1023,9 @@ Xtream Codes
 >
 
 <label for="m3u_url">
+
 URL da lista M3U
+
 </label>
 
 <input
@@ -1007,7 +1036,9 @@ URL da lista M3U
 >
 
 <div class="hint">
+
 Utiliza uma lista M3U tua ou autorizada.
+
 </div>
 
 </div>
@@ -1022,7 +1053,9 @@ Utiliza uma lista M3U tua ou autorizada.
 >
 
 <label for="xtream_url">
+
 Xtream Server URL
+
 </label>
 
 <input
@@ -1033,7 +1066,9 @@ Xtream Server URL
 >
 
 <label for="xtream_username">
+
 Username
+
 </label>
 
 <input
@@ -1043,7 +1078,9 @@ Username
 >
 
 <label for="xtream_password">
+
 Password
+
 </label>
 
 <input
@@ -1055,7 +1092,9 @@ Password
 </div>
 
 <label for="epg_url">
+
 EPG URL
+
 <span
   style="
     color:#64748b;
@@ -1064,6 +1103,7 @@ EPG URL
 >
 (opcional)
 </span>
+
 </label>
 
 <input
@@ -1074,7 +1114,9 @@ EPG URL
 >
 
 <div class="hint">
+
 EPG preparado para a próxima etapa.
+
 </div>
 
 <div
@@ -1104,7 +1146,7 @@ EPG preparado para a próxima etapa.
 
 <div class="info">
 
-<b>PT TV Hub</b><br><br>
+<b>PT•HUB</b><br><br>
 
 Configura uma fonte M3U ou Xtream Codes
 autorizada e instala-a diretamente no
@@ -1258,6 +1300,7 @@ function validateClientConfig(config) {
     }
 
     try {
+
       const url =
         new URL(
           config.m3u_url
@@ -1273,7 +1316,9 @@ function validateClientConfig(config) {
       }
 
     } catch {
+
       return "A URL M3U não é válida.";
+
     }
   }
 
@@ -1302,6 +1347,7 @@ function showStatus(
   message,
   ok
 ) {
+
   statusBox.textContent =
     message;
 
@@ -1315,6 +1361,7 @@ function showStatus(
 }
 
 function clearStatus() {
+
   statusBox.textContent =
     "";
 
@@ -1339,6 +1386,7 @@ testButton.addEventListener(
       );
 
     if (validation) {
+
       showStatus(
         validation,
         false
@@ -1463,21 +1511,16 @@ installButton.addEventListener(
         ""
       )
       .replace(
-        /\\+/g,
+        /\+/g,
         "-"
       )
       .replace(
-        /\\//g,
+        /\//g,
         "_"
       );
 
     /*
      * Manifest HTTPS configurado.
-     *
-     * Exemplo:
-     *
-     * https://pt-tv-filme-e-series.onrender.com/
-     * CONFIG/manifest.json
      */
 
     const manifestUrl =
@@ -1488,20 +1531,11 @@ installButton.addEventListener(
 
     /*
      * URL de instalação Stremio.
-     *
-     * IMPORTANTE:
-     *
-     * Não usamos:
-     *
-     * stremio://addon/...
-     *
-     * O protocolo stremio substitui
-     * diretamente o https://.
      */
 
     const stremioUrl =
       manifestUrl.replace(
-        /^https?:\\/\\//i,
+        /^https?:\/\//i,
         "stremio://"
       );
 
@@ -1535,9 +1569,7 @@ installButton.addEventListener(
     link.click();
 
     /*
-     * Fallback:
-     * mostramos o URL caso o
-     * navegador bloqueie o protocolo.
+     * Fallback.
      */
 
     setTimeout(
@@ -1563,7 +1595,8 @@ updateFields();
 </body>
 
 </html>
-);
+
+`);
 }
 
 // ============================================================
@@ -1631,7 +1664,7 @@ app.post(
       return res.json({
         ok: true,
         message:
-          Ligação OK — ${channels.length} canais encontrados.
+          `Ligação OK — ${channels.length} canais encontrados.`
       });
     }
 
@@ -1662,7 +1695,7 @@ app.post(
       return res.json({
         ok: true,
         message:
-          Ligação Xtream OK — ${channels.length} canais encontrados.
+          `Ligação Xtream OK — ${channels.length} canais encontrados.`
       });
     }
 
@@ -1730,28 +1763,32 @@ app.get(
         .slice(0, 12);
 
     const manifest = {
+
       ...baseManifest,
 
       id:
-        pt.filipe.nuvio.tvhub.${configHash},
+        `pt.filipe.nuvio.tvhub.${configHash}`,
 
       version:
         baseManifest.version ||
-        "1.3.1",
+        "1.3.4",
 
       name:
         config.iptv_name
-          ? PT TV Hub - ${config.iptv_name}
+          ? `PT•HUB - ${config.iptv_name}`
           : baseManifest.name,
+
+      logo:
+        PT_HUB_LOGO,
 
       description:
         errors.length > 0
-          ? "PT TV Hub - configuração inválida."
+          ? "PT•HUB - configuração inválida."
           : (
               config.iptv_type ===
               "Xtream Codes"
-                ? "PT TV Hub - Xtream Codes"
-                : "PT TV Hub - M3U"
+                ? "PT•HUB - Xtream Codes"
+                : "PT•HUB - M3U"
             ),
 
       behaviorHints: {
@@ -1799,9 +1836,10 @@ app.get(
         Array.isArray(services)
           ? services.map(
               (service) => ({
+
                 id:
                   service.id ||
-                  service:${service.name},
+                  `service:${service.name}`,
 
                 type:
                   "channel",
@@ -1820,6 +1858,7 @@ app.get(
 
                 posterShape:
                   "square"
+
               })
             )
           : [];
@@ -1847,6 +1886,7 @@ app.get(
         metas:
           channels.map(
             (channel) => ({
+
               id:
                 channel.id,
 
@@ -1866,6 +1906,7 @@ app.get(
 
               posterShape:
                 "square"
+
             })
           )
       });
@@ -1909,6 +1950,7 @@ app.get(
 
       return res.json({
         meta: {
+
           id:
             service.id,
 
@@ -1928,6 +1970,7 @@ app.get(
 
           posterShape:
             "square"
+
         }
       });
     }
@@ -1955,6 +1998,7 @@ app.get(
 
     return res.json({
       meta: {
+
         id:
           channel.id,
 
@@ -1974,6 +2018,7 @@ app.get(
 
         posterShape:
           "square"
+
       }
     });
   }
@@ -2132,6 +2177,7 @@ app.get(
                 .slice(0, 20);
 
             return {
+
               transportName:
                 "http",
 
@@ -2139,8 +2185,9 @@ app.get(
                 addon.url,
 
               manifest: {
+
                 id:
-                  external.${addonId},
+                  `external.${addonId}`,
 
                 version:
                   "1.0.0",
@@ -2165,6 +2212,7 @@ app.get(
                 ],
 
                 catalogs: []
+
               }
             };
           }
@@ -2187,7 +2235,8 @@ app.get(
 
     res.type("html");
 
-    res.send(
+    res.send(`
+
 <!DOCTYPE html>
 
 <html lang="pt-PT">
@@ -2201,11 +2250,12 @@ app.get(
   content="width=device-width, initial-scale=1.0"
 >
 
-<title>PT TV Hub</title>
+<title>PT•HUB</title>
 
 <style>
 
 body {
+
   margin: 0;
 
   min-height: 100vh;
@@ -2232,21 +2282,44 @@ body {
 
   text-align:
     center;
+
 }
 
 .box {
+
   padding:
     40px;
+
+}
+
+.logo {
+
+  width:
+    150px;
+
+  max-width:
+    70%;
+
+  height:
+    auto;
+
+  margin-bottom:
+    20px;
+
 }
 
 .ok {
+
   color:
     #4ade80;
+
 }
 
 a {
+
   color:
     #38bdf8;
+
 }
 
 </style>
@@ -2257,26 +2330,42 @@ a {
 
 <div class="box">
 
+<img
+  class="logo"
+  src="${PT_HUB_LOGO}"
+  alt="PT•HUB"
+>
+
 <h1>
-📺 PT TV Hub
+
+PT•HUB
+
 </h1>
 
 <p class="ok">
+
 ● Serviço online
+
 </p>
 
 <p>
+
 Versão:
 ${escapeHtml(
   baseManifest.version ||
-  "1.3.1"
+  "1.3.4"
 )}
+
 </p>
 
 <p>
+
 <a href="/configure">
+
 Configurar IPTV
+
 </a>
+
 </p>
 
 </div>
@@ -2284,7 +2373,8 @@ Configurar IPTV
 </body>
 
 </html>
-);
+
+`);
   }
 );
 
@@ -2333,7 +2423,7 @@ app.listen(
   () => {
 
     console.log(
-      PT TV Hub em http://localhost:${PORT}
+      `PT•HUB em http://localhost:${PORT}`
     );
 
     console.log(
