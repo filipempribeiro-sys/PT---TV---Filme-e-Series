@@ -10,6 +10,9 @@ const BASE_DIR = __dirname;
 
 const CINEMETA_BASE = "https://v3-cinemeta.strem.io";
 
+const PT_HUB_LOGO =
+  "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
+
 // ============================================================
 // MIDDLEWARE
 // ============================================================
@@ -74,14 +77,15 @@ const baseManifest = loadJSON(
   ),
   {
     id: "pt.filipe.nuvio.tvhub",
-    version: "1.3.2",
+    version: "1.3.3",
     name: "PT•HUB",
     description:
-      "Hub de entretenimento português.",
-    logo:
-      "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png",
+      "Hub de entretenimento português com IPTV, filmes e séries.",
+    logo: PT_HUB_LOGO,
     resources: [
       "catalog",
+      "meta",
+      "stream",
       "addon_catalog"
     ],
     types: [
@@ -189,7 +193,8 @@ function parseM3U(text) {
       let match;
 
       while (
-        (match = attributeRegex.exec(line)) !== null
+        (match =
+          attributeRegex.exec(line)) !== null
       ) {
         attrs[match[1]] = match[2];
       }
@@ -299,7 +304,7 @@ async function fetchM3U(url) {
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-TV-Hub/1.3.2"
+              "PT-TV-Hub/1.3.3"
           }
         }
       );
@@ -402,7 +407,7 @@ async function xtreamRequest(
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-TV-Hub/1.3.2"
+              "PT-TV-Hub/1.3.3"
           }
         }
       );
@@ -575,7 +580,7 @@ async function fetchCinemetaCatalog(
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-HUB/1.3.2"
+              "PT-HUB/1.3.3"
           }
         }
       );
@@ -647,6 +652,72 @@ async function fetchCinemetaCatalog(
     );
 
     return [];
+  }
+}
+
+async function fetchCinemetaMeta(
+  type,
+  id
+) {
+  if (
+    type !== "movie" &&
+    type !== "series"
+  ) {
+    return null;
+  }
+
+  if (!id) {
+    return null;
+  }
+
+  try {
+    const url =
+      `${CINEMETA_BASE}/meta/` +
+      `${type}/${encodeURIComponent(id)}.json`;
+
+    const controller =
+      new AbortController();
+
+    const timeout =
+      setTimeout(
+        () => controller.abort(),
+        15000
+      );
+
+    const response =
+      await fetch(
+        url,
+        {
+          signal:
+            controller.signal,
+          headers: {
+            "User-Agent":
+              "PT-HUB/1.3.3"
+          }
+        }
+      );
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data =
+      await response.json();
+
+    return data &&
+      data.meta
+      ? data.meta
+      : null;
+
+  } catch (error) {
+    console.error(
+      `Erro Meta Cinemeta ${type}:`,
+      error.message
+    );
+
+    return null;
   }
 }
 
@@ -781,14 +852,17 @@ function renderConfigure(
     existingConfig.xtream_username ||
     "";
 
+  const xtreamPassword =
+    existingConfig.xtream_password ||
+    "";
+
   const epgUrl =
     existingConfig.epg_url ||
     "";
 
   res.type("html");
 
-  res.send(`
-<!DOCTYPE html>
+  res.send(`<!DOCTYPE html>
 <html lang="pt-PT">
 
 <head>
@@ -876,10 +950,7 @@ h1 {
 
 label {
   display: block;
-
-  margin:
-    18px 0 8px;
-
+  margin: 18px 0 8px;
   font-size: 14px;
   font-weight: 700;
 }
@@ -887,28 +958,18 @@ label {
 input,
 select {
   width: 100%;
-
   padding: 14px;
-
   border-radius: 10px;
-
-  border:
-    1px solid
-    #334155;
-
+  border: 1px solid #334155;
   background: #020617;
-
   color: #ffffff;
-
   font-size: 15px;
 }
 
 input:focus,
 select:focus {
   outline: none;
-
-  border-color:
-    #38bdf8;
+  border-color: #38bdf8;
 }
 
 .hidden {
@@ -917,34 +978,23 @@ select:focus {
 
 .hint {
   margin-top: 7px;
-
   color: #64748b;
-
   font-size: 12px;
 }
 
 .buttons {
   display: grid;
-
-  grid-template-columns:
-    1fr 1fr;
-
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
-
   margin-top: 28px;
 }
 
 button {
   border: 0;
-
   border-radius: 10px;
-
   padding: 15px;
-
   font-size: 15px;
-
   font-weight: 700;
-
   cursor: pointer;
 }
 
@@ -969,16 +1019,12 @@ button:hover {
 
 .status {
   display: none;
-
   margin-top: 18px;
-
   padding: 14px;
-
   border-radius: 10px;
-
   font-size: 14px;
-
   line-height: 1.5;
+  word-break: break-word;
 }
 
 .status.show {
@@ -1007,32 +1053,49 @@ button:hover {
   color: #fca5a5;
 }
 
+.installLinks {
+  display: none;
+  margin-top: 14px;
+  gap: 10px;
+  flex-direction: column;
+}
+
+.installLinks.show {
+  display: flex;
+}
+
+.installLinks a {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  padding: 13px;
+  border-radius: 10px;
+  background: #1e293b;
+  color: #ffffff;
+  font-weight: 700;
+}
+
 .info {
   margin-top: 25px;
-
   padding: 15px;
-
   border-radius: 10px;
-
   background:
     rgba(30,41,59,.55);
-
   color: #94a3b8;
-
   font-size: 12px;
-
   line-height: 1.6;
 }
 
 @media (max-width: 600px) {
+
   .card {
     padding: 22px;
   }
 
   .buttons {
-    grid-template-columns:
-      1fr;
+    grid-template-columns: 1fr;
   }
+
 }
 
 </style>
@@ -1049,7 +1112,7 @@ button:hover {
 
 <img
   class="brandLogo"
-  src="https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png"
+  src="${PT_HUB_LOGO}"
   alt="PT•HUB"
 >
 
@@ -1163,6 +1226,7 @@ Password
 <input
   id="xtream_password"
   type="password"
+  value="${escapeHtml(xtreamPassword)}"
   autocomplete="current-password"
 >
 
@@ -1216,13 +1280,38 @@ EPG preparado para a próxima etapa.
 
 </div>
 
+<div
+  id="installLinks"
+  class="installLinks"
+>
+
+<a
+  id="stremioLink"
+  href="#"
+>
+📺 Abrir novamente no Stremio
+</a>
+
+<a
+  id="manifestLink"
+  href="#"
+  target="_blank"
+>
+🔗 Abrir Manifest configurado
+</a>
+
+</div>
+
 <div class="info">
 
 <b>PT•HUB</b><br><br>
 
-Um hub de entretenimento para televisão,
-IPTV, filmes, séries e integrações com
-add-ons externos.
+Configura uma fonte M3U ou Xtream Codes
+autorizada e instala-a diretamente no
+Stremio.
+
+Filmes e séries ficam disponíveis
+através do catálogo integrado.
 
 </div>
 
@@ -1260,6 +1349,21 @@ const testButton =
 const installButton =
   document.getElementById(
     "installButton"
+  );
+
+const installLinks =
+  document.getElementById(
+    "installLinks"
+  );
+
+const stremioLink =
+  document.getElementById(
+    "stremioLink"
+  );
+
+const manifestLink =
+  document.getElementById(
+    "manifestLink"
   );
 
 function updateFields() {
@@ -1352,7 +1456,9 @@ function getConfig() {
   };
 }
 
-function validateClientConfig(config) {
+function validateClientConfig(
+  config
+) {
 
   if (
     !config.iptv_type ||
@@ -1379,10 +1485,8 @@ function validateClientConfig(config) {
         );
 
       if (
-        url.protocol !==
-          "http:" &&
-        url.protocol !==
-          "https:"
+        url.protocol !== "http:" &&
+        url.protocol !== "https:"
       ) {
         return "A URL M3U deve começar por http:// ou https://.";
       }
@@ -1399,6 +1503,24 @@ function validateClientConfig(config) {
 
     if (!config.xtream_url) {
       return "Introduz o servidor Xtream.";
+    }
+
+    try {
+
+      const url =
+        new URL(
+          config.xtream_url
+        );
+
+      if (
+        url.protocol !== "http:" &&
+        url.protocol !== "https:"
+      ) {
+        return "O servidor Xtream deve começar por http:// ou https://.";
+      }
+
+    } catch {
+      return "O servidor Xtream não é válido.";
     }
 
     if (!config.xtream_username) {
@@ -1540,13 +1662,22 @@ installButton.addEventListener(
       return;
     }
 
+    /*
+     * Base64URL compatível com
+     * Buffer.from(..., "base64url")
+     * utilizado no servidor.
+     */
+
+    const json =
+      JSON.stringify(
+        config
+      );
+
     const encodedConfig =
       btoa(
         unescape(
           encodeURIComponent(
-            JSON.stringify(
-              config
-            )
+            json
           )
         )
       )
@@ -1555,18 +1686,35 @@ installButton.addEventListener(
         ""
       )
       .replace(
-        /\+/g,
+        /\\+/g,
         "-"
       )
       .replace(
-        /\//g,
+        /\\//g,
         "_"
       );
+
+    /*
+     * IMPORTANTE:
+     * As substituições acima são
+     * executadas pelo browser.
+     *
+     * O fallback seguinte garante
+     * a conversão correta mesmo em
+     * browsers que interpretem os
+     * caracteres de forma diferente.
+     */
+
+    const safeEncodedConfig =
+      encodedConfig
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/g, "");
 
     const manifestUrl =
       window.location.origin +
       "/" +
-      encodedConfig +
+      safeEncodedConfig +
       "/manifest.json";
 
     const stremioUrl =
@@ -1575,40 +1723,44 @@ installButton.addEventListener(
         "stremio://"
       );
 
+    stremioLink.href =
+      stremioUrl;
+
+    manifestLink.href =
+      manifestUrl;
+
+    installLinks.classList.add(
+      "show"
+    );
+
     showStatus(
       "A abrir o Stremio...",
       true
     );
 
-    const link =
-      document.createElement(
-        "a"
-      );
+    /*
+     * Abrir automaticamente.
+     */
 
-    link.href =
+    window.location.href =
       stremioUrl;
 
-    link.style.display =
-      "none";
-
-    document.body.appendChild(
-      link
-    );
-
-    link.click();
+    /*
+     * Se o protocolo for bloqueado,
+     * os links ficam disponíveis
+     * na página.
+     */
 
     setTimeout(
       () => {
 
-        link.remove();
-
         showStatus(
-          "Se o Stremio não abriu automaticamente, aceita a abertura da aplicação no navegador.",
+          "Se o Stremio não abriu automaticamente, utiliza o botão «Abrir novamente no Stremio» abaixo.",
           true
         );
 
       },
-      1500
+      1800
     );
   }
 );
@@ -1619,8 +1771,7 @@ updateFields();
 
 </body>
 
-</html>
-`);
+</html>`);
 }
 
 // ============================================================
@@ -1796,8 +1947,7 @@ app.get(
         `pt.filipe.nuvio.tvhub.${configHash}`,
 
       version:
-        baseManifest.version ||
-        "1.3.2",
+        "1.3.3",
 
       name:
         config.iptv_name
@@ -1810,9 +1960,12 @@ app.get(
           : (
               config.iptv_type ===
               "Xtream Codes"
-                ? "PT•HUB - IPTV Xtream Codes"
-                : "PT•HUB - IPTV M3U"
+                ? "PT•HUB - IPTV Xtream Codes, filmes e séries."
+                : "PT•HUB - IPTV M3U, filmes e séries."
             ),
+
+      logo:
+        PT_HUB_LOGO,
 
       behaviorHints: {
         configurable: true,
@@ -1933,7 +2086,7 @@ app.get(
 );
 
 // ============================================================
-// META — APENAS IPTV
+// META
 // ============================================================
 
 app.get(
@@ -1945,8 +2098,35 @@ app.get(
         req.params.config
       );
 
+    const type =
+      req.params.type;
+
     const id =
       req.params.id;
+
+    // ========================================================
+    // FILMES / SÉRIES
+    // ========================================================
+
+    if (
+      type === "movie" ||
+      type === "series"
+    ) {
+
+      const meta =
+        await fetchCinemetaMeta(
+          type,
+          id
+        );
+
+      return res.json({
+        meta
+      });
+    }
+
+    // ========================================================
+    // IPTV
+    // ========================================================
 
     if (
       !id.startsWith("m3u:") &&
@@ -2004,7 +2184,7 @@ app.get(
 );
 
 // ============================================================
-// STREAM — APENAS IPTV
+// STREAM
 // ============================================================
 
 app.get(
@@ -2016,8 +2196,33 @@ app.get(
         req.params.config
       );
 
+    const type =
+      req.params.type;
+
     const id =
       req.params.id;
+
+    /*
+     * Filmes e séries não são
+     * transformados aqui em streams.
+     *
+     * A pesquisa/fontes de reprodução
+     * será feita pelos add-ons próprios.
+     */
+
+    if (
+      type === "movie" ||
+      type === "series"
+    ) {
+
+      return res.json({
+        streams: []
+      });
+    }
+
+    // ========================================================
+    // IPTV
+    // ========================================================
 
     if (
       !id.startsWith("m3u:") &&
@@ -2174,8 +2379,7 @@ app.get(
 
     res.type("html");
 
-    res.send(`
-<!DOCTYPE html>
+    res.send(`<!DOCTYPE html>
 
 <html lang="pt-PT">
 
@@ -2194,7 +2398,6 @@ app.get(
 
 body {
   margin: 0;
-
   min-height: 100vh;
 
   font-family:
@@ -2263,7 +2466,7 @@ a {
 
 <img
   class="logo"
-  src="https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png"
+  src="${PT_HUB_LOGO}"
   alt="PT•HUB"
 >
 
@@ -2279,7 +2482,7 @@ PT•HUB
 Versão:
 ${escapeHtml(
   baseManifest.version ||
-  "1.3.2"
+  "1.3.3"
 )}
 </p>
 
@@ -2293,12 +2496,17 @@ Configurar IPTV
 </a>
 </p>
 
+<p>
+<a href="/manifest.json">
+Manifest
+</a>
+</p>
+
 </div>
 
 </body>
 
-</html>
-`);
+</html>`);
   }
 );
 
