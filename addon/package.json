@@ -1,8 +1,8 @@
 {
   "name": "pt-tv-hub",
-  "version": "1.3.1",
+  "version": "1.3.4",
   "private": true,
-  "description": "PT TV Hub - IPTV M3U, Xtream Codes e serviços TV Portugal para Stremio.",
+  "description": "PT•HUB - IPTV M3U, Xtream Codes e serviços TV Portugal para Stremio.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
