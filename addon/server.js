@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.3.7";
+const VERSION = "1.3.8";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -18,11 +18,10 @@ const CINEMETA_BASE =
 
 
 /* =========================================================
-   LOGOS DAS OPERADORAS
+   LOGOS OPERADORAS
    ========================================================= */
 
 const OPERATOR_LOGOS = {
-
   vodafone:
     "https://commons.wikimedia.org/wiki/Special:Redirect/file/Vodafone_logo_2017.svg",
 
@@ -34,7 +33,6 @@ const OPERATOR_LOGOS = {
 
   digi:
     "https://commons.wikimedia.org/wiki/Special:Redirect/file/Digi-Logo.png"
-
 };
 
 
@@ -54,37 +52,33 @@ app.use(
   })
 );
 
+app.use((req, res, next) => {
 
-app.use(
-  (req, res, next) => {
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "*"
+  );
 
-    res.setHeader(
-      "Access-Control-Allow-Origin",
-      "*"
-    );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,OPTIONS"
+  );
 
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET,POST,OPTIONS"
-    );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
 
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type"
-    );
-
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(204);
-    }
-
-    next();
-
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
   }
-);
+
+  next();
+});
 
 
 /* =========================================================
-   HELPERS
+   LOAD JSON
    ========================================================= */
 
 function loadJSON(relativePath, fallback) {
@@ -92,10 +86,7 @@ function loadJSON(relativePath, fallback) {
   try {
 
     const filePath =
-      path.join(
-        BASE_DIR,
-        relativePath
-      );
+      path.join(BASE_DIR, relativePath);
 
     if (!fs.existsSync(filePath)) {
       return fallback;
@@ -116,9 +107,7 @@ function loadJSON(relativePath, fallback) {
     );
 
     return fallback;
-
   }
-
 }
 
 
@@ -128,13 +117,11 @@ const services =
     []
   );
 
-
 const addons =
   loadJSON(
     "../data/addons.json",
     []
   );
-
 
 const manifestTemplate =
   loadJSON(
@@ -148,7 +135,7 @@ const manifestTemplate =
 
 
 /* =========================================================
-   LOGO DA OPERADORA
+   OPERATOR LOGO
    ========================================================= */
 
 function getOperatorLogo(name) {
@@ -157,8 +144,10 @@ function getOperatorLogo(name) {
     String(name || "")
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-
+      .replace(
+        /[\u0300-\u036f]/g,
+        ""
+      );
 
   if (
     value.includes("vodafone")
@@ -166,13 +155,11 @@ function getOperatorLogo(name) {
     return OPERATOR_LOGOS.vodafone;
   }
 
-
   if (
     value.includes("meo")
   ) {
     return OPERATOR_LOGOS.meo;
   }
-
 
   if (
     value.includes("nos")
@@ -180,21 +167,18 @@ function getOperatorLogo(name) {
     return OPERATOR_LOGOS.nos;
   }
 
-
   if (
     value.includes("digi")
   ) {
     return OPERATOR_LOGOS.digi;
   }
 
-
   return null;
-
 }
 
 
 /* =========================================================
-   BASE64URL CONFIG
+   BASE64URL
    ========================================================= */
 
 function encodeConfig(config) {
@@ -205,7 +189,6 @@ function encodeConfig(config) {
       "utf8"
     )
     .toString("base64url");
-
 }
 
 
@@ -234,14 +217,12 @@ function decodeConfig(value) {
     );
 
     return null;
-
   }
-
 }
 
 
 /* =========================================================
-   GENERAL HELPERS
+   HELPERS
    ========================================================= */
 
 function isValidHttpUrl(value) {
@@ -259,36 +240,18 @@ function isValidHttpUrl(value) {
   } catch {
 
     return false;
-
   }
-
 }
 
 
 function escapeHtml(value) {
 
   return String(value || "")
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-    .replace(
-      /</g,
-      "&lt;"
-    )
-    .replace(
-      />/g,
-      "&gt;"
-    )
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-    .replace(
-      /'/g,
-      "&#039;"
-    );
-
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 
@@ -296,11 +259,7 @@ function normalizeUrl(value) {
 
   return String(value || "")
     .trim()
-    .replace(
-      /\/+$/,
-      ""
-    );
-
+    .replace(/\/+$/, "");
 }
 
 
@@ -312,27 +271,21 @@ function parseM3U(content) {
 
   const lines =
     String(content || "")
-      .replace(
-        /\r/g,
-        ""
-      )
+      .replace(/\r/g, "")
       .split("\n");
 
   const channels = [];
 
   let currentInfo = null;
 
-
   for (const rawLine of lines) {
 
     const line =
       rawLine.trim();
 
-
     if (!line) {
       continue;
     }
-
 
     if (
       line.startsWith("#EXTINF:")
@@ -343,7 +296,6 @@ function parseM3U(content) {
 
       let attributes = "";
       let name = line;
-
 
       if (commaIndex >= 0) {
 
@@ -359,39 +311,32 @@ function parseM3U(content) {
               commaIndex + 1
             )
             .trim();
-
       }
-
 
       const tvgIdMatch =
         attributes.match(
           /tvg-id="([^"]*)"/i
         );
 
-
       const tvgNameMatch =
         attributes.match(
           /tvg-name="([^"]*)"/i
         );
-
 
       const tvgLogoMatch =
         attributes.match(
           /tvg-logo="([^"]*)"/i
         );
 
-
       const groupMatch =
         attributes.match(
           /group-title="([^"]*)"/i
         );
 
-
       const groupMatchSingle =
         attributes.match(
           /group-title='([^']*)'/i
         );
-
 
       currentInfo = {
 
@@ -412,14 +357,10 @@ function parseM3U(content) {
           groupMatch?.[1] ||
           groupMatchSingle?.[1] ||
           "TV"
-
       };
 
-
       continue;
-
     }
-
 
     if (
       !line.startsWith("#") &&
@@ -433,7 +374,6 @@ function parseM3U(content) {
           .update(line)
           .digest("hex")
           .slice(0, 24);
-
 
       channels.push({
 
@@ -457,19 +397,13 @@ function parseM3U(content) {
 
         url:
           line
-
       });
 
-
       currentInfo = null;
-
     }
-
   }
 
-
   return channels;
-
 }
 
 
@@ -486,9 +420,7 @@ async function fetchM3U(url) {
     throw new Error(
       "URL M3U inválido."
     );
-
   }
-
 
   const response =
     await fetch(
@@ -501,31 +433,24 @@ async function fetchM3U(url) {
       }
     );
 
-
   if (!response.ok) {
 
     throw new Error(
       `Não foi possível obter a lista M3U. HTTP ${response.status}`
     );
-
   }
-
 
   const text =
     await response.text();
-
 
   if (!text.trim()) {
 
     throw new Error(
       "A lista M3U está vazia."
     );
-
   }
 
-
   return parseM3U(text);
-
 }
 
 
@@ -543,15 +468,12 @@ async function xtreamRequest(
       config.xtreamServer
     );
 
-
   if (!server) {
 
     throw new Error(
       "Servidor Xtream não definido."
     );
-
   }
-
 
   if (
     !config.username ||
@@ -561,16 +483,13 @@ async function xtreamRequest(
     throw new Error(
       "Username ou password Xtream em falta."
     );
-
   }
-
 
   const url =
     `${server}/player_api.php` +
     `?username=${encodeURIComponent(config.username)}` +
     `&password=${encodeURIComponent(config.password)}` +
     `&action=${encodeURIComponent(action)}`;
-
 
   const response =
     await fetch(
@@ -583,22 +502,20 @@ async function xtreamRequest(
       }
     );
 
-
   if (!response.ok) {
 
     throw new Error(
       `Xtream respondeu HTTP ${response.status}`
     );
-
   }
 
-
   return await response.json();
-
 }
 
 
-async function getXtreamChannels(config) {
+async function getXtreamChannels(
+  config
+) {
 
   const data =
     await xtreamRequest(
@@ -606,21 +523,16 @@ async function getXtreamChannels(config) {
       "get_live_streams"
     );
 
-
   if (
     !Array.isArray(data)
   ) {
-
     return [];
-
   }
-
 
   const server =
     normalizeUrl(
       config.xtreamServer
     );
-
 
   return data.map(
     (item) => {
@@ -631,7 +543,6 @@ async function getXtreamChannels(config) {
           item.id ||
           ""
         );
-
 
       return {
 
@@ -664,17 +575,14 @@ async function getXtreamChannels(config) {
           `${encodeURIComponent(config.username)}/` +
           `${encodeURIComponent(config.password)}/` +
           `${encodeURIComponent(streamId)}.ts`
-
       };
-
     }
   );
-
 }
 
 
 /* =========================================================
-   IPTV CHANNELS
+   IPTV
    ========================================================= */
 
 async function getIPTVChannels(
@@ -685,11 +593,8 @@ async function getIPTVChannels(
     !config ||
     !config.mode
   ) {
-
     return [];
-
   }
-
 
   if (
     config.mode === "m3u"
@@ -698,9 +603,7 @@ async function getIPTVChannels(
     return await fetchM3U(
       config.m3uUrl
     );
-
   }
-
 
   if (
     config.mode === "xtream"
@@ -709,17 +612,14 @@ async function getIPTVChannels(
     return await getXtreamChannels(
       config
     );
-
   }
 
-
   return [];
-
 }
 
 
 /* =========================================================
-   CONFIG VALIDATION
+   VALIDATE
    ========================================================= */
 
 function validateConfig(
@@ -730,21 +630,15 @@ function validateConfig(
     !config ||
     typeof config !== "object"
   ) {
-
     return "Configuração inválida.";
-
   }
-
 
   if (
     !["m3u", "xtream"]
       .includes(config.mode)
   ) {
-
     return "Seleciona M3U ou Xtream Codes.";
-
   }
-
 
   if (
     config.mode === "m3u"
@@ -755,13 +649,9 @@ function validateConfig(
         config.m3uUrl
       )
     ) {
-
       return "Indica um URL M3U válido.";
-
     }
-
   }
-
 
   if (
     config.mode === "xtream"
@@ -772,27 +662,17 @@ function validateConfig(
         config.xtreamServer
       )
     ) {
-
       return "Indica um URL de servidor Xtream válido.";
-
     }
-
 
     if (!config.username) {
-
       return "Indica o username Xtream.";
-
     }
-
 
     if (!config.password) {
-
       return "Indica a password Xtream.";
-
     }
-
   }
-
 
   if (
     config.epgUrl &&
@@ -800,14 +680,10 @@ function validateConfig(
       config.epgUrl
     )
   ) {
-
     return "O URL EPG não é válido.";
-
   }
 
-
   return null;
-
 }
 
 
@@ -822,7 +698,6 @@ async function cinemetaFetch(
   const url =
     `${CINEMETA_BASE}${endpoint}`;
 
-
   const response =
     await fetch(
       url,
@@ -834,18 +709,14 @@ async function cinemetaFetch(
       }
     );
 
-
   if (!response.ok) {
 
     throw new Error(
       `Cinemeta respondeu HTTP ${response.status}`
     );
-
   }
 
-
   return await response.json();
-
 }
 
 
@@ -860,9 +731,7 @@ async function getCinemetaCatalog(
     return await cinemetaFetch(
       "/catalog/movie/top.json"
     );
-
   }
-
 
   if (
     type === "series"
@@ -871,14 +740,11 @@ async function getCinemetaCatalog(
     return await cinemetaFetch(
       "/catalog/series/top.json"
     );
-
   }
-
 
   return {
     metas: []
   };
-
 }
 
 
@@ -890,12 +756,12 @@ async function getCinemetaMeta(
   return await cinemetaFetch(
     `/meta/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`
   );
-
 }
 
 
 /* =========================================================
-   CONFIGURE PAGE
+   CONFIGURATION PAGE
+   BASE 1.3.6 + VISUAL 1.3.8
    ========================================================= */
 
 function renderConfigurePage(
@@ -907,18 +773,14 @@ function renderConfigurePage(
       ? "xtream"
       : "m3u";
 
-
   const m3uUrl =
     config.m3uUrl || "";
-
 
   const xtreamServer =
     config.xtreamServer || "";
 
-
   const username =
     config.username || "";
-
 
   const epgUrl =
     config.epgUrl || "";
@@ -940,925 +802,852 @@ function renderConfigurePage(
 
 <title>PT•HUB — Configuração</title>
 
-
 <style>
 
-  * {
-    box-sizing: border-box;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+
+  margin: 0;
+  padding: 0;
+
+  color: #ffffff;
+
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
+
+  min-height: 100vh;
+
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(255, 125, 0, 0.18),
+      rgba(105, 65, 180, 0.13) 25%,
+      rgba(10, 10, 10, 0.95) 65%
+    ),
+    linear-gradient(
+      135deg,
+      #281309 0%,
+      #171021 38%,
+      #090909 75%,
+      #050505 100%
+    );
+
+  position: relative;
+
+  overflow-x: hidden;
+}
 
 
-  html,
-  body {
-    min-height: 100%;
-  }
+/*
+  O logo é usado como elemento visual de fundo,
+  mas sem interferir com os controlos.
+*/
+
+body::before {
+
+  content: "";
+
+  position: fixed;
+
+  inset: 0;
+
+  background-image:
+    url("${PT_HUB_LOGO}");
+
+  background-repeat:
+    no-repeat;
+
+  background-position:
+    center 12%;
+
+  background-size:
+    min(650px, 75vw);
+
+  opacity:
+    0.075;
+
+  filter:
+    saturate(1.25);
+
+  pointer-events:
+    none;
+
+  z-index:
+    0;
+}
 
 
-  body {
+body::after {
 
-    margin: 0;
-    padding: 0;
+  content: "";
 
-    background:
-      radial-gradient(
-        circle at 50% -10%,
-        rgba(255, 120, 0, 0.13) 0%,
-        rgba(120, 70, 180, 0.10) 22%,
-        rgba(0, 0, 0, 0.90) 58%
-      ),
-      linear-gradient(
-        135deg,
-        #24120a 0%,
-        #120d1d 35%,
-        #080808 72%,
-        #050505 100%
-      );
+  position: fixed;
 
-    color: #ffffff;
+  inset: 0;
 
-    font-family:
-      Arial,
-      Helvetica,
-      sans-serif;
+  background:
+    radial-gradient(
+      ellipse at center,
+      transparent 25%,
+      rgba(0,0,0,0.68) 100%
+    );
 
-    min-height: 100vh;
+  pointer-events:
+    none;
 
-    position: relative;
-
-    overflow-x: hidden;
-
-  }
+  z-index:
+    0;
+}
 
 
-  body::before {
+.container {
 
-    content: "";
+  position:
+    relative;
 
-    position: fixed;
+  z-index:
+    1;
 
-    inset: 0;
+  width:
+    100%;
 
-    background-image:
-      url("${PT_HUB_LOGO}");
+  max-width:
+    760px;
 
-    background-repeat: no-repeat;
+  margin:
+    0 auto;
 
-    background-position:
-      center 14%;
-
-    background-size:
-      min(680px, 75vw);
-
-    opacity: 0.075;
-
-    filter:
-      saturate(1.35)
-      blur(0.2px);
-
-    pointer-events: none;
-
-    z-index: 0;
-
-  }
+  padding:
+    40px 20px 60px;
+}
 
 
-  body::after {
+.logo {
 
-    content: "";
+  display:
+    block;
 
-    position: fixed;
+  width:
+    150px;
 
-    inset: 0;
+  max-width:
+    70%;
 
-    background:
-      radial-gradient(
-        ellipse at center,
-        transparent 25%,
-        rgba(0,0,0,0.72) 100%
-      );
+  margin:
+    0 auto 25px;
 
-    pointer-events: none;
-
-    z-index: 0;
-
-  }
-
-
-  .container {
-
-    position: relative;
-
-    z-index: 1;
-
-    width: 100%;
-
-    max-width: 760px;
-
-    margin: 0 auto;
-
-    padding:
-      40px 20px 60px;
-
-  }
+  filter:
+    drop-shadow(
+      0 10px 30px
+      rgba(0,0,0,0.45)
+    );
+}
 
 
-  .logo {
+.card {
 
-    display: block;
+  background:
+    rgba(20,20,20,0.96);
 
-    width: 170px;
+  border:
+    1px solid
+    rgba(255,255,255,0.10);
 
-    max-width: 70%;
+  border-radius:
+    18px;
 
-    margin:
-      0 auto 25px;
+  padding:
+    30px;
 
-    filter:
-      drop-shadow(
-        0 10px 30px
-        rgba(0,0,0,0.45)
-      );
+  box-shadow:
+    0 20px 60px
+    rgba(0,0,0,0.48),
 
-  }
+    inset 0 1px 0
+    rgba(255,255,255,0.04);
 
+}
+
+
+h1 {
+
+  text-align:
+    center;
+
+  margin:
+    0 0 8px;
+
+  font-size:
+    30px;
+}
+
+
+.subtitle {
+
+  text-align:
+    center;
+
+  color:
+    #aaa;
+
+  margin-bottom:
+    30px;
+}
+
+
+label {
+
+  display:
+    block;
+
+  margin-top:
+    18px;
+
+  margin-bottom:
+    8px;
+
+  font-weight:
+    600;
+}
+
+
+input,
+select {
+
+  width:
+    100%;
+
+  padding:
+    13px 14px;
+
+  border-radius:
+    10px;
+
+  border:
+    1px solid #444;
+
+  background:
+    #111;
+
+  color:
+    #fff;
+
+  font-size:
+    15px;
+
+  outline:
+    none;
+}
+
+
+input:focus,
+select:focus {
+
+  border-color:
+    #777;
+}
+
+
+.mode-buttons {
+
+  display:
+    grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap:
+    12px;
+
+  margin-bottom:
+    15px;
+}
+
+
+.mode-button {
+
+  padding:
+    14px;
+
+  border-radius:
+    10px;
+
+  border:
+    1px solid #444;
+
+  background:
+    #151515;
+
+  color:
+    #ddd;
+
+  cursor:
+    pointer;
+
+  font-size:
+    15px;
+}
+
+
+.mode-button.active {
+
+  background:
+    #ffffff;
+
+  color:
+    #000000;
+
+  border-color:
+    #ffffff;
+}
+
+
+.section {
+
+  display:
+    none;
+}
+
+
+.section.active {
+
+  display:
+    block;
+}
+
+
+.buttons {
+
+  display:
+    grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap:
+    12px;
+
+  margin-top:
+    25px;
+}
+
+
+button {
+
+  border:
+    0;
+
+  border-radius:
+    10px;
+
+  padding:
+    14px 16px;
+
+  cursor:
+    pointer;
+
+  font-size:
+    15px;
+
+  font-weight:
+    700;
+}
+
+
+.test {
+
+  background:
+    #333;
+
+  color:
+    #fff;
+}
+
+
+.install {
+
+  background:
+    #fff;
+
+  color:
+    #000;
+}
+
+
+button:disabled {
+
+  opacity:
+    0.5;
+
+  cursor:
+    not-allowed;
+}
+
+
+.status {
+
+  margin-top:
+    20px;
+
+  padding:
+    14px;
+
+  border-radius:
+    10px;
+
+  background:
+    #111;
+
+  border:
+    1px solid #333;
+
+  color:
+    #bbb;
+
+  white-space:
+    pre-wrap;
+
+  display:
+    none;
+}
+
+
+.status.show {
+
+  display:
+    block;
+}
+
+
+.install-box {
+
+  display:
+    none;
+
+  margin-top:
+    20px;
+
+  padding:
+    18px;
+
+  border-radius:
+    12px;
+
+  background:
+    #101010;
+
+  border:
+    1px solid #333;
+}
+
+
+.install-box.show {
+
+  display:
+    block;
+}
+
+
+.install-url {
+
+  word-break:
+    break-all;
+
+  font-size:
+    13px;
+
+  color:
+    #aaa;
+
+  margin:
+    10px 0 15px;
+}
+
+
+.install-actions {
+
+  display:
+    grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap:
+    10px;
+}
+
+
+.copy {
+
+  background:
+    #333;
+
+  color:
+    #fff;
+}
+
+
+.open {
+
+  background:
+    #fff;
+
+  color:
+    #000;
+}
+
+
+.footer {
+
+  text-align:
+    center;
+
+  color:
+    #666;
+
+  margin-top:
+    25px;
+
+  font-size:
+    12px;
+}
+
+
+@media (max-width: 600px) {
 
   .card {
-
-    background:
-      linear-gradient(
-        145deg,
-        rgba(31,31,31,0.96),
-        rgba(13,13,13,0.97)
-      );
-
-    border:
-      1px solid
-      rgba(255,255,255,0.10);
-
-    border-radius: 18px;
-
-    padding: 30px;
-
-    box-shadow:
-      0 20px 70px
-      rgba(0,0,0,0.55),
-
-      inset 0 1px 0
-      rgba(255,255,255,0.04);
-
-    backdrop-filter:
-      blur(10px);
-
-  }
-
-
-  h1 {
-
-    text-align: center;
-
-    margin:
-      0 0 8px;
-
-    font-size: 30px;
-
-  }
-
-
-  .subtitle {
-
-    text-align: center;
-
-    color: #aaa;
-
-    margin-bottom: 30px;
-
-  }
-
-
-  label {
-
-    display: block;
-
-    margin-top: 18px;
-
-    margin-bottom: 8px;
-
-    font-weight: 600;
-
-  }
-
-
-  input,
-  select {
-
-    width: 100%;
-
     padding:
-      13px 14px;
-
-    border-radius: 10px;
-
-    border:
-      1px solid #444;
-
-    background:
-      rgba(7,7,7,0.88);
-
-    color: #fff;
-
-    font-size: 15px;
-
-    outline: none;
-
+      22px;
   }
 
-
-  input:focus,
-  select:focus {
-
-    border-color: #888;
-
-    box-shadow:
-      0 0 0 2px
-      rgba(255,255,255,0.04);
-
-  }
-
-
-  .mode-buttons {
-
-    display: grid;
-
-    grid-template-columns:
-      1fr 1fr;
-
-    gap: 12px;
-
-    margin-bottom: 15px;
-
-  }
-
-
-  .mode-button {
-
-    padding: 14px;
-
-    border-radius: 10px;
-
-    border:
-      1px solid #444;
-
-    background:
-      rgba(21,21,21,0.92);
-
-    color: #ddd;
-
-    cursor: pointer;
-
-    font-size: 15px;
-
-  }
-
-
-  .mode-button.active {
-
-    background: #ffffff;
-
-    color: #000000;
-
-    border-color: #ffffff;
-
-  }
-
-
-  .section {
-
-    display: none;
-
-  }
-
-
-  .section.active {
-
-    display: block;
-
-  }
-
-
-  .buttons {
-
-    display: grid;
-
-    grid-template-columns:
-      1fr 1fr;
-
-    gap: 12px;
-
-    margin-top: 25px;
-
-  }
-
-
-  button {
-
-    border: 0;
-
-    border-radius: 10px;
-
-    padding:
-      14px 16px;
-
-    cursor: pointer;
-
-    font-size: 15px;
-
-    font-weight: 700;
-
-  }
-
-
-  .test {
-
-    background: #333;
-
-    color: #fff;
-
-  }
-
-
-  .install {
-
-    background: #fff;
-
-    color: #000;
-
-  }
-
-
-  button:disabled {
-
-    opacity: 0.5;
-
-    cursor: not-allowed;
-
-  }
-
-
-  .status {
-
-    margin-top: 20px;
-
-    padding: 14px;
-
-    border-radius: 10px;
-
-    background: #111;
-
-    border:
-      1px solid #333;
-
-    color: #bbb;
-
-    white-space: pre-wrap;
-
-    display: none;
-
-  }
-
-
-  .status.show {
-
-    display: block;
-
-  }
-
-
-  .install-box {
-
-    display: none;
-
-    margin-top: 20px;
-
-    padding: 18px;
-
-    border-radius: 12px;
-
-    background: #101010;
-
-    border:
-      1px solid #333;
-
-  }
-
-
-  .install-box.show {
-
-    display: block;
-
-  }
-
-
-  .install-url {
-
-    word-break: break-all;
-
-    font-size: 13px;
-
-    color: #aaa;
-
-    margin:
-      10px 0 15px;
-
-  }
-
-
+  .buttons,
   .install-actions {
-
-    display: grid;
-
     grid-template-columns:
-      1fr 1fr;
-
-    gap: 10px;
-
+      1fr;
   }
 
-
-  .copy {
-
-    background: #333;
-
-    color: #fff;
-
-  }
-
-
-  .open {
-
-    background: #fff;
-
-    color: #000;
-
-  }
-
-
-  .footer {
-
-    text-align: center;
-
-    color: #666;
-
-    margin-top: 25px;
-
-    font-size: 12px;
-
-  }
-
-
-  @media (max-width: 600px) {
-
-    .card {
-
-      padding: 22px;
-
-    }
-
-
-    .buttons,
-    .install-actions {
-
-      grid-template-columns:
-        1fr;
-
-    }
-
-  }
+}
 
 </style>
 
 </head>
 
-
 <body>
-
 
 <div class="container">
 
+<img
+  class="logo"
+  src="${PT_HUB_LOGO}"
+  alt="PT•HUB"
+>
+
+<div class="card">
+
+<h1>
+  PT•HUB
+</h1>
+
+<div class="subtitle">
+  Configuração IPTV
+</div>
+
+<div class="mode-buttons">
+
+<button
+  type="button"
+  id="m3uButton"
+  class="mode-button ${
+    mode === "m3u"
+      ? "active"
+      : ""
+  }"
+>
+  M3U URL
+</button>
+
+<button
+  type="button"
+  id="xtreamButton"
+  class="mode-button ${
+    mode === "xtream"
+      ? "active"
+      : ""
+  }"
+>
+  Xtream Codes
+</button>
+
+</div>
+
+
+<div
+  id="m3uSection"
+  class="section ${
+    mode === "m3u"
+      ? "active"
+      : ""
+  }"
+>
+
+<label for="m3uUrl">
+  URL da lista M3U
+</label>
+
+<input
+  id="m3uUrl"
+  type="url"
+  placeholder="https://exemplo.com/lista.m3u"
+  value="${escapeHtml(m3uUrl)}"
+>
+
+</div>
+
+
+<div
+  id="xtreamSection"
+  class="section ${
+    mode === "xtream"
+      ? "active"
+      : ""
+  }"
+>
+
+<label for="xtreamServer">
+  Servidor Xtream
+</label>
+
+<input
+  id="xtreamServer"
+  type="url"
+  placeholder="https://servidor.com:8080"
+  value="${escapeHtml(xtreamServer)}"
+>
+
+<label for="username">
+  Username
+</label>
+
+<input
+  id="username"
+  type="text"
+  placeholder="Username"
+  value="${escapeHtml(username)}"
+>
+
+<label for="password">
+  Password
+</label>
 
-  <img
-    class="logo"
-    src="${PT_HUB_LOGO}"
-    alt="PT•HUB"
-  >
+<input
+  id="password"
+  type="password"
+  placeholder="Password"
+>
 
+</div>
 
-  <div class="card">
 
+<label for="epgUrl">
 
-    <h1>
-      PT•HUB
-    </h1>
+URL EPG
 
+<span
+  style="
+    color:#777;
+    font-weight:normal;
+  "
+>
+(opcional)
+</span>
 
-    <div class="subtitle">
-      Configuração IPTV
-    </div>
+</label>
 
+<input
+  id="epgUrl"
+  type="url"
+  placeholder="https://exemplo.com/epg.xml"
+  value="${escapeHtml(epgUrl)}"
+>
 
-    <div class="mode-buttons">
 
+<div class="buttons">
 
-      <button
-        type="button"
-        id="m3uButton"
-        class="mode-button ${
-          mode === "m3u"
-            ? "active"
-            : ""
-        }"
-      >
-        M3U URL
-      </button>
+<button
+  id="testButton"
+  class="test"
+  type="button"
+>
+Testar ligação
+</button>
 
+<button
+  id="installButton"
+  class="install"
+  type="button"
+>
+Gerar instalação
+</button>
 
-      <button
-        type="button"
-        id="xtreamButton"
-        class="mode-button ${
-          mode === "xtream"
-            ? "active"
-            : ""
-        }"
-      >
-        Xtream Codes
-      </button>
+</div>
 
 
-    </div>
+<div
+  id="status"
+  class="status"
+></div>
 
 
-    <div
-      id="m3uSection"
-      class="section ${
-        mode === "m3u"
-          ? "active"
-          : ""
-      }"
-    >
+<div
+  id="installBox"
+  class="install-box"
+>
 
+<strong>
+URL do Add-on
+</strong>
 
-      <label for="m3uUrl">
-        URL da lista M3U
-      </label>
+<div
+  id="installUrl"
+  class="install-url"
+></div>
 
+<div class="install-actions">
 
-      <input
-        id="m3uUrl"
-        type="url"
-        placeholder="https://exemplo.com/lista.m3u"
-        value="${escapeHtml(m3uUrl)}"
-      >
+<button
+  id="copyButton"
+  class="copy"
+  type="button"
+>
+Copiar URL
+</button>
 
+<button
+  id="openButton"
+  class="open"
+  type="button"
+>
+Abrir no Stremio
+</button>
 
-    </div>
+</div>
 
+</div>
 
-    <div
-      id="xtreamSection"
-      class="section ${
-        mode === "xtream"
-          ? "active"
-          : ""
-      }"
-    >
+</div>
 
 
-      <label for="xtreamServer">
-        Servidor Xtream
-      </label>
-
-
-      <input
-        id="xtreamServer"
-        type="url"
-        placeholder="https://servidor.com:8080"
-        value="${escapeHtml(xtreamServer)}"
-      >
-
-
-      <label for="username">
-        Username
-      </label>
-
-
-      <input
-        id="username"
-        type="text"
-        placeholder="Username"
-        value="${escapeHtml(username)}"
-      >
-
-
-      <label for="password">
-        Password
-      </label>
-
-
-      <input
-        id="password"
-        type="password"
-        placeholder="Password"
-      >
-
-
-    </div>
-
-
-    <label for="epgUrl">
-
-      URL EPG
-
-      <span
-        style="
-          color:#777;
-          font-weight:normal;
-        "
-      >
-        (opcional)
-      </span>
-
-    </label>
-
-
-    <input
-      id="epgUrl"
-      type="url"
-      placeholder="https://exemplo.com/epg.xml"
-      value="${escapeHtml(epgUrl)}"
-    >
-
-
-    <div class="buttons">
-
-
-      <button
-        id="testButton"
-        class="test"
-        type="button"
-      >
-        Testar ligação
-      </button>
-
-
-      <button
-        id="installButton"
-        class="install"
-        type="button"
-      >
-        Gerar instalação
-      </button>
-
-
-    </div>
-
-
-    <div
-      id="status"
-      class="status"
-    ></div>
-
-
-    <div
-      id="installBox"
-      class="install-box"
-    >
-
-
-      <strong>
-        URL do Add-on
-      </strong>
-
-
-      <div
-        id="installUrl"
-        class="install-url"
-      ></div>
-
-
-      <div class="install-actions">
-
-
-        <button
-          id="copyButton"
-          class="copy"
-          type="button"
-        >
-          Copiar URL
-        </button>
-
-
-        <button
-          id="openButton"
-          class="open"
-          type="button"
-        >
-          Abrir no Stremio
-        </button>
-
-
-      </div>
-
-
-    </div>
-
-
-  </div>
-
-
-  <div class="footer">
-    PT•HUB ${VERSION}
-  </div>
-
+<div class="footer">
+PT•HUB ${VERSION}
+</div>
 
 </div>
 
 
 <script>
-
 (function () {
 
-
-  let currentMode =
-    "${mode}";
-
+  let currentMode = "${mode}";
 
   const m3uButton =
-    document.getElementById(
-      "m3uButton"
-    );
-
+    document.getElementById("m3uButton");
 
   const xtreamButton =
-    document.getElementById(
-      "xtreamButton"
-    );
-
+    document.getElementById("xtreamButton");
 
   const m3uSection =
-    document.getElementById(
-      "m3uSection"
-    );
-
+    document.getElementById("m3uSection");
 
   const xtreamSection =
-    document.getElementById(
-      "xtreamSection"
-    );
-
+    document.getElementById("xtreamSection");
 
   const m3uUrl =
-    document.getElementById(
-      "m3uUrl"
-    );
-
+    document.getElementById("m3uUrl");
 
   const xtreamServer =
-    document.getElementById(
-      "xtreamServer"
-    );
-
+    document.getElementById("xtreamServer");
 
   const username =
-    document.getElementById(
-      "username"
-    );
-
+    document.getElementById("username");
 
   const password =
-    document.getElementById(
-      "password"
-    );
-
+    document.getElementById("password");
 
   const epgUrl =
-    document.getElementById(
-      "epgUrl"
-    );
-
+    document.getElementById("epgUrl");
 
   const testButton =
-    document.getElementById(
-      "testButton"
-    );
-
+    document.getElementById("testButton");
 
   const installButton =
-    document.getElementById(
-      "installButton"
-    );
-
+    document.getElementById("installButton");
 
   const status =
-    document.getElementById(
-      "status"
-    );
-
+    document.getElementById("status");
 
   const installBox =
-    document.getElementById(
-      "installBox"
-    );
-
+    document.getElementById("installBox");
 
   const installUrl =
-    document.getElementById(
-      "installUrl"
-    );
-
+    document.getElementById("installUrl");
 
   const copyButton =
-    document.getElementById(
-      "copyButton"
-    );
-
+    document.getElementById("copyButton");
 
   const openButton =
-    document.getElementById(
-      "openButton"
-    );
+    document.getElementById("openButton");
 
 
   function setMode(mode) {
 
     currentMode = mode;
 
+    if (mode === "m3u") {
 
-    if (
-      mode === "m3u"
-    ) {
+      m3uButton.classList.add("active");
 
-      m3uButton.classList.add(
-        "active"
-      );
+      xtreamButton.classList.remove("active");
 
-      xtreamButton.classList.remove(
-        "active"
-      );
+      m3uSection.classList.add("active");
 
-      m3uSection.classList.add(
-        "active"
-      );
-
-      xtreamSection.classList.remove(
-        "active"
-      );
+      xtreamSection.classList.remove("active");
 
     } else {
 
-      m3uButton.classList.remove(
-        "active"
-      );
+      m3uButton.classList.remove("active");
 
-      xtreamButton.classList.add(
-        "active"
-      );
+      xtreamButton.classList.add("active");
 
-      m3uSection.classList.remove(
-        "active"
-      );
+      m3uSection.classList.remove("active");
 
-      xtreamSection.classList.add(
-        "active"
-      );
-
+      xtreamSection.classList.add("active");
     }
-
   }
 
 
-  function showStatus(
-    message
-  ) {
+  function showStatus(message) {
 
-    status.textContent =
-      message;
+    status.textContent = message;
 
-    status.classList.add(
-      "show"
-    );
-
+    status.classList.add("show");
   }
 
 
   function hideInstall() {
 
-    installBox.classList.remove(
-      "show"
-    );
+    installBox.classList.remove("show");
 
-    installUrl.textContent =
-      "";
-
+    installUrl.textContent = "";
   }
 
 
@@ -1883,47 +1672,32 @@ function renderConfigurePage(
 
       epgUrl:
         epgUrl.value.trim()
-
     };
-
   }
 
 
-  function encodeConfig(
-    config
-  ) {
+  function encodeConfig(config) {
 
     const json =
-      JSON.stringify(
-        config
-      );
-
+      JSON.stringify(config);
 
     const bytes =
       new TextEncoder()
         .encode(json);
 
-
     let binary = "";
 
+    bytes.forEach(function (byte) {
 
-    bytes.forEach(
-      function (byte) {
+      binary +=
+        String.fromCharCode(byte);
 
-        binary +=
-          String.fromCharCode(
-            byte
-          );
-
-      }
-    );
-
+    });
 
     return btoa(binary)
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/g, "");
-
   }
 
 
@@ -1932,12 +1706,8 @@ function renderConfigurePage(
     const config =
       getConfig();
 
-
     const encoded =
-      encodeConfig(
-        config
-      );
-
+      encodeConfig(config);
 
     const manifestUrl =
       window.location.origin +
@@ -1945,12 +1715,10 @@ function renderConfigurePage(
       encoded +
       "/manifest.json";
 
-
     return manifestUrl.replace(
       /^https?:\/\//i,
       "stremio://"
     );
-
   }
 
 
@@ -1984,14 +1752,11 @@ function renderConfigurePage(
 
       hideInstall();
 
-      testButton.disabled =
-        true;
-
+      testButton.disabled = true;
 
       showStatus(
         "A testar ligação..."
       );
-
 
       try {
 
@@ -1999,8 +1764,7 @@ function renderConfigurePage(
           await fetch(
             "/test-iptv",
             {
-              method:
-                "POST",
+              method: "POST",
 
               headers: {
                 "Content-Type":
@@ -2014,10 +1778,8 @@ function renderConfigurePage(
             }
           );
 
-
         const data =
           await response.json();
-
 
         if (!response.ok) {
 
@@ -2025,15 +1787,12 @@ function renderConfigurePage(
             data.error ||
             "Erro ao testar ligação."
           );
-
         }
-
 
         showStatus(
           data.message ||
           "Ligação efetuada com sucesso."
         );
-
 
       } catch (error) {
 
@@ -2042,14 +1801,11 @@ function renderConfigurePage(
           error.message
         );
 
-
       } finally {
 
         testButton.disabled =
           false;
-
       }
-
     }
   );
 
@@ -2059,7 +1815,6 @@ function renderConfigurePage(
     function () {
 
       hideInstall();
-
 
       try {
 
@@ -2079,7 +1834,6 @@ function renderConfigurePage(
           );
 
           return;
-
         }
 
 
@@ -2095,7 +1849,6 @@ function renderConfigurePage(
           );
 
           return;
-
         }
 
 
@@ -2112,7 +1865,6 @@ function renderConfigurePage(
           );
 
           return;
-
         }
 
 
@@ -2123,16 +1875,13 @@ function renderConfigurePage(
         installUrl.textContent =
           url;
 
-
         installBox.classList.add(
           "show"
         );
 
-
         showStatus(
           "URL de instalação gerado com sucesso."
         );
-
 
       } catch (error) {
 
@@ -2140,9 +1889,7 @@ function renderConfigurePage(
           "Erro: " +
           error.message
         );
-
       }
-
     }
   );
 
@@ -2154,11 +1901,9 @@ function renderConfigurePage(
       const url =
         installUrl.textContent;
 
-
       if (!url) {
         return;
       }
-
 
       try {
 
@@ -2166,20 +1911,16 @@ function renderConfigurePage(
           url
         );
 
-
         showStatus(
           "URL copiado para a área de transferência."
         );
-
 
       } catch {
 
         showStatus(
           "Não foi possível copiar automaticamente. Copia o URL manualmente."
         );
-
       }
-
     }
   );
 
@@ -2191,39 +1932,30 @@ function renderConfigurePage(
       const url =
         installUrl.textContent;
 
-
       if (!url) {
         return;
       }
 
-
       window.location.href =
         url;
-
     }
   );
 
 
-  setMode(
-    currentMode
-  );
-
+  setMode(currentMode);
 
 })();
-
 </script>
-
 
 </body>
 
 </html>
 `;
-
 }
 
 
 /* =========================================================
-   CONFIGURE ROUTES
+   CONFIGURE
    ========================================================= */
 
 app.get(
@@ -2247,19 +1979,17 @@ app.get(
         req.params.config
       );
 
-
     res.send(
       renderConfigurePage(
         config || {}
       )
     );
-
   }
 );
 
 
 /* =========================================================
-   IPTV TEST
+   TEST IPTV
    ========================================================= */
 
 app.post(
@@ -2271,12 +2001,10 @@ app.post(
       const config =
         req.body || {};
 
-
       const validation =
         validateConfig(
           config
         );
-
 
       if (validation) {
 
@@ -2286,7 +2014,6 @@ app.post(
             success: false,
             error: validation
           });
-
       }
 
 
@@ -2299,7 +2026,6 @@ app.post(
             config.m3uUrl
           );
 
-
         return res.json({
 
           success: true,
@@ -2311,7 +2037,6 @@ app.post(
             channels.length
 
         });
-
       }
 
 
@@ -2324,7 +2049,6 @@ app.post(
             config,
             "get_live_streams"
           );
-
 
         if (
           !Array.isArray(data)
@@ -2340,9 +2064,7 @@ app.post(
                 "O servidor Xtream não devolveu uma lista válida de canais."
 
             });
-
         }
-
 
         return res.json({
 
@@ -2355,7 +2077,6 @@ app.post(
             data.length
 
         });
-
       }
 
 
@@ -2378,7 +2099,6 @@ app.post(
         error
       );
 
-
       return res
         .status(500)
         .json({
@@ -2390,9 +2110,7 @@ app.post(
             "Não foi possível testar a ligação."
 
         });
-
     }
-
   }
 );
 
@@ -2401,9 +2119,7 @@ app.post(
    MANIFEST
    ========================================================= */
 
-function buildManifest(
-  config
-) {
+function buildManifest(config) {
 
   return {
 
@@ -2516,11 +2232,8 @@ function buildManifest(
 
       p2p:
         false
-
     }
-
   };
-
 }
 
 
@@ -2535,7 +2248,6 @@ app.get(
     res.json(
       buildManifest(null)
     );
-
   }
 );
 
@@ -2549,11 +2261,9 @@ app.get(
         req.params.config
       );
 
-
     res.json(
       buildManifest(config)
     );
-
   }
 );
 
@@ -2575,7 +2285,6 @@ app.get(
             const id =
               addon.id ||
               `addon:${index}`;
-
 
             return {
 
@@ -2601,20 +2310,16 @@ app.get(
                 addon.url ||
                 addon.website ||
                 ""
-
             };
-
           }
         )
-
     });
-
   }
 );
 
 
 /* =========================================================
-   CATALOG CHANNEL
+   CHANNEL CATALOG
    ========================================================= */
 
 app.get(
@@ -2627,7 +2332,6 @@ app.get(
         decodeConfig(
           req.params.config
         );
-
 
       const catalogId =
         req.params.id;
@@ -2645,7 +2349,6 @@ app.get(
                 getOperatorLogo(
                   service.name
                 );
-
 
               return {
 
@@ -2675,17 +2378,13 @@ app.get(
                 description:
                   service.description ||
                   ""
-
               };
-
             }
           );
-
 
         return res.json({
           metas
         });
-
       }
 
 
@@ -2698,60 +2397,49 @@ app.get(
           return res.json({
             metas: []
           });
-
         }
-
 
         const channels =
           await getIPTVChannels(
             config
           );
 
-
         return res.json({
 
           metas:
             channels.map(
-              (channel) => {
+              (channel) => ({
 
-                return {
+                id:
+                  channel.id,
 
-                  id:
-                    channel.id,
+                type:
+                  "channel",
 
-                  type:
-                    "channel",
+                name:
+                  channel.name,
 
-                  name:
-                    channel.name,
+                poster:
+                  channel.logo ||
+                  PT_HUB_LOGO,
 
-                  poster:
-                    channel.logo ||
-                    PT_HUB_LOGO,
+                logo:
+                  channel.logo ||
+                  PT_HUB_LOGO,
 
-                  logo:
-                    channel.logo ||
-                    PT_HUB_LOGO,
-
-                  description:
-                    channel.group
-                      ? `Grupo: ${channel.group}`
-                      : ""
-
-                };
-
-              }
+                description:
+                  channel.group
+                    ? `Grupo: ${channel.group}`
+                    : ""
+              })
             )
-
         });
-
       }
 
 
       return res.json({
         metas: []
       });
-
 
     } catch (error) {
 
@@ -2760,19 +2448,16 @@ app.get(
         error
       );
 
-
       return res.json({
         metas: []
       });
-
     }
-
   }
 );
 
 
 /* =========================================================
-   CATALOG FILMES
+   MOVIES
    ========================================================= */
 
 app.get(
@@ -2786,11 +2471,7 @@ app.get(
           "movie"
         );
 
-
-      return res.json(
-        data
-      );
-
+      return res.json(data);
 
     } catch (error) {
 
@@ -2799,19 +2480,16 @@ app.get(
         error.message
       );
 
-
       return res.json({
         metas: []
       });
-
     }
-
   }
 );
 
 
 /* =========================================================
-   CATALOG SERIES
+   SERIES
    ========================================================= */
 
 app.get(
@@ -2825,11 +2503,7 @@ app.get(
           "series"
         );
 
-
-      return res.json(
-        data
-      );
-
+      return res.json(data);
 
     } catch (error) {
 
@@ -2838,13 +2512,10 @@ app.get(
         error.message
       );
 
-
       return res.json({
         metas: []
       });
-
     }
-
   }
 );
 
@@ -2864,10 +2535,8 @@ app.get(
           req.params.config
         );
 
-
       const type =
         req.params.type;
-
 
       const id =
         req.params.id;
@@ -2878,16 +2547,11 @@ app.get(
         id === "filmes"
       ) {
 
-        const data =
+        return res.json(
           await getCinemetaCatalog(
             "movie"
-          );
-
-
-        return res.json(
-          data
+          )
         );
-
       }
 
 
@@ -2896,16 +2560,11 @@ app.get(
         id === "series"
       ) {
 
-        const data =
+        return res.json(
           await getCinemetaCatalog(
             "series"
-          );
-
-
-        return res.json(
-          data
+          )
         );
-
       }
 
 
@@ -2916,7 +2575,6 @@ app.get(
           id === "pt-services"
         )
       ) {
-
 
         if (
           id === "pt-services"
@@ -2932,7 +2590,6 @@ app.get(
                     getOperatorLogo(
                       service.name
                     );
-
 
                   return {
 
@@ -2958,14 +2615,10 @@ app.get(
                       service.logo ||
                       service.poster ||
                       PT_HUB_LOGO
-
                   };
-
                 }
               )
-
           });
-
         }
 
 
@@ -2974,7 +2627,6 @@ app.get(
           return res.json({
             metas: []
           });
-
         }
 
 
@@ -3002,19 +2654,15 @@ app.get(
                 poster:
                   channel.logo ||
                   PT_HUB_LOGO
-
               })
             )
-
         });
-
       }
 
 
       return res.json({
         metas: []
       });
-
 
     } catch (error) {
 
@@ -3023,13 +2671,10 @@ app.get(
         error.message
       );
 
-
       return res.json({
         metas: []
       });
-
     }
-
   }
 );
 
@@ -3049,10 +2694,8 @@ app.get(
           req.params.config
         );
 
-
       const type =
         req.params.type;
-
 
       const id =
         req.params.id;
@@ -3063,17 +2706,12 @@ app.get(
         type === "series"
       ) {
 
-        const data =
+        return res.json(
           await getCinemetaMeta(
             type,
             id
-          );
-
-
-        return res.json(
-          data
+          )
         );
-
       }
 
 
@@ -3091,7 +2729,6 @@ app.get(
             return res.json({
               meta: null
             });
-
           }
 
 
@@ -3113,7 +2750,6 @@ app.get(
             return res.json({
               meta: null
             });
-
           }
 
 
@@ -3142,20 +2778,15 @@ app.get(
                 channel.group
                   ? `Grupo: ${channel.group}`
                   : ""
-
             }
-
           });
-
         }
-
       }
 
 
       return res.json({
         meta: null
       });
-
 
     } catch (error) {
 
@@ -3164,13 +2795,10 @@ app.get(
         error.message
       );
 
-
       return res.json({
         meta: null
       });
-
     }
-
   }
 );
 
@@ -3190,10 +2818,8 @@ app.get(
           req.params.config
         );
 
-
       const type =
         req.params.type;
-
 
       const id =
         req.params.id;
@@ -3208,7 +2834,6 @@ app.get(
           return res.json({
             streams: []
           });
-
         }
 
 
@@ -3230,7 +2855,6 @@ app.get(
           return res.json({
             streams: []
           });
-
         }
 
 
@@ -3253,15 +2877,11 @@ app.get(
 
                 notWebReady:
                   false
-
               }
-
             }
 
           ]
-
         });
-
       }
 
 
@@ -3273,14 +2893,12 @@ app.get(
         return res.json({
           streams: []
         });
-
       }
 
 
       return res.json({
         streams: []
       });
-
 
     } catch (error) {
 
@@ -3289,13 +2907,10 @@ app.get(
         error.message
       );
 
-
       return res.json({
         streams: []
       });
-
     }
-
   }
 );
 
@@ -3324,161 +2939,146 @@ app.get(
 
 <title>PT•HUB</title>
 
-
 <style>
 
-  body {
+body {
 
-    margin: 0;
+  margin: 0;
 
-    min-height: 100vh;
+  min-height: 100vh;
 
-    display:
-      flex;
+  display:
+    flex;
 
-    align-items:
-      center;
+  align-items:
+    center;
 
-    justify-content:
-      center;
+  justify-content:
+    center;
 
-    background:
+  background:
 
-      radial-gradient(
-        circle at top,
-        rgba(255,120,0,0.14),
-        transparent 35%
-      ),
+    radial-gradient(
+      circle at top,
+      rgba(255,120,0,0.14),
+      transparent 35%
+    ),
 
-      linear-gradient(
-        135deg,
-        #24120a,
-        #090909
-      );
+    linear-gradient(
+      135deg,
+      #24120a,
+      #090909
+    );
 
-    color:
-      #fff;
+  color:
+    #fff;
 
-    font-family:
-      Arial,
-      Helvetica,
-      sans-serif;
-
-  }
-
-
-  .box {
-
-    text-align:
-      center;
-
-    padding:
-      30px;
-
-  }
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
+}
 
 
-  img {
+.box {
 
-    width:
-      170px;
+  text-align:
+    center;
 
-    max-width:
-      70%;
-
-    margin-bottom:
-      25px;
-
-    filter:
-      drop-shadow(
-        0 10px 30px
-        rgba(0,0,0,0.5)
-      );
-
-  }
+  padding:
+    30px;
+}
 
 
-  h1 {
+img {
 
-    font-size:
-      34px;
+  width:
+    170px;
 
-    margin:
-      0 0 10px;
+  max-width:
+    70%;
 
-  }
+  margin-bottom:
+    25px;
+
+  filter:
+    drop-shadow(
+      0 10px 30px
+      rgba(0,0,0,0.5)
+    );
+}
 
 
-  p {
+h1 {
 
-    color:
-      #999;
+  font-size:
+    34px;
 
-  }
+  margin:
+    0 0 10px;
+}
 
 
-  a {
+p {
 
-    display:
-      inline-block;
+  color:
+    #999;
+}
 
-    margin-top:
-      20px;
 
-    padding:
-      13px 22px;
+a {
 
-    border-radius:
-      10px;
+  display:
+    inline-block;
 
-    background:
-      #fff;
+  margin-top:
+    20px;
 
-    color:
-      #000;
+  padding:
+    13px 22px;
 
-    text-decoration:
-      none;
+  border-radius:
+    10px;
 
-    font-weight:
-      700;
+  background:
+    #fff;
 
-  }
+  color:
+    #000;
+
+  text-decoration:
+    none;
+
+  font-weight:
+    700;
+}
 
 </style>
 
 </head>
 
-
 <body>
-
 
 <div class="box">
 
+<img
+  src="${PT_HUB_LOGO}"
+  alt="PT•HUB"
+>
 
-  <img
-    src="${PT_HUB_LOGO}"
-    alt="PT•HUB"
-  >
+<h1>
+  PT•HUB
+</h1>
 
+<p>
+  IPTV, Filmes e Séries para Stremio
+</p>
 
-  <h1>
-    PT•HUB
-  </h1>
-
-
-  <p>
-    IPTV, Filmes e Séries para Stremio
-  </p>
-
-
-  <a href="/configure">
-    Configurar IPTV
-  </a>
-
+<a href="/configure">
+  Configurar IPTV
+</a>
 
 </div>
-
 
 </body>
 
@@ -3505,9 +3105,7 @@ app.use(
 
         version:
           VERSION
-
       });
-
   }
 );
 
@@ -3529,7 +3127,6 @@ app.use(
       error
     );
 
-
     res
       .status(500)
       .json({
@@ -3537,9 +3134,7 @@ app.use(
         error:
           error.message ||
           "Erro interno do servidor."
-
       });
-
   }
 );
 
