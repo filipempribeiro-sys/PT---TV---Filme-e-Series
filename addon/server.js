@@ -8,10 +8,10 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const CINEMETA_BASE = "https://v3-cinemeta.strem.io";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
+
 
 // ============================================================
 // MIDDLEWARE
@@ -52,7 +52,7 @@ function loadJSON(filePath, fallback) {
     );
   } catch (error) {
     console.error(
-      `Erro ao carregar ${filePath}:`,
+      Erro ao carregar ${filePath}:,
       error.message
     );
 
@@ -60,10 +60,15 @@ function loadJSON(filePath, fallback) {
   }
 }
 
-// ------------------------------------------------------------
-// Apenas addons.json.
-// services.json NÃO é utilizado nesta versão.
-// ------------------------------------------------------------
+const services = loadJSON(
+  path.join(
+    BASE_DIR,
+    "..",
+    "data",
+    "services.json"
+  ),
+  []
+);
 
 const addons = loadJSON(
   path.join(
@@ -75,10 +80,6 @@ const addons = loadJSON(
   []
 );
 
-// ============================================================
-// MANIFEST
-// ============================================================
-
 const baseManifest = loadJSON(
   path.join(
     BASE_DIR,
@@ -88,37 +89,17 @@ const baseManifest = loadJSON(
     id: "pt.filipe.nuvio.tvhub",
     version: "1.3.3",
     name: "PT•HUB",
-    description:
-      "Hub de entretenimento português com IPTV, filmes e séries.",
+    description: "PT•HUB de entretenimento português com IPTV, filmes e séries.",
     logo: PT_HUB_LOGO,
     resources: [
       "catalog",
       "meta",
-      "stream",
-      "addon_catalog"
+      "stream"
     ],
     types: [
-      "channel",
-      "movie",
-      "series"
+      "channel"
     ],
-    catalogs: [
-      {
-        type: "channel",
-        id: "m3u",
-        name: "Minha IPTV"
-      },
-      {
-        type: "movie",
-        id: "filmes",
-        name: "Filmes"
-      },
-      {
-        type: "series",
-        id: "series",
-        name: "Séries"
-      }
-    ]
+    catalogs: []
   }
 );
 
@@ -151,8 +132,7 @@ function decodeConfig(value) {
     );
   } catch (error) {
     console.error(
-      "Configuração inválida:",
-      error.message
+      "Configuração inválida."
     );
 
     return {};
@@ -179,7 +159,7 @@ function isValidHttpUrl(value) {
 }
 
 // ============================================================
-// HTML ESCAPE
+// ESCAPE HTML
 // ============================================================
 
 function escapeHtml(value) {
@@ -329,7 +309,7 @@ async function fetchM3U(url) {
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-HUB/1.3.3"
+              "PT-TV-Hub/1.3.3"
           }
         }
       );
@@ -338,7 +318,7 @@ async function fetchM3U(url) {
 
     if (!response.ok) {
       throw new Error(
-        `HTTP ${response.status}`
+        HTTP ${response.status}
       );
     }
 
@@ -401,17 +381,17 @@ async function xtreamRequest(
   }
 
   let url =
-    `${server}/player_api.php`;
+    ${server}/player_api.php;
 
   url +=
-    `?username=${encodeURIComponent(username)}`;
+    ?username=${encodeURIComponent(username)};
 
   url +=
-    `&password=${encodeURIComponent(password)}`;
+    &password=${encodeURIComponent(password)};
 
   if (action) {
     url +=
-      `&action=${encodeURIComponent(action)}`;
+      &action=${encodeURIComponent(action)};
   }
 
   try {
@@ -432,7 +412,7 @@ async function xtreamRequest(
             controller.signal,
           headers: {
             "User-Agent":
-              "PT-HUB/1.3.3"
+              "PT-TV-Hub/1.3.3"
           }
         }
       );
@@ -441,7 +421,7 @@ async function xtreamRequest(
 
     if (!response.ok) {
       throw new Error(
-        `HTTP ${response.status}`
+        HTTP ${response.status}
       );
     }
 
@@ -509,11 +489,11 @@ async function getXtreamChannels(
 
       return {
         id:
-          `xtream:${streamId}`,
+          xtream:${streamId},
 
         title:
           channel.name ||
-          `Canal ${streamId}`,
+          Canal ${streamId},
 
         group:
           channel.category_name ||
@@ -528,17 +508,17 @@ async function getXtreamChannels(
           "",
 
         url:
-          `${server}/live/` +
-          `${encodeURIComponent(username)}/` +
-          `${encodeURIComponent(password)}/` +
-          `${streamId}.${extension}`
+          ${server}/live/ +
+          ${encodeURIComponent(username)}/ +
+          ${encodeURIComponent(password)}/ +
+          ${streamId}.${extension}
       };
     })
     .filter(Boolean);
 }
 
 // ============================================================
-// OBTER CANAIS IPTV
+// OBTER CANAIS
 // ============================================================
 
 async function getIPTVChannels(
@@ -666,115 +646,6 @@ function validateConfig(config) {
 }
 
 // ============================================================
-// CINEMETA
-// ============================================================
-
-async function fetchCinemetaCatalog(type) {
-  try {
-    const url =
-      `${CINEMETA_BASE}/catalog/${type}/top.json`;
-
-    const controller =
-      new AbortController();
-
-    const timeout =
-      setTimeout(
-        () => controller.abort(),
-        15000
-      );
-
-    const response =
-      await fetch(
-        url,
-        {
-          signal:
-            controller.signal,
-          headers: {
-            "User-Agent":
-              "PT-HUB/1.3.3"
-          }
-        }
-      );
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      throw new Error(
-        `Cinemeta HTTP ${response.status}`
-      );
-    }
-
-    const data =
-      await response.json();
-
-    return Array.isArray(data.metas)
-      ? data.metas
-      : [];
-
-  } catch (error) {
-    console.error(
-      "Erro Cinemeta catálogo:",
-      error.message
-    );
-
-    return [];
-  }
-}
-
-async function fetchCinemetaMeta(
-  type,
-  id
-) {
-  try {
-    const url =
-      `${CINEMETA_BASE}/meta/${type}/${encodeURIComponent(id)}.json`;
-
-    const controller =
-      new AbortController();
-
-    const timeout =
-      setTimeout(
-        () => controller.abort(),
-        15000
-      );
-
-    const response =
-      await fetch(
-        url,
-        {
-          signal:
-            controller.signal,
-          headers: {
-            "User-Agent":
-              "PT-HUB/1.3.3"
-          }
-        }
-      );
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      throw new Error(
-        `Cinemeta HTTP ${response.status}`
-      );
-    }
-
-    const data =
-      await response.json();
-
-    return data.meta || null;
-
-  } catch (error) {
-    console.error(
-      "Erro Cinemeta meta:",
-      error.message
-    );
-
-    return null;
-  }
-}
-
-// ============================================================
 // PÁGINA DE CONFIGURAÇÃO
 // ============================================================
 
@@ -809,17 +680,13 @@ function renderConfigure(
     existingConfig.xtream_username ||
     "";
 
-  const xtreamPassword =
-    existingConfig.xtream_password ||
-    "";
-
   const epgUrl =
     existingConfig.epg_url ||
     "";
 
   res.type("html");
 
-  res.send(`
+  res.send(
 <!DOCTYPE html>
 <html lang="pt-PT">
 
@@ -888,12 +755,9 @@ body {
   margin-bottom: 30px;
 }
 
-.brandLogo {
-  width: 110px;
-  height: 110px;
-  object-fit: contain;
-  border-radius: 20px;
-  margin-bottom: 10px;
+.logo {
+  font-size: 50px;
+  margin-bottom: 8px;
 }
 
 h1 {
@@ -1057,7 +921,6 @@ button:hover {
 }
 
 @media (max-width: 600px) {
-
   .card {
     padding: 22px;
   }
@@ -1066,7 +929,6 @@ button:hover {
     grid-template-columns:
       1fr;
   }
-
 }
 
 </style>
@@ -1081,11 +943,7 @@ button:hover {
 
 <div class="header">
 
-<img
-  class="brandLogo"
-  src="${PT_HUB_LOGO}"
-  alt="PT•HUB"
->
+<div class="logo">📺</div>
 
 <h1>PT•HUB</h1>
 
@@ -1197,7 +1055,6 @@ Password
 <input
   id="xtream_password"
   type="password"
-  value="${escapeHtml(xtreamPassword)}"
   autocomplete="current-password"
 >
 
@@ -1223,7 +1080,7 @@ EPG URL
 >
 
 <div class="hint">
-EPG guardado na configuração para utilização futura.
+EPG preparado para a próxima etapa.
 </div>
 
 <div
@@ -1246,7 +1103,7 @@ EPG guardado na configuração para utilização futura.
   class="install"
   id="installButton"
 >
-📺 Instalar PT•HUB
+📺 Instalar no Stremio
 </button>
 
 </div>
@@ -1256,12 +1113,8 @@ EPG guardado na configuração para utilização futura.
 <b>PT•HUB</b><br><br>
 
 Configura uma fonte M3U ou Xtream Codes
-autorizada e testa a ligação antes de
-instalar o addon.
-
-Depois da instalação, o PT•HUB disponibiliza
-o catálogo IPTV configurado, além de Filmes
-e Séries.
+autorizada e instala-a diretamente no
+Stremio.
 
 </div>
 
@@ -1301,10 +1154,6 @@ const installButton =
     "installButton"
   );
 
-// ============================================================
-// CAMPOS
-// ============================================================
-
 function updateFields() {
 
   m3uSection.classList.add(
@@ -1338,10 +1187,6 @@ typeSelect.addEventListener(
   "change",
   updateFields
 );
-
-// ============================================================
-// CONFIG
-// ============================================================
 
 function getConfig() {
 
@@ -1399,10 +1244,6 @@ function getConfig() {
   };
 }
 
-// ============================================================
-// VALIDAR NO BROWSER
-// ============================================================
-
 function validateClientConfig(config) {
 
   if (
@@ -1423,7 +1264,6 @@ function validateClientConfig(config) {
     }
 
     try {
-
       const url =
         new URL(
           config.m3u_url
@@ -1452,26 +1292,6 @@ function validateClientConfig(config) {
       return "Introduz o servidor Xtream.";
     }
 
-    try {
-
-      const url =
-        new URL(
-          config.xtream_url
-        );
-
-      if (
-        url.protocol !==
-          "http:" &&
-        url.protocol !==
-          "https:"
-      ) {
-        return "O servidor Xtream deve começar por http:// ou https://.";
-      }
-
-    } catch {
-      return "O servidor Xtream não é válido.";
-    }
-
     if (!config.xtream_username) {
       return "Introduz o username Xtream.";
     }
@@ -1481,43 +1301,13 @@ function validateClientConfig(config) {
     }
   }
 
-  if (
-    config.epg_url
-  ) {
-
-    try {
-
-      const url =
-        new URL(
-          config.epg_url
-        );
-
-      if (
-        url.protocol !==
-          "http:" &&
-        url.protocol !==
-          "https:"
-      ) {
-        return "A URL EPG não é válida.";
-      }
-
-    } catch {
-      return "A URL EPG não é válida.";
-    }
-  }
-
   return null;
 }
-
-// ============================================================
-// STATUS
-// ============================================================
 
 function showStatus(
   message,
   ok
 ) {
-
   statusBox.textContent =
     message;
 
@@ -1531,7 +1321,6 @@ function showStatus(
 }
 
 function clearStatus() {
-
   statusBox.textContent =
     "";
 
@@ -1540,45 +1329,12 @@ function clearStatus() {
 }
 
 // ============================================================
-// CODIFICAR CONFIG NO BROWSER
-// ============================================================
-
-function encodeConfigBrowser(config) {
-
-  const json =
-    JSON.stringify(
-      config
-    );
-
-  const bytes =
-    new TextEncoder()
-      .encode(json);
-
-  let binary = "";
-
-  for (
-    const byte of bytes
-  ) {
-    binary += String.fromCharCode(
-      byte
-    );
-  }
-
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-// ============================================================
-// TESTAR IPTV
+// TESTAR
 // ============================================================
 
 testButton.addEventListener(
   "click",
   async () => {
-
-    clearStatus();
 
     const config =
       getConfig();
@@ -1589,7 +1345,6 @@ testButton.addEventListener(
       );
 
     if (validation) {
-
       showStatus(
         validation,
         false
@@ -1645,8 +1400,7 @@ testButton.addEventListener(
       } else {
 
         showStatus(
-          result.message ||
-          "O teste falhou.",
+          result.message,
           false
         );
       }
@@ -1670,14 +1424,12 @@ testButton.addEventListener(
 );
 
 // ============================================================
-// INSTALAR
+// INSTALAR NO STREMIO
 // ============================================================
 
 installButton.addEventListener(
   "click",
   () => {
-
-    clearStatus();
 
     const config =
       getConfig();
@@ -1697,10 +1449,42 @@ installButton.addEventListener(
       return;
     }
 
+    /*
+     * Criar configuração codificada
+     * em Base64URL.
+     */
+
     const encodedConfig =
-      encodeConfigBrowser(
-        config
+      btoa(
+        unescape(
+          encodeURIComponent(
+            JSON.stringify(
+              config
+            )
+          )
+        )
+      )
+      .replace(
+        /=+$/,
+        ""
+      )
+      .replace(
+        /\\+/g,
+        "-"
+      )
+      .replace(
+        /\\//g,
+        "_"
       );
+
+    /*
+     * Manifest HTTPS configurado.
+     *
+     * Exemplo:
+     *
+     * https://pt-tv-filme-e-series.onrender.com/
+     * CONFIG/manifest.json
+     */
 
     const manifestUrl =
       window.location.origin +
@@ -1708,9 +1492,22 @@ installButton.addEventListener(
       encodedConfig +
       "/manifest.json";
 
+    /*
+     * URL de instalação Stremio.
+     *
+     * IMPORTANTE:
+     *
+     * Não usamos:
+     *
+     * stremio://addon/...
+     *
+     * O protocolo stremio substitui
+     * diretamente o https://.
+     */
+
     const stremioUrl =
       manifestUrl.replace(
-        /^https?:\/\//i,
+        /^https?:\\/\\//i,
         "stremio://"
       );
 
@@ -1718,6 +1515,10 @@ installButton.addEventListener(
       "A abrir o Stremio...",
       true
     );
+
+    /*
+     * Criar link temporário.
+     */
 
     const link =
       document.createElement(
@@ -1739,13 +1540,19 @@ installButton.addEventListener(
 
     link.click();
 
+    /*
+     * Fallback:
+     * mostramos o URL caso o
+     * navegador bloqueie o protocolo.
+     */
+
     setTimeout(
       () => {
 
         link.remove();
 
         showStatus(
-          "Se o Stremio não abriu automaticamente, utiliza novamente o botão de instalação ou permite a abertura do Stremio no navegador.",
+          "Se o Stremio não abriu automaticamente, procura o pedido de abertura do Stremio no navegador.",
           true
         );
 
@@ -1762,7 +1569,7 @@ updateFields();
 </body>
 
 </html>
-  `);
+);
 }
 
 // ============================================================
@@ -1798,7 +1605,6 @@ app.post(
     if (
       errors.length > 0
     ) {
-
       return res
         .status(400)
         .json({
@@ -1821,7 +1627,6 @@ app.post(
       if (
         channels.length === 0
       ) {
-
         return res.json({
           ok: false,
           message:
@@ -1832,7 +1637,7 @@ app.post(
       return res.json({
         ok: true,
         message:
-          `Ligação OK — ${channels.length} canais encontrados.`
+          Ligação OK — ${channels.length} canais encontrados.
       });
     }
 
@@ -1848,7 +1653,6 @@ app.post(
         );
 
       if (!auth) {
-
         return res.json({
           ok: false,
           message:
@@ -1864,7 +1668,7 @@ app.post(
       return res.json({
         ok: true,
         message:
-          `Ligação Xtream OK — ${channels.length} canais encontrados.`
+          Ligação Xtream OK — ${channels.length} canais encontrados.
       });
     }
 
@@ -1883,7 +1687,6 @@ app.post(
 app.get(
   "/manifest.json",
   (req, res) => {
-
     res.json(
       baseManifest
     );
@@ -1936,7 +1739,7 @@ app.get(
       ...baseManifest,
 
       id:
-        `pt.filipe.nuvio.tvhub.${configHash}`,
+        pt.filipe.nuvio.tvhub.${configHash},
 
       version:
         baseManifest.version ||
@@ -1944,8 +1747,8 @@ app.get(
 
       name:
         config.iptv_name
-          ? `PT•HUB - ${config.iptv_name}`
-          : "PT•HUB",
+          ? PT•HUB - ${config.iptv_name}
+          : baseManifest.name,
 
       description:
         errors.length > 0
@@ -1953,12 +1756,9 @@ app.get(
           : (
               config.iptv_type ===
               "Xtream Codes"
-                ? "PT•HUB - IPTV Xtream Codes, filmes e séries."
-                : "PT•HUB - IPTV M3U, filmes e séries."
+                ? "PT•HUB - Xtream Codes"
+                : "PT•HUB - M3U"
             ),
-
-      logo:
-        PT_HUB_LOGO,
 
       behaviorHints: {
         configurable: true,
@@ -1992,97 +1792,88 @@ app.get(
     const id =
       req.params.id;
 
-    // ========================================================
-    // IPTV
-    // ========================================================
+    /*
+     * Serviços oficiais
+     */
 
     if (
       type === "channel" &&
-      id === "m3u"
+      id === "pt-services"
     ) {
 
-      try {
-
-        const channels =
-          await getIPTVChannels(
-            config
-          );
-
-        return res.json({
-          metas:
-            channels.map(
-              (channel) => ({
+      const metas =
+        Array.isArray(services)
+          ? services.map(
+              (service) => ({
                 id:
-                  channel.id,
+                  service.id ||
+                  service:${service.name},
 
                 type:
                   "channel",
 
                 name:
-                  channel.title,
+                  service.name ||
+                  "Serviço",
 
                 poster:
-                  channel.logo ||
+                  service.logo ||
                   "",
 
                 description:
-                  channel.group ||
-                  "IPTV",
+                  service.description ||
+                  "Serviço oficial.",
 
                 posterShape:
                   "square"
               })
             )
-        });
-
-      } catch (error) {
-
-        console.error(
-          "Erro catálogo IPTV:",
-          error.message
-        );
-
-        return res.json({
-          metas: []
-        });
-      }
-    }
-
-    // ========================================================
-    // FILMES
-    // ========================================================
-
-    if (
-      type === "movie" &&
-      id === "filmes"
-    ) {
-
-      const metas =
-        await fetchCinemetaCatalog(
-          "movie"
-        );
+          : [];
 
       return res.json({
         metas
       });
     }
 
-    // ========================================================
-    // SÉRIES
-    // ========================================================
+    /*
+     * IPTV
+     */
 
     if (
-      type === "series" &&
-      id === "series"
+      type === "channel" &&
+      id === "m3u"
     ) {
 
-      const metas =
-        await fetchCinemetaCatalog(
-          "series"
+      const channels =
+        await getIPTVChannels(
+          config
         );
 
       return res.json({
-        metas
+        metas:
+          channels.map(
+            (channel) => ({
+              id:
+                channel.id,
+
+              type:
+                "channel",
+
+              name:
+                channel.title,
+
+              poster:
+                channel.logo ||
+                "",
+
+              description:
+                channel.group ||
+                "IPTV",
+
+              posterShape:
+                "square"
+            })
+          )
       });
     }
 
@@ -2105,45 +1896,51 @@ app.get(
         req.params.config
       );
 
-    const type =
-      req.params.type;
-
     const id =
       req.params.id;
 
-    // ========================================================
-    // FILMES / SÉRIES
-    // ========================================================
+    /*
+     * Serviços oficiais
+     */
 
-    if (
-      type === "movie" ||
-      type === "series"
-    ) {
+    const service =
+      Array.isArray(services)
+        ? services.find(
+            (item) =>
+              item.id === id
+          )
+        : null;
 
-      const meta =
-        await fetchCinemetaMeta(
-          type,
-          id
-        );
+    if (service) {
 
       return res.json({
-        meta
+        meta: {
+          id:
+            service.id,
+
+          type:
+            "channel",
+
+          name:
+            service.name,
+
+          poster:
+            service.logo ||
+            "",
+
+          description:
+            service.description ||
+            "Serviço oficial.",
+
+          posterShape:
+            "square"
+        }
       });
     }
 
-    // ========================================================
-    // IPTV
-    // ========================================================
-
-    if (
-      !id.startsWith("m3u:") &&
-      !id.startsWith("xtream:")
-    ) {
-
-      return res.json({
-        meta: null
-      });
-    }
+    /*
+     * IPTV
+     */
 
     const channels =
       await getIPTVChannels(
@@ -2157,7 +1954,6 @@ app.get(
       );
 
     if (!channel) {
-
       return res.json({
         meta: null
       });
@@ -2165,7 +1961,6 @@ app.get(
 
     return res.json({
       meta: {
-
         id:
           channel.id,
 
@@ -2203,39 +1998,59 @@ app.get(
         req.params.config
       );
 
-    const type =
-      req.params.type;
-
     const id =
       req.params.id;
 
-    // ========================================================
-    // FILMES / SÉRIES
-    // ========================================================
+    /*
+     * Serviços oficiais
+     */
 
-    if (
-      type === "movie" ||
-      type === "series"
-    ) {
+    const service =
+      Array.isArray(services)
+        ? services.find(
+            (item) =>
+              item.id === id
+          )
+        : null;
+
+    if (service) {
+
+      const serviceUrl =
+        service.url ||
+        service.link ||
+        service.web ||
+        "";
+
+      if (
+        isValidHttpUrl(
+          serviceUrl
+        )
+      ) {
+
+        return res.json({
+          streams: [
+            {
+              name:
+                service.name,
+
+              description:
+                "Abrir serviço oficial.",
+
+              externalUrl:
+                serviceUrl
+            }
+          ]
+        });
+      }
 
       return res.json({
         streams: []
       });
     }
 
-    // ========================================================
-    // IPTV
-    // ========================================================
-
-    if (
-      !id.startsWith("m3u:") &&
-      !id.startsWith("xtream:")
-    ) {
-
-      return res.json({
-        streams: []
-      });
-    }
+    /*
+     * IPTV
+     */
 
     const channels =
       await getIPTVChannels(
@@ -2249,7 +2064,6 @@ app.get(
       );
 
     if (!channel) {
-
       return res.json({
         streams: []
       });
@@ -2260,7 +2074,6 @@ app.get(
         channel.url
       )
     ) {
-
       return res.json({
         streams: []
       });
@@ -2333,7 +2146,7 @@ app.get(
 
               manifest: {
                 id:
-                  `external.${addonId}`,
+                  external.${addonId},
 
                 version:
                   "1.0.0",
@@ -2371,7 +2184,7 @@ app.get(
 );
 
 // ============================================================
-// HOME / HEALTH
+// HEALTH / HOME
 // ============================================================
 
 app.get(
@@ -2380,7 +2193,7 @@ app.get(
 
     res.type("html");
 
-    res.send(`
+    res.send(
 <!DOCTYPE html>
 
 <html lang="pt-PT">
@@ -2432,23 +2245,6 @@ body {
     40px;
 }
 
-.logo {
-  width:
-    160px;
-
-  height:
-    160px;
-
-  object-fit:
-    contain;
-
-  border-radius:
-    24px;
-
-  margin-bottom:
-    15px;
-}
-
 .ok {
   color:
     #4ade80;
@@ -2466,12 +2262,6 @@ a {
 <body>
 
 <div class="box">
-
-<img
-  class="logo"
-  src="${PT_HUB_LOGO}"
-  alt="PT•HUB"
->
 
 <h1>
 📺 PT•HUB
@@ -2495,18 +2285,12 @@ Configurar IPTV
 </a>
 </p>
 
-<p>
-<a href="/manifest.json">
-Manifest
-</a>
-</p>
-
 </div>
 
 </body>
 
 </html>
-    `);
+);
   }
 );
 
@@ -2516,7 +2300,6 @@ Manifest
 
 app.use(
   (req, res) => {
-
     res
       .status(404)
       .json({
@@ -2556,7 +2339,7 @@ app.listen(
   () => {
 
     console.log(
-      `PT•HUB em http://localhost:${PORT}`
+      PT•HUB em http://localhost:${PORT}
     );
 
     console.log(
