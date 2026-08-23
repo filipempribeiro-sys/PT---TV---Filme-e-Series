@@ -721,7 +721,7 @@ async function getJustWatchCatalog(
     if (!imdbId) {
       continue;
     }
-
+console.log("STREAMER CONTENT:", JSON.stringify(content, null, 2));
    metas.push({
   id: imdbId,
   type,
