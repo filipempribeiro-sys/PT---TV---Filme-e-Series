@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.4.7";
+const VERSION = "1.4.6";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -488,7 +488,7 @@ const STREAMER_CATALOG_BASE =
 
 const streamerNames = {
   netflix: "Netflix",
-  hbomax: "HBO Max",
+  max: "HBO Max",
   "prime-video": "Amazon Prime Video",
   "disney-plus": "Disney Plus",
   "apple-tv-plus": "Apple TV Plus"
@@ -529,83 +529,61 @@ async function justWatchRequest(query, variables) {
   return data.data;
 }
 
-let justWatchPackagesCache = null;
-let justWatchPackagesCacheTime = 0;
-
 
 async function getJustWatchPackages() {
+  const query = `
+    query Packages(
+      $country: Country!
+      $platform: Platform!
+    ) {
+      packages(
+        country: $country
+        platform: $platform
+      ) {
+        id
+        clearName
+        shortName
+      }
+    }
+  `;
 
- const now = Date.now();
+  const response = await fetch(JUSTWATCH_URL, {
+    method: "POST",
 
- if (
- justWatchPackagesCache &&
- (now - justWatchPackagesCacheTime) <
- (60 * 60 * 1000)
- ) {
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": `PT-HUB/${VERSION}`
+    },
 
- return justWatchPackagesCache;
+    body: JSON.stringify({
+      operationName: "Packages",
+      variables: {
+        country: JUSTWATCH_COUNTRY,
+        platform: "WEB"
+      },
+      query
+    })
+  });
 
- }
+  if (!response.ok) {
+    throw new Error(
+      `JustWatch Packages respondeu HTTP ${response.status}`
+    );
+  }
 
- const query = `
- query Packages(
- $country: Country!
- $platform: Platform!
- ) {
- packages(
- country: $country
- platform: $platform
- ) {
- id
- clearName
- shortName
- }
- }
- `;
+  const data = await response.json();
 
- const response = await fetch(JUSTWATCH_URL, {
- method: "POST",
+  if (data.errors) {
+    throw new Error(
+      data.errors
+        .map((error) => error.message)
+        .join("; ")
+    );
+  }
 
- headers: {
- "Content-Type": "application/json",
- "User-Agent": `PT-HUB/${VERSION}`
- },
-
- body: JSON.stringify({
- operationName: "Packages",
- variables: {
- country: JUSTWATCH_COUNTRY,
- platform: "WEB"
- },
- query
- })
- });
-
- if (!response.ok) {
- throw new Error(
- `JustWatch Packages respondeu HTTP ${response.status}`
- );
- }
-
- const data = await response.json();
-
- if (data.errors) {
- throw new Error(
- data.errors
- .map((error) => error.message)
- .join("; ")
- );
- }
-
- justWatchPackagesCache =
- data.data?.packages || [];
-
- justWatchPackagesCacheTime =
- Date.now();
-
- return justWatchPackagesCache;
-
+  return data.data?.packages || [];
 }
+
 
 async function getStreamerPackage(streamerId) {
   const packages =
@@ -759,61 +737,10 @@ metas.push({
     `https://images.metahub.space/background/medium/${imdbId}/img`
 });
 }
-
-return {
- metas
-};
-
-}
   
-async function getFeaturedCatalog(type) {
-
- const streamers = [
- "netflix",
- "hbomax",
- "prime-video",
- "disney-plus",
- "apple-tv-plus"
- ];
-
- const metas = [];
- const ids = new Set();
-
- for (const streamer of streamers) {
-
- try {
-
- const data =
- await getJustWatchCatalog(
- type,
- streamer
- );
-
- for (const meta of data.metas.slice(0, 10)) {
-
- if (!ids.has(meta.id)) {
-
- ids.add(meta.id);
- metas.push(meta);
-
- }
-
- }
-
- } catch (error) {
-
- console.error(
- `Erro no streamer ${streamer}:`,
- error.message
- );
-
- }
-
- }
-
- return {
- metas: metas.slice(0, 50)
- };
+  return {
+    metas
+  };
 }
 
 /*
@@ -828,14 +755,7 @@ const movieCatalogs = [
   name: "🔥 Filmes Populares",
   description:
    "Filmes mais populares"
-}, 
-
-{
- id: "featured",
- name: "⭐ Filmes em Destaque",
- description:
- "Seleção de filmes em destaque"
-},
+},  
 {
     id: "netflix",
     name: "🎬 Netflix Filmes",
@@ -875,12 +795,6 @@ const seriesCatalogs = [
   description:
    "Séries mais populares"
 }, 
-{
- id: "featured",
- name: "⭐ Séries em Destaque",
- description:
- "Seleção de séries em destaque"
-},
 {
     id: "netflix",
     name: "📺 Netflix Séries",
@@ -2260,32 +2174,26 @@ app.get(
         });
       }
 
-if (id === "featured") {
-
- return res.json(
- await getFeaturedCatalog(
- "movie"
- )
- );
-
-}
+      
 
 if (id === "movie-top") {
 
- return res.json(
+ const data =
  await getCinemetaCatalog(
  "movie"
- )
  );
+
+ return res.json(data);
 
 }
 
-return res.json(
+const data =
  await getJustWatchCatalog(
  "movie",
  id
- )
-);
+ );
+
+return res.json(data);
 
     } catch (error) {
 
@@ -2324,33 +2232,24 @@ app.get(
           metas: []
         });
       }
-
-if (id === "featured") {
-
- return res.json(
- await getFeaturedCatalog(
- "series"
- )
- );
-
-}
-
 if (id === "series-top") {
 
- return res.json(
+ const data =
  await getCinemetaCatalog(
  "series"
- )
  );
+
+ return res.json(data);
 
 }
 
-return res.json(
+const data =
  await getJustWatchCatalog(
  "series",
  id
- )
-);
+ );
+
+return res.json(data);
     } catch (error) {
 
       console.error(
