@@ -721,20 +721,14 @@ async function getJustWatchCatalog(
     if (!imdbId) {
       continue;
     }
-console.log("STREAMER CONTENT:", JSON.stringify(content, null, 2));
-   metas.push({
+    
+metas.push({
   id: imdbId,
   type,
   name:
     content.title || "Título",
   poster:
-    content.posterUrl
-      ? (
-          content.posterUrl.startsWith("/")
-            ? `https://v3-cinemeta.strem.io${content.posterUrl}`
-            : content.posterUrl
-        )
-      : ""
+    content.posterUrl || ""
 });
   }
   
