@@ -725,18 +725,28 @@ async function getJustWatchCatalog(
       continue;
     }
     
+const cinemetaData =
+  await getCinemetaMeta(
+    type,
+    imdbId
+  );
+
+const cinemetaMeta =
+  cinemetaData?.meta || {};
+
 metas.push({
   id: imdbId,
+
   type,
+
   name:
-    content.title || "Título",
+    cinemetaMeta.name ||
+    content.title ||
+    "Título",
 
   poster:
-    content.posterUrl
-      ? content.posterUrl
-          .replace("{profile}", "medium")
-          .replace("{format}", "webp")
-      : ""
+    cinemetaMeta.poster ||
+    ""
 });
 }
   
