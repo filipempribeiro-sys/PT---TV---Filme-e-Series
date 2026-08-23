@@ -728,9 +728,14 @@ async function getJustWatchCatalog(
       name:
         content.title || "Título",
       poster:
-        content.posterUrl || `${CINEMETA_BASE}/meta/${type}/${encodeURIComponent(imdbId)}.json`
-    });
-  }
+        content.posterUrl
+      ? (
+          content.posterUrl.startsWith("/")
+            ? `https://v3-cinemeta.strem.io${content.posterUrl}`
+            : content.posterUrl
+        )
+      : ""
+});
 
   return {
     metas
