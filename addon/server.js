@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.4.6";
+const VERSION = "1.4.7;
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -738,9 +738,54 @@ metas.push({
 });
 }
   
-  return {
-    metas
-  };
+async function getFeaturedCatalog(type) {
+
+ const streamers = [
+ "netflix",
+ "hbomax",
+ "prime-video",
+ "disney-plus",
+ "apple-tv-plus"
+ ];
+
+ const metas = [];
+ const ids = new Set();
+
+ for (const streamer of streamers) {
+
+ try {
+
+ const data =
+ await getJustWatchCatalog(
+ type,
+ streamer
+ );
+
+ for (const meta of data.metas.slice(0, 10)) {
+
+ if (!ids.has(meta.id)) {
+
+ ids.add(meta.id);
+ metas.push(meta);
+
+ }
+
+ }
+
+ } catch (error) {
+
+ console.error(
+ `Erro no streamer ${streamer}:`,
+ error.message
+ );
+
+ }
+
+ }
+
+ return {
+ metas: metas.slice(0, 50)
+ };
 }
 
 /*
@@ -755,7 +800,14 @@ const movieCatalogs = [
   name: "🔥 Filmes Populares",
   description:
    "Filmes mais populares"
-},  
+}, 
+
+{
+ id: "featured",
+ name: "⭐ Filmes em Destaque",
+ description:
+ "Seleção de filmes em destaque"
+},
 {
     id: "netflix",
     name: "🎬 Netflix Filmes",
@@ -795,6 +847,12 @@ const seriesCatalogs = [
   description:
    "Séries mais populares"
 }, 
+{
+ id: "featured",
+ name: "⭐ Séries em Destaque",
+ description:
+ "Seleção de séries em destaque"
+},
 {
     id: "netflix",
     name: "📺 Netflix Séries",
@@ -2174,18 +2232,34 @@ app.get(
         });
       }
 
-      
+
+if (id === "featured") {
+
+ return res.json(
+ await getFeaturedCatalog(
+ "movie"
+ )
+ );
+
+}
 
 if (id === "movie-top") {
 
- const data =
+ return res.json(
  await getCinemetaCatalog(
  "movie"
+ )
  );
 
- return res.json(data);
-
 }
+
+const data =
+ await getJustWatchCatalog(
+ "movie",
+ id
+ );
+
+return res.json(data);
 
 const data =
  await getJustWatchCatalog(
@@ -2232,14 +2306,24 @@ app.get(
           metas: []
         });
       }
-if (id === "series-top") {
 
- const data =
- await getCinemetaCatalog(
+if (id === "featured") {
+
+ return res.json(
+ await getFeaturedCatalog(
  "series"
+ )
  );
 
- return res.json(data);
+}
+
+if (id === "series-top") {
+
+ return res.json(
+ await getCinemetaCatalog(
+ "series"
+ )
+ );
 
 }
 
