@@ -736,6 +736,8 @@ async function getJustWatchCatalog(
         )
       : ""
 });
+  }
+  
   return {
     metas
   };
