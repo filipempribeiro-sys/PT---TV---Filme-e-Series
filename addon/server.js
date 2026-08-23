@@ -1770,11 +1770,11 @@ app.get(
 
                 poster:
                   channel.logo ||
-                  "",
+                  PT_HUB_LOGO,
 
                 logo:
                   channel.logo ||
-                  "",
+                  PT_HUB_LOGO,
 
                 description:
                   channel.group
