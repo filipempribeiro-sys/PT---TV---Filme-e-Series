@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.4.5";
+const VERSION = "1.4.7";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -757,38 +757,32 @@ const movieCatalogs = [
    "Filmes mais populares"
 },  
 {
-    id: "filmes",
-    name: "Filmes",
-    description:
-      "Filmes populares"
-  },
-  {
     id: "netflix",
-    name: "Netflix",
+    name: "🎬 Netflix Filmes",
     description:
       "Filmes Netflix"
   },
   {
     id: "hbomax",
-    name: "HBO Max",
+    name: "🎬 HBO Max Filmes",
     description:
       "Filmes HBO Max"
   },
   {
     id: "prime-video",
-    name: "Prime Video",
+    name: "🎬 Prime Video Filmes",
     description:
       "Filmes Prime Video"
   },
   {
     id: "disney-plus",
-    name: "Disney+",
+    name:"🎬 Disney+ Filmes",
     description:
       "Filmes Disney+"
   },
   {
     id: "apple-tv-plus",
-    name: "Apple TV+",
+    name: "🎬 Apple TV+ Filmes",
     description:
       "Filmes Apple TV+"
   }
@@ -800,40 +794,34 @@ const seriesCatalogs = [
   name: "🔥 Séries Populares",
   description:
    "Séries mais populares"
-},  
+}, 
 {
-    id: "series",
-    name: "Séries",
-    description:
-      "Séries populares"
-  },
-  {
     id: "netflix",
-    name: "Netflix",
+    name: "📺 Netflix Séries",
     description:
       "Séries Netflix"
   },
   {
     id: "hbomax",
-    name: "HBO Max",
+    name: "📺 HBO Max Séries",
     description:
       "Séries HBO Max"
   },
   {
     id: "prime-video",
-    name: "Prime Video",
+    name: "📺 Prime Video Séries",
     description:
       "Séries Prime Video"
   },
   {
     id: "disney-plus",
-    name: "Disney+",
+    name: "📺 Disney+ Séries",
     description:
       "Séries Disney+"
   },
   {
     id: "apple-tv-plus",
-    name: "Apple TV+",
+    name: "📺 Apple TV+ Séries",
     description:
       "Séries Apple TV+"
   }
@@ -1831,36 +1819,38 @@ function buildManifest(config) {
       "series"
     ],
 
-    catalogs: [
-      
-  {
-        type: "channel",
-        id: "pt-services",
-        name: "TV Portugal"
-      },
+    
 
-      {
-        type: "channel",
-        id: "m3u",
-        name: "Minha IPTV"
-      },
+catalogs: [
 
-      ...movieCatalogs.map(
-        (catalog) => ({
-          type: "movie",
-          id: catalog.id,
-          name: catalog.name
-        })
-      ),
+ ...movieCatalogs.map(
+ (catalog) => ({
+ type: "movie",
+ id: catalog.id,
+ name: catalog.name
+ })
+ ),
 
-      ...seriesCatalogs.map(
-        (catalog) => ({
-          type: "series",
-          id: catalog.id,
-          name: catalog.name
-        })
-      )
-    ],
+ ...seriesCatalogs.map(
+ (catalog) => ({
+ type: "series",
+ id: catalog.id,
+ name: catalog.name
+ })
+ ),
+
+ {
+ type: "channel",
+ id: "m3u",
+ name: "📡 Minha IPTV"
+ },
+
+ {
+ type: "channel",
+ id: "pt-services",
+ name: "📺 Operadores"
+ }
+],
 
     addonCatalogs: [
       {
