@@ -529,61 +529,83 @@ async function justWatchRequest(query, variables) {
   return data.data;
 }
 
+let justWatchPackagesCache = null;
+let justWatchPackagesCacheTime = 0;
+
 
 async function getJustWatchPackages() {
-  const query = `
-    query Packages(
-      $country: Country!
-      $platform: Platform!
-    ) {
-      packages(
-        country: $country
-        platform: $platform
-      ) {
-        id
-        clearName
-        shortName
-      }
-    }
-  `;
 
-  const response = await fetch(JUSTWATCH_URL, {
-    method: "POST",
+ const now = Date.now();
 
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": `PT-HUB/${VERSION}`
-    },
+ if (
+ justWatchPackagesCache &&
+ (now - justWatchPackagesCacheTime) <
+ (60 * 60 * 1000)
+ ) {
 
-    body: JSON.stringify({
-      operationName: "Packages",
-      variables: {
-        country: JUSTWATCH_COUNTRY,
-        platform: "WEB"
-      },
-      query
-    })
-  });
+ return justWatchPackagesCache;
 
-  if (!response.ok) {
-    throw new Error(
-      `JustWatch Packages respondeu HTTP ${response.status}`
-    );
-  }
+ }
 
-  const data = await response.json();
+ const query = `
+ query Packages(
+ $country: Country!
+ $platform: Platform!
+ ) {
+ packages(
+ country: $country
+ platform: $platform
+ ) {
+ id
+ clearName
+ shortName
+ }
+ }
+ `;
 
-  if (data.errors) {
-    throw new Error(
-      data.errors
-        .map((error) => error.message)
-        .join("; ")
-    );
-  }
+ const response = await fetch(JUSTWATCH_URL, {
+ method: "POST",
 
-  return data.data?.packages || [];
+ headers: {
+ "Content-Type": "application/json",
+ "User-Agent": `PT-HUB/${VERSION}`
+ },
+
+ body: JSON.stringify({
+ operationName: "Packages",
+ variables: {
+ country: JUSTWATCH_COUNTRY,
+ platform: "WEB"
+ },
+ query
+ })
+ });
+
+ if (!response.ok) {
+ throw new Error(
+ `JustWatch Packages respondeu HTTP ${response.status}`
+ );
+ }
+
+ const data = await response.json();
+
+ if (data.errors) {
+ throw new Error(
+ data.errors
+ .map((error) => error.message)
+ .join("; ")
+ );
+ }
+
+ justWatchPackagesCache =
+ data.data?.packages || [];
+
+ justWatchPackagesCacheTime =
+ Date.now();
+
+ return justWatchPackagesCache;
+
 }
-
 
 async function getStreamerPackage(streamerId) {
   const packages =
@@ -743,7 +765,7 @@ return {
 };
 
 }
- 
+  
 async function getFeaturedCatalog(type) {
 
  const streamers = [
