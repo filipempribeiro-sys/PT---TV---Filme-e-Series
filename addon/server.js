@@ -728,8 +728,11 @@ metas.push({
   name:
     content.title || "Título",
   poster:
-    content.posterUrl || ""
-});
+    content.posterUrl
+    ? `${STREAMER_CATALOG_BASE}${content.posterUrl
+        .replace("{profile}", "medium")
+        .replace("{format}", "webp")}`
+    : ""
   }
   
   return {
