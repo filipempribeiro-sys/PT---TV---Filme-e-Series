@@ -1,6 +1,6 @@
 {
   "id": "pt.filipe.nuvio.tvhub",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "name": "PT•HUB",
   "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
   "logo": "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png",
@@ -33,8 +33,9 @@
 
     {
       "type": "movie",
-      "id": "filmes",
-      "name": "Filmes"
+      "id": "top",
+      "name": "
+🔥 Filmes Populares"
     },
     {
       "type": "movie",
@@ -64,8 +65,9 @@
 
     {
       "type": "series",
-      "id": "series",
-      "name": "Séries"
+      "id": "top",
+      "name": "
+🔥 Séries Populares"
     },
     {
       "type": "series",
