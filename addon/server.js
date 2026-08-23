@@ -731,22 +731,13 @@ const cinemetaData =
     imdbId
   );
 
-const cinemetaMeta =
-  cinemetaData?.meta || {};
-
 metas.push({
   id: imdbId,
-
   type,
-
-  name:
-    cinemetaMeta.name ||
-    content.title ||
-    "Título",
+  name: content.title || "Título",
 
   poster:
-    cinemetaMeta.poster ||
-    ""
+    `https://images.metahub.space/poster/medium/${imdbId}/img`
 });
 }
   
