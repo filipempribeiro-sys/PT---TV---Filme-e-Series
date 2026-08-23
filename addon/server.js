@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.4.4";
+const VERSION = "1.4.5";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -488,7 +488,7 @@ const STREAMER_CATALOG_BASE =
 
 const streamerNames = {
   netflix: "Netflix",
-  max: "Max",
+  max: "HBO Max",
   "prime-video": "Amazon Prime Video",
   "disney-plus": "Disney Plus",
   "apple-tv-plus": "Apple TV Plus"
@@ -725,28 +725,18 @@ async function getJustWatchCatalog(
       continue;
     }
     
-const cinemetaData =
-  await getCinemetaMeta(
-    type,
-    imdbId
-  );
-
 metas.push({
   id: imdbId,
   type,
-  name: content.title || "Título",
+  name:
+    content.title || "Título",
 
   poster:
-    imdbId
-      ? `https://images.metahub.space/poster/medium/${imdbId}/img`
-      : content.posterUrl
-          ?.replace("{profile}", "s718")
-          ?.replace("{format}", "jpg"),
-
-  background:
-    imdbId
-      ? `https://images.metahub.space/background/medium/${imdbId}/img`
-      : undefined
+    content.posterUrl
+      ? content.posterUrl
+          .replace("{profile}", "medium")
+          .replace("{format}", "webp")
+      : ""
 });
 }
   
@@ -762,7 +752,13 @@ STREAMER CATALOGS
 */
 
 const movieCatalogs = [
-  {
+{
+id: "top",
+name: "🔥 Populares",
+description:
+"Filmes mais populares"
+},
+{
     id: "filmes",
     name: "Filmes",
     description:
@@ -775,10 +771,10 @@ const movieCatalogs = [
       "Filmes Netflix"
   },
   {
-    id: "max",
-    name: "Max",
+    id: "hbomax",
+    name: "HBO Max",
     description:
-      "Filmes Max"
+      "Filmes HBO Max"
   },
   {
     id: "prime-video",
@@ -801,7 +797,13 @@ const movieCatalogs = [
 ];
 
 const seriesCatalogs = [
-  {
+{
+id: "top",
+name: "🔥 Populares",
+description:
+"Séries mais populares"
+},
+{
     id: "series",
     name: "Séries",
     description:
@@ -814,10 +816,10 @@ const seriesCatalogs = [
       "Séries Netflix"
   },
   {
-    id: "max",
-    name: "Max",
+    id: "hbomax",
+    name: "HBO Max",
     description:
-      "Séries Max"
+      "Séries HBO Max"
   },
   {
     id: "prime-video",
