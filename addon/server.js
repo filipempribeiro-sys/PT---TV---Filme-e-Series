@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.4.5";
+const VERSION = "1.4.4";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -752,13 +752,7 @@ STREAMER CATALOGS
 */
 
 const movieCatalogs = [
-{
-id: "top",
-name: "🔥 Populares",
-description:
-"Filmes mais populares"
-},
-{
+  {
     id: "filmes",
     name: "Filmes",
     description:
@@ -797,13 +791,7 @@ description:
 ];
 
 const seriesCatalogs = [
-{
-id: "top",
-name: "🔥 Populares",
-description:
-"Séries mais populares"
-},
-{
+  {
     id: "series",
     name: "Séries",
     description:
