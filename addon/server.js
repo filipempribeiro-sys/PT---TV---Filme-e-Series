@@ -473,6 +473,270 @@ async function getCinemetaMeta(type, id) {
   );
 }
 
+/* =========================================================
+   JUSTWATCH STREAMER CATALOGS - 1.4.3
+   ========================================================= */
+
+const JUSTWATCH_URL =
+  "https://apis.justwatch.com/graphql";
+
+const JUSTWATCH_COUNTRY = "PT";
+const JUSTWATCH_LANGUAGE = "pt";
+
+const streamerNames = {
+  netflix: "Netflix",
+  max: "Max",
+  "prime-video": "Amazon Prime Video",
+  "disney-plus": "Disney Plus",
+  "apple-tv-plus": "Apple TV Plus"
+};
+
+async function justWatchRequest(query, variables) {
+  const response = await fetch(JUSTWATCH_URL, {
+    method: "POST",
+
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": `PT-HUB/${VERSION}`
+    },
+
+    body: JSON.stringify({
+      operationName: "GetPopularTitles",
+      variables,
+      query
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `JustWatch respondeu HTTP ${response.status}`
+    );
+  }
+
+  const data = await response.json();
+
+  if (data.errors) {
+    throw new Error(
+      data.errors
+        .map((error) => error.message)
+        .join("; ")
+    );
+  }
+
+  return data.data;
+}
+
+
+async function getJustWatchPackages() {
+  const query = `
+    query Packages(
+      $country: Country!
+      $platform: Platform!
+    ) {
+      packages(
+        country: $country
+        platform: $platform
+      ) {
+        id
+        clearName
+        shortName
+      }
+    }
+  `;
+
+  const response = await fetch(JUSTWATCH_URL, {
+    method: "POST",
+
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": `PT-HUB/${VERSION}`
+    },
+
+    body: JSON.stringify({
+      operationName: "Packages",
+      variables: {
+        country: JUSTWATCH_COUNTRY,
+        platform: "WEB"
+      },
+      query
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `JustWatch Packages respondeu HTTP ${response.status}`
+    );
+  }
+
+  const data = await response.json();
+
+  if (data.errors) {
+    throw new Error(
+      data.errors
+        .map((error) => error.message)
+        .join("; ")
+    );
+  }
+
+  return data.data?.packages || [];
+}
+
+
+async function getStreamerPackage(streamerId) {
+  const packages =
+    await getJustWatchPackages();
+
+  const target =
+    streamerNames[streamerId];
+
+  if (!target) {
+    return null;
+  }
+
+  const normalizedTarget =
+    target
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+  return (
+    packages.find((item) => {
+      const name =
+        String(item.clearName || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+
+      return (
+        name === normalizedTarget ||
+        name.includes(normalizedTarget) ||
+        normalizedTarget.includes(name)
+      );
+    }) || null
+  );
+}
+
+
+async function getJustWatchCatalog(
+  type,
+  streamerId
+) {
+  const packageInfo =
+    await getStreamerPackage(streamerId);
+
+  if (!packageInfo?.shortName) {
+    console.error(
+      `Streamer não encontrado no JustWatch: ${streamerId}`
+    );
+
+    return {
+      metas: []
+    };
+  }
+
+  const objectType =
+    type === "movie"
+      ? "MOVIE"
+      : "SHOW";
+
+  const query = `
+    query GetPopularTitles(
+      $country: Country!
+      $filter: TitleFilter
+      $first: Int!
+      $sortBy: PopularTitlesSorting!
+    ) {
+      popularTitles(
+        country: $country
+        filter: $filter
+        first: $first
+        sortBy: $sortBy
+      ) {
+        edges {
+          node {
+            objectType
+
+            content(
+              country: $country
+              language: pt
+            ) {
+              title
+
+              posterUrl
+
+              externalIds {
+                imdbId
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    country: JUSTWATCH_COUNTRY,
+
+    first: 100,
+
+    sortBy: "POPULAR",
+
+    filter: {
+      packages: [
+        packageInfo.shortName
+      ],
+
+      objectTypes: [
+        objectType
+      ],
+
+      monetizationTypes: [
+        "FLATRATE"
+      ]
+    }
+  };
+
+  const data =
+    await justWatchRequest(
+      query,
+      variables
+    );
+
+  const edges =
+    data?.popularTitles?.edges || [];
+
+  const metas = [];
+
+  for (const edge of edges) {
+    const node = edge?.node;
+
+    if (!node) {
+      continue;
+    }
+
+    const content =
+      node.content;
+
+    const imdbId =
+      content?.externalIds?.imdbId;
+
+    if (!imdbId) {
+      continue;
+    }
+
+    metas.push({
+      id: imdbId,
+      type,
+      name:
+        content.title || "Título",
+      poster:
+        content.posterUrl || ""
+    });
+  }
+
+  return {
+    metas
+  };
+}
+
 /*
 =========================================================
 STREAMER CATALOGS
@@ -1902,12 +2166,14 @@ app.get(
         });
       }
 
-      const data =
-        await getCinemetaCatalog(
-          "movie"
-        );
+      
+const data =
+  await getJustWatchCatalog(
+    "movie",
+    id
+  );
 
-      return res.json(data);
+return res.json(data);
 
     } catch (error) {
 
@@ -1947,13 +2213,14 @@ app.get(
         });
       }
 
-      const data =
-        await getCinemetaCatalog(
-          "series"
-        );
+      
+const data =
+  await getJustWatchCatalog(
+    "series",
+    id
+  );
 
-      return res.json(data);
-
+return res.json(data);
     } catch (error) {
 
       console.error(
