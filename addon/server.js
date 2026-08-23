@@ -733,7 +733,8 @@ metas.push({
         .replace("{profile}", "medium")
         .replace("{format}", "webp")}`
     : ""
-  }
+  }},
+}
   
   return {
     metas
