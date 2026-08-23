@@ -730,11 +730,12 @@ metas.push({
   type,
   name:
     content.title || "Título",
+
   poster:
     content.posterUrl
-      ? `${STREAMER_CATALOG_BASE}${content.posterUrl
+      ? content.posterUrl
           .replace("{profile}", "medium")
-          .replace("{format}", "webp")}`
+          .replace("{format}", "webp")
       : ""
 });
 }
