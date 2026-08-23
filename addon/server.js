@@ -483,6 +483,9 @@ const JUSTWATCH_URL =
 const JUSTWATCH_COUNTRY = "PT";
 const JUSTWATCH_LANGUAGE = "pt";
 
+const STREAMER_CATALOG_BASE =
+  "https://v3-cinemeta.strem.io/catalog";
+
 const streamerNames = {
   netflix: "Netflix",
   max: "Max",
