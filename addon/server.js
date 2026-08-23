@@ -737,7 +737,13 @@ metas.push({
     `https://images.metahub.space/background/medium/${imdbId}/img`
 });
 }
-  
+
+return {
+ metas
+};
+
+}
+ 
 async function getFeaturedCatalog(type) {
 
  const streamers = [
