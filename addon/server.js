@@ -797,7 +797,7 @@ const movieCatalogs = [
 const seriesCatalogs = [
  {
   id: "top",
-  name: "🔥 Filmes Populares",
+  name: "🔥 Séries Populares",
   description:
    "Séries mais populares"
 },  
