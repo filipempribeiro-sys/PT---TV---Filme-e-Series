@@ -1,6 +1,6 @@
 {
   "id": "pt.filipe.nuvio.tvhub",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "name": "PT•HUB",
   "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
   "logo": "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png",
@@ -22,22 +22,31 @@
   "catalogs": [
     {
       "type": "movie",
-      "id": "movie-top",
+      "id": "top",
       "name": "🔥 Filmes Populares"
     },
     {
-      "type": "channel",
-      "id": "pt-services",
-      "name": "TV Portugal"
+      "type": "series",
+      "id": "top",
+      "name": "🔥 Séries Populares"
+   },
+   {
+     "type": "movie",
+     "id": "featured",
+     "name": "⭐ Filmes em Destaque"
     },
     {
-      "type": "channel",
-      "id": "m3u",
-      "name": "Minha IPTV"
+     "type": "series",
+     "id": "featured",
+     "name": "⭐ Séries em Destaque"
     },
-
     {
       "type": "movie",
+      "id": "netflix",
+      "name": "Netflix"
+    },
+    {
+      "type": "series",
       "id": "netflix",
       "name": "Netflix"
     },
@@ -47,12 +56,27 @@
       "name": "HBO Max"
     },
     {
+      "type": "series",
+      "id": "hbomax",
+      "name": "HBO Max"
+    },
+    {
       "type": "movie",
       "id": "prime-video",
       "name": "Prime Video"
     },
     {
+      "type": "series",
+      "id": "prime-video",
+      "name": "Prime Video"
+    },
+    {
       "type": "movie",
+      "id": "disney-plus",
+      "name": "Disney+"
+    },
+    {
+      "type": "series",
       "id": "disney-plus",
       "name": "Disney+"
     },
@@ -60,39 +84,23 @@
       "type": "movie",
       "id": "apple-tv-plus",
       "name": "Apple TV+"
-    },
-
-    {
-      "type": "series",
-      "id": "series-top",
-      "name": "🔥 Séries Populares"
-    },
-    {
-      "type": "series",
-      "id": "netflix",
-      "name": "Netflix"
-    },
-    {
-      "type": "series",
-      "id": "hbomax",
-      "name": "HBO Max"
-    },
-    {
-      "type": "series",
-      "id": "prime-video",
-      "name": "Prime Video"
-    },
-    {
-      "type": "series",
-      "id": "disney-plus",
-      "name": "Disney+"
     },
     {
       "type": "series",
       "id": "apple-tv-plus",
       "name": "Apple TV+"
     }
-  ],
+  ],  
+  {
+      "type": "channel",
+      "id": "m3u",
+      "name": "Minha IPTV"
+    },
+    {
+      "type": "channel",
+      "id": "pt-services",
+      "name": "TV Portugal"
+    },
 
   "addonCatalogs": [
     {
