@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.4.4";
+const VERSION = "1.4.5";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -750,7 +750,13 @@ STREAMER CATALOGS
 */
 
 const movieCatalogs = [
-  {
+{
+  id: "top",
+  name: "🔥 Filmes Populares",
+  description:
+   "Filmes mais populares"
+},  
+{
     id: "filmes",
     name: "Filmes",
     description:
@@ -789,7 +795,13 @@ const movieCatalogs = [
 ];
 
 const seriesCatalogs = [
-  {
+ {
+  id: "top",
+  name: "🔥 Filmes Populares",
+  description:
+   "Séries mais populares"
+},  
+{
     id: "series",
     name: "Séries",
     description:
@@ -2173,11 +2185,23 @@ app.get(
       }
 
       
+
+if (id === "top") {
+
+ const data =
+ await getCinemetaCatalog(
+ "movie"
+ );
+
+ return res.json(data);
+
+}
+
 const data =
-  await getJustWatchCatalog(
-    "movie",
-    id
-  );
+ await getJustWatchCatalog(
+ "movie",
+ id
+ );
 
 return res.json(data);
 
@@ -2220,13 +2244,15 @@ app.get(
       }
 
       
+
 const data =
-  await getJustWatchCatalog(
-    "series",
-    id
-  );
+ await getJustWatchCatalog(
+ "series",
+ id
+ );
 
 return res.json(data);
+
     } catch (error) {
 
       console.error(
