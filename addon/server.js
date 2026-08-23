@@ -1716,7 +1716,7 @@ app.get(
                   "Serviço TV",
 
                 poster:
-                  service.logo ||
+                  service.logo ||""
                   service.poster ||
                   PT_HUB_LOGO,
 
@@ -1770,11 +1770,11 @@ app.get(
 
                 poster:
                   channel.logo ||
-                  PT_HUB_LOGO,
+                  "",
 
                 logo:
                   channel.logo ||
-                  PT_HUB_LOGO,
+                  "",
 
                 description:
                   channel.group
