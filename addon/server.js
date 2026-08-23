@@ -1877,6 +1877,98 @@ app.get(
   }
 );
 
+/*
+   CATALOG - PLATAFORMAS
+   ========================================================= */
+
+app.get(
+  "/:config/catalog/movie/:id.json",
+  async (req, res) => {
+
+    try {
+
+      const id =
+        req.params.id;
+
+      const validCatalog =
+        movieCatalogs.some(
+          (catalog) =>
+            catalog.id === id
+        );
+
+      if (!validCatalog) {
+        return res.json({
+          metas: []
+        });
+      }
+
+      const data =
+        await getCinemetaCatalog(
+          "movie"
+        );
+
+      return res.json(data);
+
+    } catch (error) {
+
+      console.error(
+        "Erro no catálogo de filmes:",
+        error.message
+      );
+
+      return res.json({
+        metas: []
+      });
+
+    }
+
+  }
+);
+
+
+app.get(
+  "/:config/catalog/series/:id.json",
+  async (req, res) => {
+
+    try {
+
+      const id =
+        req.params.id;
+
+      const validCatalog =
+        seriesCatalogs.some(
+          (catalog) =>
+            catalog.id === id
+        );
+
+      if (!validCatalog) {
+        return res.json({
+          metas: []
+        });
+      }
+
+      const data =
+        await getCinemetaCatalog(
+          "series"
+        );
+
+      return res.json(data);
+
+    } catch (error) {
+
+      console.error(
+        "Erro no catálogo de séries:",
+        error.message
+      );
+
+      return res.json({
+        metas: []
+      });
+
+    }
+
+  }
+);
 
 /* =========================================================
    GENERIC CATALOG
