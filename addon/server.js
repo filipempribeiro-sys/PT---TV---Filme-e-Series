@@ -2232,7 +2232,6 @@ app.get(
         });
       }
 
-
 if (id === "featured") {
 
  return res.json(
@@ -2253,21 +2252,12 @@ if (id === "movie-top") {
 
 }
 
-const data =
+return res.json(
  await getJustWatchCatalog(
  "movie",
  id
- );
-
-return res.json(data);
-
-const data =
- await getJustWatchCatalog(
- "movie",
- id
- );
-
-return res.json(data);
+ )
+);
 
     } catch (error) {
 
@@ -2327,13 +2317,12 @@ if (id === "series-top") {
 
 }
 
-const data =
+return res.json(
  await getJustWatchCatalog(
  "series",
  id
- );
-
-return res.json(data);
+ )
+);
     } catch (error) {
 
       console.error(
