@@ -1822,7 +1822,7 @@ app.get(
 
       const data =
         await getCinemetaCatalog(
-          "netflix"
+          "movie"
         );
 
       return res.json(data);
