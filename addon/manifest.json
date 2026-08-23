@@ -21,6 +21,11 @@
 
   "catalogs": [
     {
+      "type": "movie",
+      "id": "movie-top",
+      "name": "🔥 Filmes Populares"
+    },
+    {
       "type": "channel",
       "id": "pt-services",
       "name": "TV Portugal"
@@ -31,11 +36,6 @@
       "name": "Minha IPTV"
     },
 
-    {
-      "type": "movie",
-      "id": "movie-top",
-      "name": "🔥 Filmes Populares"
-    },
     {
       "type": "movie",
       "id": "netflix",
