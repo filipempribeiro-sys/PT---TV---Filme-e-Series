@@ -728,15 +728,13 @@ async function getJustWatchCatalog(
 metas.push({
   id: imdbId,
   type,
-  name:
-    content.title || "Título",
+  name: content.title || "Título",
 
   poster:
-    content.posterUrl
-      ? content.posterUrl
-          .replace("{profile}", "medium")
-          .replace("{format}", "webp")
-      : ""
+    `https://images.metahub.space/poster/medium/${imdbId}/img`,
+
+  background:
+    `https://images.metahub.space/background/medium/${imdbId}/img`
 });
 }
   
