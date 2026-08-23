@@ -488,7 +488,7 @@ const STREAMER_CATALOG_BASE =
 
 const streamerNames = {
   netflix: "Netflix",
-  max: "HBO Max",
+  hbomax: "HBO Max",
   "prime-video": "Amazon Prime Video",
   "disney-plus": "Disney Plus",
   "apple-tv-plus": "Apple TV Plus"
