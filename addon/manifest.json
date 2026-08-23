@@ -21,32 +21,24 @@
 
   "catalogs": [
     {
+      "type": "channel",
+      "id": "pt-services",
+      "name": "TV Portugal"
+    },
+    {
+      "type": "channel",
+      "id": "m3u",
+      "name": "Minha IPTV"
+    },
+
+    {
       "type": "movie",
       "id": "top",
-      "name": "🔥 Filmes Populares"
-    },
-    {
-      "type": "series",
-      "id": "top",
-      "name": "🔥 Séries Populares"
-   },
-   {
-     "type": "movie",
-     "id": "featured",
-     "name": "⭐ Filmes em Destaque"
-    },
-    {
-     "type": "series",
-     "id": "featured",
-     "name": "⭐ Séries em Destaque"
+      "name": "
+🔥 Filmes Populares"
     },
     {
       "type": "movie",
-      "id": "netflix",
-      "name": "Netflix"
-    },
-    {
-      "type": "series",
       "id": "netflix",
       "name": "Netflix"
     },
@@ -56,27 +48,12 @@
       "name": "HBO Max"
     },
     {
-      "type": "series",
-      "id": "hbomax",
-      "name": "HBO Max"
-    },
-    {
       "type": "movie",
       "id": "prime-video",
       "name": "Prime Video"
     },
     {
-      "type": "series",
-      "id": "prime-video",
-      "name": "Prime Video"
-    },
-    {
       "type": "movie",
-      "id": "disney-plus",
-      "name": "Disney+"
-    },
-    {
-      "type": "series",
       "id": "disney-plus",
       "name": "Disney+"
     },
@@ -84,23 +61,40 @@
       "type": "movie",
       "id": "apple-tv-plus",
       "name": "Apple TV+"
+    },
+
+    {
+      "type": "series",
+      "id": "top",
+      "name": "
+🔥 Séries Populares"
+    },
+    {
+      "type": "series",
+      "id": "netflix",
+      "name": "Netflix"
+    },
+    {
+      "type": "series",
+      "id": "hbomax",
+      "name": "HBO Max"
+    },
+    {
+      "type": "series",
+      "id": "prime-video",
+      "name": "Prime Video"
+    },
+    {
+      "type": "series",
+      "id": "disney-plus",
+      "name": "Disney+"
     },
     {
       "type": "series",
       "id": "apple-tv-plus",
       "name": "Apple TV+"
     }
-  ],  
-  {
-      "type": "channel",
-      "id": "m3u",
-      "name": "Minha IPTV"
-    },
-    {
-      "type": "channel",
-      "id": "pt-services",
-      "name": "TV Portugal"
-    },
+  ],
 
   "addonCatalogs": [
     {
