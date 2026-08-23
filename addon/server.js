@@ -728,7 +728,7 @@ async function getJustWatchCatalog(
       name:
         content.title || "Título",
       poster:
-        content.posterUrl || ""
+        content.posterUrl || `${CINEMETA_BASE}/meta/${type}/${encodeURIComponent(imdbId)}.json`
     });
   }
 
