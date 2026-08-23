@@ -33,8 +33,9 @@
 
     {
       "type": "movie",
-      "id": "filmes",
-      "name": "Filmes"
+      "id": "top",
+      "name": "
+🔥 Filmes Populares"
     },
     {
       "type": "movie",
@@ -64,8 +65,9 @@
 
     {
       "type": "series",
-      "id": "series",
-      "name": "Séries"
+      "id": "top",
+      "name": "
+🔥 Séries Populares"
     },
     {
       "type": "series",
@@ -74,8 +76,8 @@
     },
     {
       "type": "series",
-      "id": "max",
-      "name": "Max"
+      "id": "hbomax",
+      "name": "HBO Max"
     },
     {
       "type": "series",
