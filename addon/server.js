@@ -722,13 +722,13 @@ async function getJustWatchCatalog(
       continue;
     }
 
-    metas.push({
-      id: imdbId,
-      type,
-      name:
-        content.title || "Título",
-      poster:
-        content.posterUrl
+   metas.push({
+  id: imdbId,
+  type,
+  name:
+    content.title || "Título",
+  poster:
+    content.posterUrl
       ? (
           content.posterUrl.startsWith("/")
             ? `https://v3-cinemeta.strem.io${content.posterUrl}`
@@ -736,7 +736,6 @@ async function getJustWatchCatalog(
         )
       : ""
 });
-
   return {
     metas
   };
