@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.3.6";
+const VERSION = "1.3.8";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -37,7 +37,7 @@ app.use((req, res, next) => {
 });
 
 
-/* =========================================================
+/*
    HELPERS
    ========================================================= */
 
@@ -70,7 +70,7 @@ const manifestTemplate = loadJSON(
 );
 
 
-/* =========================================================
+/*
    BASE64URL CONFIG
    ========================================================= */
 
@@ -92,13 +92,16 @@ function decodeConfig(value) {
       Buffer.from(value, "base64url").toString("utf8")
     );
   } catch (error) {
-    console.error("Erro a descodificar configuração:", error.message);
+    console.error(
+      "Erro a descodificar configuração:",
+      error.message
+    );
     return null;
   }
 }
 
 
-/* =========================================================
+/*
    GENERAL HELPERS
    ========================================================= */
 
@@ -127,7 +130,9 @@ function escapeHtml(value) {
 
 
 function normalizeUrl(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
+  return String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 
@@ -140,7 +145,7 @@ function getConfigHash(config) {
 }
 
 
-/* =========================================================
+/*
    M3U
    ========================================================= */
 
@@ -243,7 +248,7 @@ function parseM3U(content) {
 }
 
 
-/* =========================================================
+/*
    M3U FETCH
    ========================================================= */
 
@@ -274,7 +279,7 @@ async function fetchM3U(url) {
 }
 
 
-/* =========================================================
+/*
    XTREAM
    ========================================================= */
 
@@ -359,7 +364,7 @@ async function getXtreamChannels(config) {
 }
 
 
-/* =========================================================
+/*
    IPTV CHANNELS
    ========================================================= */
 
@@ -380,7 +385,7 @@ async function getIPTVChannels(config) {
 }
 
 
-/* =========================================================
+/*
    CONFIG VALIDATION
    ========================================================= */
 
@@ -424,7 +429,7 @@ function validateConfig(config) {
 }
 
 
-/* =========================================================
+/*
    CINEMETA
    ========================================================= */
 
@@ -474,7 +479,79 @@ async function getCinemetaMeta(type, id) {
 }
 
 
-/* =========================================================
+/*
+   CATALOG DEFINITIONS - 1.3.8
+   ========================================================= */
+
+const movieCatalogs = [
+  {
+    id: "filmes",
+    name: "Filmes",
+    description: "Filmes populares"
+  },
+  {
+    id: "netflix",
+    name: "Netflix",
+    description: "Filmes Netflix"
+  },
+  {
+    id: "max",
+    name: "Max",
+    description: "Filmes Max"
+  },
+  {
+    id: "prime-video",
+    name: "Prime Video",
+    description: "Filmes Prime Video"
+  },
+  {
+    id: "disney-plus",
+    name: "Disney+",
+    description: "Filmes Disney+"
+  },
+  {
+    id: "apple-tv-plus",
+    name: "Apple TV+",
+    description: "Filmes Apple TV+"
+  }
+];
+
+
+const seriesCatalogs = [
+  {
+    id: "series",
+    name: "Séries",
+    description: "Séries populares"
+  },
+  {
+    id: "netflix",
+    name: "Netflix",
+    description: "Séries Netflix"
+  },
+  {
+    id: "max",
+    name: "Max",
+    description: "Séries Max"
+  },
+  {
+    id: "prime-video",
+    name: "Prime Video",
+    description: "Séries Prime Video"
+  },
+  {
+    id: "disney-plus",
+    name: "Disney+",
+    description: "Séries Disney+"
+  },
+  {
+    id: "apple-tv-plus",
+    name: "Apple TV+",
+    description: "Séries Apple TV+"
+  }
+];
+
+
+/*
    CONFIGURE PAGE
    ========================================================= */
 
@@ -499,8 +576,11 @@ function renderConfigurePage(config = {}) {
   return `
 <!DOCTYPE html>
 <html lang="pt-PT">
+
 <head>
+
 <meta charset="UTF-8">
+
 <meta
   name="viewport"
   content="width=device-width, initial-scale=1.0"
@@ -509,218 +589,223 @@ function renderConfigurePage(config = {}) {
 <title>PT•HUB — Configuração</title>
 
 <style>
-  * {
-    box-sizing: border-box;
-  }
 
-  body {
-    margin: 0;
-    padding: 0;
-    background:
-      radial-gradient(
-        circle at top,
-        #202020 0%,
-        #101010 45%,
-        #080808 100%
-      );
-    color: #ffffff;
-    font-family:
-      Arial,
-      Helvetica,
-      sans-serif;
-    min-height: 100vh;
-  }
+* {
+  box-sizing: border-box;
+}
 
-  .container {
-    width: 100%;
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 40px 20px 60px;
-  }
+body {
+  margin: 0;
+  padding: 0;
+  background:
+    radial-gradient(
+      circle at top,
+      #202020 0%,
+      #101010 45%,
+      #080808 100%
+    );
+  color: #ffffff;
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
+  min-height: 100vh;
+}
 
-  .logo {
-    display: block;
-    width: 150px;
-    max-width: 70%;
-    margin: 0 auto 25px;
-  }
+.container {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px 20px 60px;
+}
+
+.logo {
+  display: block;
+  width: 150px;
+  max-width: 70%;
+  margin: 0 auto 25px;
+}
+
+.card {
+  background: rgba(25, 25, 25, 0.96);
+  border: 1px solid #333;
+  border-radius: 18px;
+  padding: 30px;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+h1 {
+  text-align: center;
+  margin: 0 0 8px;
+  font-size: 30px;
+}
+
+.subtitle {
+  text-align: center;
+  color: #aaa;
+  margin-bottom: 30px;
+}
+
+label {
+  display: block;
+  margin-top: 18px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 10px;
+  border: 1px solid #444;
+  background: #111;
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-color: #777;
+}
+
+.mode-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.mode-button {
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid #444;
+  background: #151515;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.mode-button.active {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+
+.section {
+  display: none;
+}
+
+.section.active {
+  display: block;
+}
+
+.buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 25px;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.test {
+  background: #333;
+  color: #fff;
+}
+
+.install {
+  background: #fff;
+  color: #000;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status {
+  margin-top: 20px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #111;
+  border: 1px solid #333;
+  color: #bbb;
+  white-space: pre-wrap;
+  display: none;
+}
+
+.status.show {
+  display: block;
+}
+
+.install-box {
+  display: none;
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 12px;
+  background: #101010;
+  border: 1px solid #333;
+}
+
+.install-box.show {
+  display: block;
+}
+
+.install-url {
+  word-break: break-all;
+  font-size: 13px;
+  color: #aaa;
+  margin: 10px 0 15px;
+}
+
+.install-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.copy {
+  background: #333;
+  color: #fff;
+}
+
+.open {
+  background: #fff;
+  color: #000;
+}
+
+.footer {
+  text-align: center;
+  color: #666;
+  margin-top: 25px;
+  font-size: 12px;
+}
+
+@media (max-width: 600px) {
 
   .card {
-    background: rgba(25, 25, 25, 0.96);
-    border: 1px solid #333;
-    border-radius: 18px;
-    padding: 30px;
-    box-shadow:
-      0 20px 60px rgba(0, 0, 0, 0.45);
+    padding: 22px;
   }
 
-  h1 {
-    text-align: center;
-    margin: 0 0 8px;
-    font-size: 30px;
-  }
-
-  .subtitle {
-    text-align: center;
-    color: #aaa;
-    margin-bottom: 30px;
-  }
-
-  label {
-    display: block;
-    margin-top: 18px;
-    margin-bottom: 8px;
-    font-weight: 600;
-  }
-
-  input,
-  select {
-    width: 100%;
-    padding: 13px 14px;
-    border-radius: 10px;
-    border: 1px solid #444;
-    background: #111;
-    color: #fff;
-    font-size: 15px;
-    outline: none;
-  }
-
-  input:focus,
-  select:focus {
-    border-color: #777;
-  }
-
-  .mode-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 15px;
-  }
-
-  .mode-button {
-    padding: 14px;
-    border-radius: 10px;
-    border: 1px solid #444;
-    background: #151515;
-    color: #ddd;
-    cursor: pointer;
-    font-size: 15px;
-  }
-
-  .mode-button.active {
-    background: #ffffff;
-    color: #000000;
-    border-color: #ffffff;
-  }
-
-  .section {
-    display: none;
-  }
-
-  .section.active {
-    display: block;
-  }
-
-  .buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 25px;
-  }
-
-  button {
-    border: 0;
-    border-radius: 10px;
-    padding: 14px 16px;
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: 700;
-  }
-
-  .test {
-    background: #333;
-    color: #fff;
-  }
-
-  .install {
-    background: #fff;
-    color: #000;
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .status {
-    margin-top: 20px;
-    padding: 14px;
-    border-radius: 10px;
-    background: #111;
-    border: 1px solid #333;
-    color: #bbb;
-    white-space: pre-wrap;
-    display: none;
-  }
-
-  .status.show {
-    display: block;
-  }
-
-  .install-box {
-    display: none;
-    margin-top: 20px;
-    padding: 18px;
-    border-radius: 12px;
-    background: #101010;
-    border: 1px solid #333;
-  }
-
-  .install-box.show {
-    display: block;
-  }
-
-  .install-url {
-    word-break: break-all;
-    font-size: 13px;
-    color: #aaa;
-    margin: 10px 0 15px;
-  }
-
+  .buttons,
   .install-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    grid-template-columns: 1fr;
   }
 
-  .copy {
-    background: #333;
-    color: #fff;
-  }
+}
 
-  .open {
-    background: #fff;
-    color: #000;
-  }
-
-  .footer {
-    text-align: center;
-    color: #666;
-    margin-top: 25px;
-    font-size: 12px;
-  }
-
-  @media (max-width: 600px) {
-    .card {
-      padding: 22px;
-    }
-
-    .buttons,
-    .install-actions {
-      grid-template-columns: 1fr;
-    }
-  }
 </style>
+
 </head>
 
 <body>
@@ -769,7 +854,6 @@ function renderConfigurePage(config = {}) {
 
     </div>
 
-
     <div
       id="m3uSection"
       class="section ${
@@ -792,7 +876,6 @@ function renderConfigurePage(config = {}) {
 
     </div>
 
-
     <div
       id="xtreamSection"
       class="section ${
@@ -813,7 +896,6 @@ function renderConfigurePage(config = {}) {
         value="${escapeHtml(xtreamServer)}"
       >
 
-
       <label for="username">
         Username
       </label>
@@ -824,7 +906,6 @@ function renderConfigurePage(config = {}) {
         placeholder="Username"
         value="${escapeHtml(username)}"
       >
-
 
       <label for="password">
         Password
@@ -837,7 +918,6 @@ function renderConfigurePage(config = {}) {
       >
 
     </div>
-
 
     <label for="epgUrl">
       URL EPG
@@ -852,7 +932,6 @@ function renderConfigurePage(config = {}) {
       placeholder="https://exemplo.com/epg.xml"
       value="${escapeHtml(epgUrl)}"
     >
-
 
     <div class="buttons">
 
@@ -874,12 +953,10 @@ function renderConfigurePage(config = {}) {
 
     </div>
 
-
     <div
       id="status"
       class="status"
     ></div>
-
 
     <div
       id="installBox"
@@ -925,8 +1002,8 @@ function renderConfigurePage(config = {}) {
 
 </div>
 
-
 <script>
+
 (function () {
 
   let currentMode = "${mode}";
@@ -1024,6 +1101,7 @@ function renderConfigurePage(config = {}) {
   function getConfig() {
 
     return {
+
       mode: currentMode,
 
       m3uUrl:
@@ -1040,6 +1118,7 @@ function renderConfigurePage(config = {}) {
 
       epgUrl:
         epgUrl.value.trim()
+
     };
 
   }
@@ -1060,8 +1139,8 @@ function renderConfigurePage(config = {}) {
     });
 
     return btoa(binary)
-      .replace(/\\+/g, "-")
-      .replace(/\\//g, "_")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
       .replace(/=+$/g, "");
 
   }
@@ -1082,7 +1161,7 @@ function renderConfigurePage(config = {}) {
       "/manifest.json";
 
     return manifestUrl.replace(
-      /^https?:\\/\\//i,
+      /^https?:\/\//i,
       "stremio://"
     );
 
@@ -1184,7 +1263,7 @@ function renderConfigurePage(config = {}) {
 
         if (
           currentMode === "m3u" &&
-          !/^https?:\\/\\//i.test(
+          !/^https?:\/\//i.test(
             config.m3uUrl
           )
         ) {
@@ -1199,7 +1278,7 @@ function renderConfigurePage(config = {}) {
 
         if (
           currentMode === "xtream" &&
-          !/^https?:\\/\\//i.test(
+          !/^https?:\/\//i.test(
             config.xtreamServer
           )
         ) {
@@ -1309,15 +1388,17 @@ function renderConfigurePage(config = {}) {
   setMode(currentMode);
 
 })();
+
 </script>
 
 </body>
 </html>
 `;
+
 }
 
 
-/* =========================================================
+/*
    CONFIGURE ROUTES
    ========================================================= */
 
@@ -1342,7 +1423,7 @@ app.get("/:config/configure", (req, res) => {
 });
 
 
-/* =========================================================
+/*
    IPTV TEST
    ========================================================= */
 
@@ -1433,13 +1514,14 @@ app.post("/test-iptv", async (req, res) => {
 });
 
 
-/* =========================================================
+/*
    MANIFEST
    ========================================================= */
 
 function buildManifest(config) {
 
   const manifest = {
+
     ...manifestTemplate,
 
     version: VERSION,
@@ -1466,26 +1548,31 @@ function buildManifest(config) {
     ],
 
     catalogs: [
+
       {
         type: "channel",
         id: "pt-services",
         name: "TV Portugal"
       },
+
       {
         type: "channel",
         id: "m3u",
         name: "Minha IPTV"
       },
-      {
+
+      ...movieCatalogs.map((catalog) => ({
         type: "movie",
-        id: "filmes",
-        name: "Filmes"
-      },
-      {
+        id: catalog.id,
+        name: catalog.name
+      })),
+
+      ...seriesCatalogs.map((catalog) => ({
         type: "series",
-        id: "series",
-        name: "Séries"
-      }
+        id: catalog.id,
+        name: catalog.name
+      }))
+
     ],
 
     addonCatalogs: [
@@ -1509,14 +1596,16 @@ function buildManifest(config) {
       configurationRequired: false,
       p2p: false
     }
+
   };
 
 
   return manifest;
+
 }
 
 
-/* =========================================================
+/*
    MANIFEST ROUTES
    ========================================================= */
 
@@ -1541,7 +1630,7 @@ app.get("/:config/manifest.json", (req, res) => {
 });
 
 
-/* =========================================================
+/*
    RECOMMENDED ADDONS
    ========================================================= */
 
@@ -1557,8 +1646,11 @@ app.get(
           `addon:${index}`;
 
         return {
+
           id,
+
           type: "addon",
+
           name:
             addon.name ||
             "Add-on",
@@ -1576,6 +1668,7 @@ app.get(
             addon.url ||
             addon.website ||
             ""
+
         };
 
       })
@@ -1585,7 +1678,7 @@ app.get(
 );
 
 
-/* =========================================================
+/*
    CATALOG - TV SERVICES / IPTV
    ========================================================= */
 
@@ -1613,6 +1706,7 @@ app.get(
             (service, index) => {
 
               return {
+
                 id:
                   service.id ||
                   `pttv:${index}`,
@@ -1636,6 +1730,7 @@ app.get(
                 description:
                   service.description ||
                   ""
+
               };
 
             }
@@ -1668,6 +1763,7 @@ app.get(
             (channel) => {
 
               return {
+
                 id:
                   channel.id,
 
@@ -1688,6 +1784,7 @@ app.get(
                   channel.group
                     ? `Grupo: ${channel.group}`
                     : ""
+
               };
 
             }
@@ -1718,7 +1815,7 @@ app.get(
 );
 
 
-/* =========================================================
+/*
    CATALOG - FILMES
    ========================================================= */
 
@@ -1752,7 +1849,7 @@ app.get(
 );
 
 
-/* =========================================================
+/*
    CATALOG - SERIES
    ========================================================= */
 
@@ -1786,7 +1883,101 @@ app.get(
 );
 
 
-/* =========================================================
+/*
+   CATALOG - PLATAFORMAS
+   ========================================================= */
+
+app.get(
+  "/:config/catalog/movie/:id.json",
+  async (req, res) => {
+
+    try {
+
+      const id =
+        req.params.id;
+
+      const validCatalog =
+        movieCatalogs.some(
+          (catalog) =>
+            catalog.id === id
+        );
+
+      if (!validCatalog) {
+        return res.json({
+          metas: []
+        });
+      }
+
+      const data =
+        await getCinemetaCatalog(
+          "movie"
+        );
+
+      return res.json(data);
+
+    } catch (error) {
+
+      console.error(
+        "Erro no catálogo de filmes:",
+        error.message
+      );
+
+      return res.json({
+        metas: []
+      });
+
+    }
+
+  }
+);
+
+
+app.get(
+  "/:config/catalog/series/:id.json",
+  async (req, res) => {
+
+    try {
+
+      const id =
+        req.params.id;
+
+      const validCatalog =
+        seriesCatalogs.some(
+          (catalog) =>
+            catalog.id === id
+        );
+
+      if (!validCatalog) {
+        return res.json({
+          metas: []
+        });
+      }
+
+      const data =
+        await getCinemetaCatalog(
+          "series"
+        );
+
+      return res.json(data);
+
+    } catch (error) {
+
+      console.error(
+        "Erro no catálogo de séries:",
+        error.message
+      );
+
+      return res.json({
+        metas: []
+      });
+
+    }
+
+  }
+);
+
+
+/*
    GENERIC CATALOG
    ========================================================= */
 
@@ -1852,6 +2043,7 @@ app.get(
             metas:
               services.map(
                 (service, index) => ({
+
                   id:
                     service.id ||
                     `pttv:${index}`,
@@ -1866,6 +2058,7 @@ app.get(
                     service.logo ||
                     service.poster ||
                     PT_HUB_LOGO
+
                 })
               )
           });
@@ -1888,6 +2081,7 @@ app.get(
           metas:
             channels.map(
               (channel) => ({
+
                 id:
                   channel.id,
 
@@ -1899,6 +2093,7 @@ app.get(
                 poster:
                   channel.logo ||
                   PT_HUB_LOGO
+
               })
             )
         });
@@ -1927,7 +2122,7 @@ app.get(
 );
 
 
-/* =========================================================
+/*
    META
    ========================================================= */
 
@@ -1949,7 +2144,7 @@ app.get(
         req.params.id;
 
 
-      /* -----------------------------------------------------
+      /*
          FILMES / SÉRIES
          ----------------------------------------------------- */
 
@@ -1969,7 +2164,7 @@ app.get(
       }
 
 
-      /* -----------------------------------------------------
+      /*
          IPTV
          ----------------------------------------------------- */
 
@@ -2007,6 +2202,7 @@ app.get(
 
           return res.json({
             meta: {
+
               id:
                 channel.id,
 
@@ -2027,6 +2223,7 @@ app.get(
                 channel.group
                   ? `Grupo: ${channel.group}`
                   : ""
+
             }
           });
 
@@ -2056,7 +2253,7 @@ app.get(
 );
 
 
-/* =========================================================
+/*
    STREAM
    ========================================================= */
 
@@ -2078,7 +2275,7 @@ app.get(
         req.params.id;
 
 
-      /* -----------------------------------------------------
+      /*
          IPTV
          ----------------------------------------------------- */
 
@@ -2111,6 +2308,7 @@ app.get(
 
         return res.json({
           streams: [
+
             {
               name: "PT•HUB",
 
@@ -2123,14 +2321,16 @@ app.get(
               behaviorHints: {
                 notWebReady: false
               }
+
             }
+
           ]
         });
 
       }
 
 
-      /* -----------------------------------------------------
+      /*
          FILMES / SÉRIES
          ----------------------------------------------------- */
 
@@ -2167,15 +2367,18 @@ app.get(
 );
 
 
-/* =========================================================
+/*
    HOME
    ========================================================= */
 
 app.get("/", (req, res) => {
 
   res.send(`
+
 <!DOCTYPE html>
+
 <html lang="pt-PT">
+
 <head>
 
 <meta charset="UTF-8">
@@ -2189,62 +2392,85 @@ app.get("/", (req, res) => {
 
 <style>
 
-  body {
-    margin: 0;
-    min-height: 100vh;
+body {
 
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  margin: 0;
 
-    background:
-      radial-gradient(
-        circle at top,
-        #202020,
-        #090909
-      );
+  min-height: 100vh;
 
-    color: #fff;
+  display: flex;
 
-    font-family:
-      Arial,
-      Helvetica,
-      sans-serif;
-  }
+  align-items: center;
 
-  .box {
-    text-align: center;
-    padding: 30px;
-  }
+  justify-content: center;
 
-  img {
-    width: 170px;
-    max-width: 70%;
-    margin-bottom: 25px;
-  }
+  background:
+    radial-gradient(
+      circle at top,
+      #202020,
+      #090909
+    );
 
-  h1 {
-    font-size: 34px;
-    margin: 0 0 10px;
-  }
+  color: #fff;
 
-  p {
-    color: #999;
-  }
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
 
-  a {
-    display: inline-block;
-    margin-top: 20px;
-    padding: 13px 22px;
+}
 
-    border-radius: 10px;
+.box {
 
-    background: #fff;
-    color: #000;
+  text-align: center;
 
-    text-decoration: none;
-    font-weight: 700;
-  }
+  padding: 30px;
+
+}
+
+img {
+
+  width: 170px;
+
+  max-width: 70%;
+
+  margin-bottom: 25px;
+
+}
+
+h1 {
+
+  font-size: 34px;
+
+  margin: 0 0 10px;
+
+}
+
+p {
+
+  color: #999;
+
+}
+
+a {
+
+  display: inline-block;
+
+  margin-top: 20px;
+
+  padding: 13px 22px;
+
+  border-radius: 10px;
+
+  background: #fff;
+
+  color: #000;
+
+  text-decoration: none;
+
+  font-weight: 700;
+
+}
 
 </style>
 
@@ -2272,13 +2498,15 @@ app.get("/", (req, res) => {
 </div>
 
 </body>
+
 </html>
+
 `);
 
 });
 
 
-/* =========================================================
+/*
    404
    ========================================================= */
 
@@ -2286,15 +2514,18 @@ app.use(
   (req, res) => {
 
     res.status(404).json({
+
       error: "Not Found",
+
       version: VERSION
+
     });
 
   }
 );
 
 
-/* =========================================================
+/*
    ERROR HANDLER
    ========================================================= */
 
@@ -2307,16 +2538,18 @@ app.use(
     );
 
     res.status(500).json({
+
       error:
         error.message ||
         "Erro interno do servidor."
+
     });
 
   }
 );
 
 
-/* =========================================================
+/*
    SERVER
    ========================================================= */
 
