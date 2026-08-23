@@ -737,7 +737,16 @@ metas.push({
   name: content.title || "Título",
 
   poster:
-    `https://images.metahub.space/poster/medium/${imdbId}/img`
+    imdbId
+      ? `https://images.metahub.space/poster/medium/${imdbId}/img`
+      : content.posterUrl
+          ?.replace("{profile}", "s718")
+          ?.replace("{format}", "jpg"),
+
+  background:
+    imdbId
+      ? `https://images.metahub.space/background/medium/${imdbId}/img`
+      : undefined
 });
 }
   
