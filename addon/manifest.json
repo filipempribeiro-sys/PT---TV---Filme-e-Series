@@ -33,7 +33,7 @@
 
     {
       "type": "movie",
-      "id": "top",
+      "id": "movie-top",
       "name": "🔥 Filmes Populares"
     },
     {
@@ -64,7 +64,7 @@
 
     {
       "type": "series",
-      "id": "top",
+      "id": "series-top",
       "name": "🔥 Séries Populares"
     },
     {
