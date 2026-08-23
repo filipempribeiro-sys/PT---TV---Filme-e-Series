@@ -1,43 +1,111 @@
 {
   "id": "pt.filipe.nuvio.tvhub",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "name": "PT•HUB",
   "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
   "logo": "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png",
+
   "resources": [
     "catalog",
     "meta",
     "stream",
     "addon_catalog"
   ],
+
   "types": [
     "channel",
     "tv",
     "movie",
     "series"
   ],
+
   "catalogs": [
+
     {
       "type": "channel",
       "id": "pt-services",
-      "name": "TV Portugal"
+      "name": "Operadores"
     },
+
     {
       "type": "channel",
       "id": "m3u",
-      "name": "Minha IPTV"
+      "name": "Minha TV"
     },
+
     {
       "type": "movie",
-      "id": "filmes",
-      "name": "Filmes"
+      "id": "populares",
+      "name": "Populares"
     },
+
+    {
+      "type": "movie",
+      "id": "netflix",
+      "name": "Netflix"
+    },
+
+    {
+      "type": "movie",
+      "id": "max",
+      "name": "Max"
+    },
+
+    {
+      "type": "movie",
+      "id": "prime-video",
+      "name": "Prime Video"
+    },
+
+    {
+      "type": "movie",
+      "id": "disney-plus",
+      "name": "Disney+"
+    },
+
+    {
+      "type": "movie",
+      "id": "apple-tv-plus",
+      "name": "Apple TV+"
+    },
+
     {
       "type": "series",
-      "id": "series",
-      "name": "Séries"
+      "id": "populares",
+      "name": "Populares"
+    },
+
+    {
+      "type": "series",
+      "id": "netflix",
+      "name": "Netflix"
+    },
+
+    {
+      "type": "series",
+      "id": "max",
+      "name": "Max"
+    },
+
+    {
+      "type": "series",
+      "id": "prime-video",
+      "name": "Prime Video"
+    },
+
+    {
+      "type": "series",
+      "id": "disney-plus",
+      "name": "Disney+"
+    },
+
+    {
+      "type": "series",
+      "id": "apple-tv-plus",
+      "name": "Apple TV+"
     }
   ],
+
   "addonCatalogs": [
     {
       "type": "addon",
@@ -45,6 +113,7 @@
       "name": "Add-ons recomendados"
     }
   ],
+
   "idPrefixes": [
     "pttv:",
     "m3u:",
@@ -52,6 +121,7 @@
     "tt",
     "tmdb:"
   ],
+
   "behaviorHints": {
     "configurable": true,
     "configurationRequired": false,
