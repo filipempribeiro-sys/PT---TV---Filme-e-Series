@@ -751,7 +751,7 @@ STREAMER CATALOGS
 
 const movieCatalogs = [
 {
-  id: "top",
+  id: "movie-top",
   name: "🔥 Filmes Populares",
   description:
    "Filmes mais populares"
@@ -796,7 +796,7 @@ const movieCatalogs = [
 
 const seriesCatalogs = [
  {
-  id: "top",
+  id: "series-top",
   name: "🔥 Séries Populares",
   description:
    "Séries mais populares"
@@ -2186,7 +2186,7 @@ app.get(
 
       
 
-if (id === "top") {
+if (id === "movie-top") {
 
  const data =
  await getCinemetaCatalog(
@@ -2242,8 +2242,16 @@ app.get(
           metas: []
         });
       }
+if (id === "series-top") {
 
-      
+ const data =
+ await getCinemetaCatalog(
+ "series"
+ );
+
+ return res.json(data);
+
+}
 
 const data =
  await getJustWatchCatalog(
@@ -2252,7 +2260,6 @@ const data =
  );
 
 return res.json(data);
-
     } catch (error) {
 
       console.error(
