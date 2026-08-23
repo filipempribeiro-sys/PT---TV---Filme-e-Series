@@ -1,118 +1,118 @@
 {
- "id": "pt.filipe.nuvio.tvhub",
- "version": "1.4.0",
- "name": "PT•HUB",
- "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
- "logo": "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png",
+  "id": "pt.filipe.nuvio.tvhub",
+  "version": "1.4.1",
+  "name": "PT•HUB",
+  "description": "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
+  "logo": "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png",
 
- "resources": [
- "catalog",
- "meta",
- "stream",
- "addon_catalog"
- ],
+  "resources": [
+    "catalog",
+    "meta",
+    "stream",
+    "addon_catalog"
+  ],
 
- "types": [
- "channel",
- "tv",
- "movie",
- "series"
- ],
+  "types": [
+    "channel",
+    "tv",
+    "movie",
+    "series"
+  ],
 
- "catalogs": [
- {
- "type": "channel",
- "id": "pt-services",
- "name": "TV Portugal"
- },
- {
- "type": "channel",
- "id": "m3u",
- "name": "Minha IPTV"
- },
+  "catalogs": [
+    {
+      "type": "channel",
+      "id": "pt-services",
+      "name": "TV Portugal"
+    },
+    {
+      "type": "channel",
+      "id": "m3u",
+      "name": "Minha IPTV"
+    },
 
- {
- "type": "movie",
- "id": "filmes",
- "name": "Filmes"
- },
- {
- "type": "movie",
- "id": "movie-netflix",
- "name": "Netflix"
- },
- {
- "type": "movie",
- "id": "movie-max",
- "name": "Max"
- },
- {
- "type": "movie",
- "id": "movie-prime-video",
- "name": "Prime Video"
- },
- {
- "type": "movie",
- "id": "movie-disney-plus",
- "name": "Disney+"
- },
- {
- "type": "movie",
- "id": "movie-apple-tv-plus",
- "name": "Apple TV+"
- },
+    {
+      "type": "movie",
+      "id": "filmes",
+      "name": "Filmes"
+    },
+    {
+      "type": "movie",
+      "id": "netflix",
+      "name": "Netflix"
+    },
+    {
+      "type": "movie",
+      "id": "max",
+      "name": "Max"
+    },
+    {
+      "type": "movie",
+      "id": "prime-video",
+      "name": "Prime Video"
+    },
+    {
+      "type": "movie",
+      "id": "disney-plus",
+      "name": "Disney+"
+    },
+    {
+      "type": "movie",
+      "id": "apple-tv-plus",
+      "name": "Apple TV+"
+    },
 
- {
- "type": "series",
- "id": "series",
- "name": "Séries"
- },
- {
- "type": "series",
- "id": "series-netflix",
- "name": "Netflix"
- },
- {
- "type": "series",
- "id": "series-max",
- "name": "Max"
- },
- {
- "type": "series",
- "id": "series-prime-video",
- "name": "Prime Video"
- },
- {
- "type": "series",
- "id": "series-disney-plus",
- "name": "Disney+"
- },
- {
- "type": "series",
- "id": "series-apple-tv-plus",
- "name": "Apple TV+"
- }
- ],
+    {
+      "type": "series",
+      "id": "series",
+      "name": "Séries"
+    },
+    {
+      "type": "series",
+      "id": "netflix",
+      "name": "Netflix"
+    },
+    {
+      "type": "series",
+      "id": "max",
+      "name": "Max"
+    },
+    {
+      "type": "series",
+      "id": "prime-video",
+      "name": "Prime Video"
+    },
+    {
+      "type": "series",
+      "id": "disney-plus",
+      "name": "Disney+"
+    },
+    {
+      "type": "series",
+      "id": "apple-tv-plus",
+      "name": "Apple TV+"
+    }
+  ],
 
- "addonCatalogs": [
- {
- "type": "addon",
- "id": "recommended",
- "name": "Add-ons recomendados"
- }
- ],
+  "addonCatalogs": [
+    {
+      "type": "addon",
+      "id": "recommended",
+      "name": "Add-ons recomendados"
+    }
+  ],
 
- "idPrefixes": [
- "pttv:",
- "m3u:",
- "xtream:",
- "tt",
- "tmdb:"
- ],
+  "idPrefixes": [
+    "pttv:",
+    "m3u:",
+    "xtream:",
+    "tt",
+    "tmdb:"
+  ],
 
- "behaviorHints": {
- "configurable": true,
- "configurationRequired": false,
- "p2p": false
- }
-} 
+  "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": false,
+    "p2p": false
+  }
+}
