@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "1.4.7";
+const VERSION = "1.5.0";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -28,15 +28,11 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Headers",
     "Content-Type"
   );
-
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
-
   next();
 });
-
-
 /* =========================================================
    HELPERS
    ========================================================= */
@@ -48,7 +44,6 @@ function loadJSON(relativePath, fallback) {
     if (!fs.existsSync(filePath)) {
       return fallback;
     }
-
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch (error) {
     console.error(`Erro ao carregar ${relativePath}:`, error.message);
@@ -56,9 +51,12 @@ function loadJSON(relativePath, fallback) {
   }
 }
 
-
 const services = loadJSON("../data/services.json", []);
 const addons = loadJSON("../data/addons.json", []);
+
+const operators = loadJSON("../data/operators.json",[]);
+const streamers = loadJSON("../data/streamers.json",[]);
+const catalogs = loadJSON("../data/catalogs.json",[]);
 
 const manifestTemplate = loadJSON(
   "./manifest.json",
@@ -68,7 +66,6 @@ const manifestTemplate = loadJSON(
     name: "PT•HUB"
   }
 );
-
 
 /* =========================================================
    BASE64URL CONFIG
@@ -80,15 +77,12 @@ function encodeConfig(config) {
     "utf8"
   ).toString("base64url");
 }
-
-
-function decodeConfig(value) {
+ function decodeConfig(value) {
   try {
     if (!value) {
       return null;
     }
-
-    return JSON.parse(
+     return JSON.parse(
       Buffer.from(value, "base64url").toString("utf8")
     );
   } catch (error) {
@@ -96,7 +90,6 @@ function decodeConfig(value) {
     return null;
   }
 }
-
 
 /* =========================================================
    GENERAL HELPERS
@@ -114,9 +107,7 @@ function isValidHttpUrl(value) {
     return false;
   }
 }
-
-
-function escapeHtml(value) {
+ function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -124,13 +115,9 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
-
-
-function normalizeUrl(value) {
+ function normalizeUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
-
-
 function getConfigHash(config) {
   return crypto
     .createHash("sha256")
@@ -138,12 +125,9 @@ function getConfigHash(config) {
     .digest("hex")
     .slice(0, 16);
 }
-
-
 /* =========================================================
    M3U
    ========================================================= */
-
 function parseM3U(content) {
   const lines = String(content || "")
     .replace(/\r/g, "")
@@ -159,8 +143,7 @@ function parseM3U(content) {
     if (!line) {
       continue;
     }
-
-    if (line.startsWith("#EXTINF:")) {
+     if (line.startsWith("#EXTINF:")) {
       const commaIndex = line.indexOf(",");
 
       let attributes = "";
@@ -170,24 +153,19 @@ function parseM3U(content) {
         attributes = line.slice(0, commaIndex);
         name = line.slice(commaIndex + 1).trim();
       }
-
-      const tvgIdMatch = attributes.match(
+       const tvgIdMatch = attributes.match(
         /tvg-id="([^"]*)"/i
       );
-
       const tvgNameMatch = attributes.match(
         /tvg-name="([^"]*)"/i
       );
-
       const tvgLogoMatch = attributes.match(
         /tvg-logo=["']([^"']*)["']/i
       );
-
       const groupMatch = attributes.match(
         /group-title="([^"]*)"/i
       );
-
-      const groupMatchSingle = attributes.match(
+       const groupMatchSingle = attributes.match(
         /group-title='([^']*)'/i
       );
 
@@ -210,11 +188,9 @@ function parseM3U(content) {
           groupMatchSingle?.[1] ||
           "TV"
       };
-
-      continue;
+       continue;
     }
-
-    if (
+     if (
       !line.startsWith("#") &&
       isValidHttpUrl(line) &&
       currentInfo
@@ -241,9 +217,7 @@ function parseM3U(content) {
 
   return channels;
 }
-
-
-/* =========================================================
+ /* =========================================================
    M3U FETCH
    ========================================================= */
 
@@ -272,7 +246,6 @@ async function fetchM3U(url) {
 
   return parseM3U(text);
 }
-
 
 /* =========================================================
    XTREAM
@@ -309,7 +282,6 @@ async function xtreamRequest(config, action) {
 
   return await response.json();
 }
-
 
 async function getXtreamChannels(config) {
   const data = await xtreamRequest(
@@ -358,7 +330,6 @@ async function getXtreamChannels(config) {
   });
 }
 
-
 /* =========================================================
    IPTV CHANNELS
    ========================================================= */
@@ -378,7 +349,6 @@ async function getIPTVChannels(config) {
 
   return [];
 }
-
 
 /* =========================================================
    CONFIG VALIDATION
@@ -423,7 +393,6 @@ function validateConfig(config) {
   return null;
 }
 
-
 /* =========================================================
    CINEMETA
    ========================================================= */
@@ -447,7 +416,6 @@ async function cinemetaFetch(endpoint) {
   return await response.json();
 }
 
-
 async function getCinemetaCatalog(type) {
   if (type === "movie") {
     return await cinemetaFetch(
@@ -465,7 +433,6 @@ async function getCinemetaCatalog(type) {
     metas: []
   };
 }
-
 
 async function getCinemetaMeta(type, id) {
   return await cinemetaFetch(
@@ -532,78 +499,74 @@ async function justWatchRequest(query, variables) {
 let justWatchPackagesCache = null;
 let justWatchPackagesCacheTime = 0;
 
-
 async function getJustWatchPackages() {
 
- const now = Date.now();
+const now = Date.now();
 
- if (
- justWatchPackagesCache &&
- (now - justWatchPackagesCacheTime) <
- (60 * 60 * 1000)
- ) {
-
+if (
+justWatchPackagesCache &&
+(now - justWatchPackagesCacheTime) <
+(60 * 60 * 1000)
+) {
  return justWatchPackagesCache;
-
  }
 
- const query = `
- query Packages(
- $country: Country!
- $platform: Platform!
- ) {
- packages(
- country: $country
- platform: $platform
- ) {
- id
- clearName
- shortName
- }
- }
- `;
+const query = `
+query Packages(
+$country: Country!
+$platform: Platform!
+) {
+packages(
+country: $country
+platform: $platform
+) {
+id
+clearName
+shortName
+}
+};
 
- const response = await fetch(JUSTWATCH_URL, {
- method: "POST",
+const response = await fetch(JUSTWATCH_URL, {
+method: "POST",
 
- headers: {
- "Content-Type": "application/json",
- "User-Agent": `PT-HUB/${VERSION}`
- },
+headers: {
+"Content-Type": "application/json",
+"User-Agent": `PT-HUB/${VERSION}`
+},
 
- body: JSON.stringify({
- operationName: "Packages",
- variables: {
- country: JUSTWATCH_COUNTRY,
- platform: "WEB"
- },
- query
- })
- });
+body: JSON.stringify({
+operationName: "Packages",
+variables: {
+country: JUSTWATCH_COUNTRY,
+platform: "WEB"
+},
+query
+})
+});
 
- if (!response.ok) {
- throw new Error(
- `JustWatch Packages respondeu HTTP ${response.status}`
- );
- }
+if (!response.ok) {
+throw new Error(
+`JustWatch Packages respondeu HTTP ${response.status}`
+);
+}
 
- const data = await response.json();
+const data = await response.json();
 
- if (data.errors) {
- throw new Error(
- data.errors
- .map((error) => error.message)
- .join("; ")
- );
- }
+if (data.errors) {
+throw new Error(
+data.errors
+.map((error) => error.message)
+.join("; ")
+);
+}
 
- justWatchPackagesCache =
- data.data?.packages || [];
+justWatchPackagesCache =
+data.data?.packages || [];
 
- justWatchPackagesCacheTime =
- Date.now();
+justWatchPackagesCacheTime =
+Date.now();
 
- return justWatchPackagesCache;
+return justWatchPackagesCache;
 
 }
 
@@ -746,7 +709,7 @@ async function getJustWatchCatalog(
     if (!imdbId) {
       continue;
     }
-    
+
 metas.push({
   id: imdbId,
   type,
@@ -761,59 +724,59 @@ metas.push({
 }
 
 return {
- metas
+metas
 };
 
 }
-  
+
 async function getFeaturedCatalog(type) {
 
- const streamers = [
- "netflix",
- "hbomax",
- "prime-video",
- "disney-plus",
- "apple-tv-plus"
- ];
+const streamers = [
+"netflix",
+"hbomax",
+"prime-video",
+"disney-plus",
+"apple-tv-plus"
+];
 
- const metas = [];
- const ids = new Set();
+const metas = [];
+const ids = new Set();
 
- for (const streamer of streamers) {
+for (const streamer of streamers) {
 
- try {
+try {
 
- const data =
- await getJustWatchCatalog(
- type,
- streamer
- );
+const data =
+await getJustWatchCatalog(
+type,
+streamer
+);
 
- for (const meta of data.metas.slice(0, 10)) {
+for (const meta of data.metas.slice(0, 10)) {
 
- if (!ids.has(meta.id)) {
+if (!ids.has(meta.id)) {
 
- ids.add(meta.id);
- metas.push(meta);
+ids.add(meta.id);
+metas.push(meta);
 
- }
+}
 
- }
+}
 
- } catch (error) {
+} catch (error) {
 
- console.error(
- `Erro no streamer ${streamer}:`,
- error.message
- );
+console.error(
+`Erro no streamer ${streamer}:`,
+error.message
+);
 
- }
+}
 
- }
+}
 
- return {
- metas: metas.slice(0, 50)
- };
+return {
+metas: metas.slice(0, 50)
+};
 }
 
 /*
@@ -821,99 +784,67 @@ async function getFeaturedCatalog(type) {
 STREAMER CATALOGS
 =========================================================
 */
+ function getMovieCatalogs() {
 
-const movieCatalogs = [
-{
-  id: "movie-top",
-  name: "🔥 Filmes Populares",
-  description:
-   "Filmes mais populares"
-}, 
+const specialCatalogs =
+catalogs.filter(
+catalog =>
+catalog.type === "movie"
+);
 
-{
- id: "featured",
- name: "⭐ Filmes em Destaque",
- description:
- "Seleção de filmes em destaque"
-},
-{
-    id: "netflix",
-    name: "🎬 Netflix Filmes",
-    description:
-      "Filmes Netflix"
-  },
-  {
-    id: "hbomax",
-    name: "🎬 HBO Max Filmes",
-    description:
-      "Filmes HBO Max"
-  },
-  {
-    id: "prime-video",
-    name: "🎬 Prime Video Filmes",
-    description:
-      "Filmes Prime Video"
-  },
-  {
-    id: "disney-plus",
-    name:"🎬 Disney+ Filmes",
-    description:
-      "Filmes Disney+"
-  },
-  {
-    id: "apple-tv-plus",
-    name: "🎬 Apple TV+ Filmes",
-    description:
-      "Filmes Apple TV+"
-  }
+const streamerCatalogs =
+streamers.map(
+streamer => ({
+id: streamer.id,
+name:
+`🎬 ${streamer.name} Filmes`
+})
+);
+
+return [
+...specialCatalogs,
+...streamerCatalogs
 ];
+}
 
-const seriesCatalogs = [
- {
-  id: "series-top",
-  name: "🔥 Séries Populares",
-  description:
-   "Séries mais populares"
-}, 
-{
- id: "featured",
- name: "⭐ Séries em Destaque",
- description:
- "Seleção de séries em destaque"
-},
-{
-    id: "netflix",
-    name: "📺 Netflix Séries",
-    description:
-      "Séries Netflix"
-  },
-  {
-    id: "hbomax",
-    name: "📺 HBO Max Séries",
-    description:
-      "Séries HBO Max"
-  },
-  {
-    id: "prime-video",
-    name: "📺 Prime Video Séries",
-    description:
-      "Séries Prime Video"
-  },
-  {
-    id: "disney-plus",
-    name: "📺 Disney+ Séries",
-    description:
-      "Séries Disney+"
-  },
-  {
-    id: "apple-tv-plus",
-    name: "📺 Apple TV+ Séries",
-    description:
-      "Séries Apple TV+"
-  }
+function getSeriesCatalogs() {
+
+const specialCatalogs =
+catalogs.filter(
+catalog =>
+catalog.type === "series"
+);
+
+const streamerCatalogs =
+streamers.map(
+streamer => ({
+id: streamer.id,
+name:
+`📺 ${streamer.name} Séries`
+})
+);
+
+return [
+...specialCatalogs,
+...streamerCatalogs
 ];
+}
 
-/* 
+const movieCatalogs = getMovieCatalogs();
+const seriesCatalogs = getSeriesCatalogs();
+
+function getOperatorCatalogs() {
+
+return operators.map(
+operator => ({
+type: "channel",
+id: operator.id,
+name: `📺 ${operator.name}`
+})
+);
+}
+
+/*
 =========================================================
    CONFIGURE PAGE
    ========================================================= */
@@ -1905,37 +1836,32 @@ function buildManifest(config) {
       "series"
     ],
 
-    
+ catalogs: [
 
-catalogs: [
+...movieCatalogs.map(
+(catalog) => ({
+type: "movie",
+id: catalog.id,
+name: catalog.name
+})
+),
 
- ...movieCatalogs.map(
- (catalog) => ({
- type: "movie",
- id: catalog.id,
- name: catalog.name
- })
- ),
+...seriesCatalogs.map(
+(catalog) => ({
+type: "series",
+id: catalog.id,
+name: catalog.name
+})
+),
 
- ...seriesCatalogs.map(
- (catalog) => ({
- type: "series",
- id: catalog.id,
- name: catalog.name
- })
- ),
+{
+type: "channel",
+id: "m3u",
+name: "📡 Minha IPTV"
+},
 
- {
- type: "channel",
- id: "m3u",
- name: "📡 Minha IPTV"
- },
+...getOperatorCatalogs()
 
- {
- type: "channel",
- id: "pt-services",
- name: "📺 Operadores"
- }
 ],
 
     addonCatalogs: [
@@ -2262,29 +2188,29 @@ app.get(
 
 if (id === "featured") {
 
- return res.json(
- await getFeaturedCatalog(
- "movie"
- )
- );
+return res.json(
+await getFeaturedCatalog(
+"movie"
+)
+);
 
 }
 
 if (id === "movie-top") {
 
- return res.json(
- await getCinemetaCatalog(
- "movie"
- )
- );
+return res.json(
+await getCinemetaCatalog(
+"movie"
+)
+);
 
 }
 
 return res.json(
- await getJustWatchCatalog(
- "movie",
- id
- )
+await getJustWatchCatalog(
+"movie",
+id
+)
 );
 
     } catch (error) {
@@ -2327,29 +2253,29 @@ app.get(
 
 if (id === "featured") {
 
- return res.json(
- await getFeaturedCatalog(
- "series"
- )
- );
+return res.json(
+await getFeaturedCatalog(
+"series"
+)
+);
 
 }
 
 if (id === "series-top") {
 
- return res.json(
- await getCinemetaCatalog(
- "series"
- )
- );
+return res.json(
+await getCinemetaCatalog(
+"series"
+)
+);
 
 }
 
 return res.json(
- await getJustWatchCatalog(
- "series",
- id
- )
+await getJustWatchCatalog(
+"series",
+id
+)
 );
     } catch (error) {
 
