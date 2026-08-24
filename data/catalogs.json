@@ -1,0 +1,26 @@
+[
+  {
+    "id": "movie-top",
+    "type": "movie",
+    "name": "🔥 Filmes Populares",
+    "enabled": true
+  },
+  {
+    "id": "series-top",
+    "type": "series",
+    "name": "🔥 Séries Populares",
+    "enabled": true
+  },
+  {
+    "id": "featured",
+    "type": "movie",
+    "name": "⭐ Filmes em Destaque",
+    "enabled": true
+  },
+  {
+    "id": "featured",
+    "type": "series",
+    "name": "⭐ Séries em Destaque",
+    "enabled": true
+  }
+]

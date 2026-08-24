@@ -1,0 +1,27 @@
+[
+  {
+    "id": "netflix",
+    "name": "Netflix",
+    "type": ["movie", "series"]
+  },
+  {
+    "id": "hbomax",
+    "name": "HBO Max",
+    "type": ["movie", "series"]
+  },
+  {
+    "id": "prime-video",
+    "name": "Prime Video",
+    "type": ["movie", "series"]
+  },
+  {
+    "id": "disney-plus",
+    "name": "Disney+",
+    "type": ["movie", "series"]
+  },
+  {
+    "id": "apple-tv-plus",
+    "name": "Apple TV+",
+    "type": ["movie", "series"]
+  }
+]
