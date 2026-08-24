@@ -424,7 +424,7 @@ function validateConfig(config) {
 
 }
 
-/* =========================================================
+/* ========================================================
    CINEMETA
    ========================================================= */
 
@@ -1228,6 +1228,7 @@ const enabledIPTV =
  </label>
 
 </div>
+<div id="iptvContainer">
 
     <div class="mode-buttons">
 
@@ -1341,6 +1342,7 @@ const enabledIPTV =
       value="${escapeHtml(epgUrl)}"
     >
 
+</div>
 
     <div class="buttons">
 
@@ -1479,6 +1481,11 @@ const operatorsEnabled =
 const iptvEnabled =
  document.getElementById(
  "iptvEnabled"
+ );
+
+const iptvContainer =
+ document.getElementById(
+ "iptvContainer"
  );
 
   function setMode(mode) {
@@ -1825,8 +1832,23 @@ function getConfig() {
     }
   );
 
+function updateIPTVVisibility() {
 
-  setMode(currentMode);
+ iptvContainer.style.display =
+ iptvEnabled.checked
+ ? "block"
+ : "none";
+
+}
+
+iptvEnabled.addEventListener(
+ "change",
+ updateIPTVVisibility
+);
+
+updateIPTVVisibility();
+
+setMode(currentMode);
 
 })();
 </script>
@@ -2326,7 +2348,7 @@ app.get(
   }
 );
 
-/*
+/*=========================================================
    CATALOG - PLATAFORMAS
    ========================================================= */
 
