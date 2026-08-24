@@ -524,7 +524,8 @@ id
 clearName
 shortName
 }
-};
+}
+`;
 
 const response = await fetch(JUSTWATCH_URL, {
 method: "POST",
