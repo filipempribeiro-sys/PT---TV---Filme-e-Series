@@ -898,8 +898,23 @@ function renderConfigurePage(config = {}) {
 
   const epgUrl =
     config.epgUrl || "";
+const features =
+  config.features || {};
 
+const enabledFeatured =
+  features.featured !== false;
+
+const enabledStreamers =
+  features.streamers !== false;
+
+const enabledOperators =
+  features.operators !== false;
+
+const enabledIPTV =
+  features.iptv === true;
+  
   return `
+  
 <!DOCTYPE html>
 <html lang="pt-PT">
 <head>
