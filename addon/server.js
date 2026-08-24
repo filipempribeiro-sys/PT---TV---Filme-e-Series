@@ -424,7 +424,7 @@ function validateConfig(config) {
 
 }
 
-/* =========================================================
+/* ========================================================= */
    CINEMETA
    ========================================================= */
 
@@ -898,23 +898,24 @@ function renderConfigurePage(config = {}) {
 
   const epgUrl =
     config.epgUrl || "";
+
 const features =
-  config.features || {};
+ config.features || {};
 
 const enabledFeatured =
-  features.featured !== false;
+ features.featured !== false;
 
 const enabledStreamers =
-  features.streamers !== false;
+ features.streamers !== false;
 
 const enabledOperators =
-  features.operators !== false;
+ features.operators !== false;
 
 const enabledIPTV =
-  features.iptv === true;
-  
+ features.iptv === true;
+
   return `
-  
+
 <!DOCTYPE html>
 <html lang="pt-PT">
 <head>
@@ -1030,6 +1031,29 @@ const enabledIPTV =
     color: #000000;
     border-color: #ffffff;
   }
+
+.features-grid {
+ display: grid;
+ grid-template-columns: 1fr 1fr;
+ gap: 12px;
+ margin-bottom: 25px;
+}
+
+.feature-item {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ padding: 12px;
+ border: 1px solid #333;
+ border-radius: 10px;
+ background: #111;
+ margin: 0;
+}
+
+.feature-item input {
+ width: auto;
+ margin: 0;
+}
 
   .section {
     display: none;
@@ -1155,58 +1179,56 @@ const enabledIPTV =
 
     <h1>PT•HUB</h1>
 
+
 <div class="subtitle">
-  Configuração PT•HUB
+ Configuração PT•HUB
 </div>
+
 
 <label>
-  Conteúdo
+ Conteúdo
 </label>
 
-<div style="
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-  margin-bottom:25px;
-">
+<div class="features-grid">
 
-  <label>
-    <input
-      type="checkbox"
-      id="featuredEnabled"
-      ${enabledFeatured ? "checked" : ""}
-    >
-    Destaques
-  </label>
+ <label class="feature-item">
+ <input
+ type="checkbox"
+ id="featuredEnabled"
+ ${enabledFeatured ? "checked" : ""}
+ >
+ Destaques
+ </label>
 
-  <label>
-    <input
-      type="checkbox"
-      id="streamersEnabled"
-      ${enabledStreamers ? "checked" : ""}
-    >
-    Streamers
-  </label>
+ <label class="feature-item">
+ <input
+ type="checkbox"
+ id="streamersEnabled"
+ ${enabledStreamers ? "checked" : ""}
+ >
+ Streamers
+ </label>
 
-  <label>
-    <input
-      type="checkbox"
-      id="operatorsEnabled"
-      ${enabledOperators ? "checked" : ""}
-    >
-    Operadores Portugueses
-  </label>
+ <label class="feature-item">
+ <input
+ type="checkbox"
+ id="operatorsEnabled"
+ ${enabledOperators ? "checked" : ""}
+ >
+ Operadores PT
+ </label>
 
-  <label>
-    <input
-      type="checkbox"
-      id="iptvEnabled"
-      ${enabledIPTV ? "checked" : ""}
-    >
-    IPTV
-  </label>
+ <label class="feature-item">
+ <input
+ type="checkbox"
+ id="iptvEnabled"
+ ${enabledIPTV ? "checked" : ""}
+ >
+ IPTV
+ </label>
 
 </div>
+
     <div class="mode-buttons">
 
       <button
