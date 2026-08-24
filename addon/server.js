@@ -1140,10 +1140,58 @@ function renderConfigurePage(config = {}) {
 
     <h1>PT•HUB</h1>
 
-    <div class="subtitle">
-      Configuração IPTV
-    </div>
+<div class="subtitle">
+  Configuração PT•HUB
+</div>
 
+<label>
+  Conteúdo
+</label>
+
+<div style="
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-bottom:25px;
+">
+
+  <label>
+    <input
+      type="checkbox"
+      id="featuredEnabled"
+      ${enabledFeatured ? "checked" : ""}
+    >
+    Destaques
+  </label>
+
+  <label>
+    <input
+      type="checkbox"
+      id="streamersEnabled"
+      ${enabledStreamers ? "checked" : ""}
+    >
+    Streamers
+  </label>
+
+  <label>
+    <input
+      type="checkbox"
+      id="operatorsEnabled"
+      ${enabledOperators ? "checked" : ""}
+    >
+    Operadores Portugueses
+  </label>
+
+  <label>
+    <input
+      type="checkbox"
+      id="iptvEnabled"
+      ${enabledIPTV ? "checked" : ""}
+    >
+    IPTV
+  </label>
+
+</div>
     <div class="mode-buttons">
 
       <button
