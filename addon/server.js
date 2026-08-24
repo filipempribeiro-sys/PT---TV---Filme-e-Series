@@ -2529,7 +2529,33 @@ app.get(
       if (
         type === "channel"
       ) {
+const operator =
+  operators.find(
+    item => item.id === id
+  );
 
+if (operator) {
+
+  return res.json({
+    meta: {
+      id: operator.id,
+      type: "channel",
+      name: operator.name,
+
+      poster: operator.poster,
+
+      background:
+        operator.background,
+
+      logo:
+        operator.poster,
+
+      description:
+        operator.description || ""
+    }
+  });
+
+}
         if (
           id.startsWith("m3u:") ||
           id.startsWith("xtream:")
