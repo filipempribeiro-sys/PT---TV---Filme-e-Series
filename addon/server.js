@@ -524,8 +524,7 @@ id
 clearName
 shortName
 }
-}
-`;
+};
 
 const response = await fetch(JUSTWATCH_URL, {
 method: "POST",
@@ -833,31 +832,6 @@ return [
 
 const movieCatalogs = getMovieCatalogs();
 const seriesCatalogs = getSeriesCatalogs();
-
-console.log(
-  "operators:",
-  operators.length
-);
-
-console.log(
-  "streamers:",
-  streamers.length
-);
-
-console.log(
-  "catalogs:",
-  catalogs.length
-);
-
-console.log(
-  "movieCatalogs:",
-  movieCatalogs.length
-);
-
-console.log(
-  "seriesCatalogs:",
-  seriesCatalogs.length
-);
 
 function getOperatorCatalogs() {
 
@@ -2005,28 +1979,6 @@ app.get(
       const catalogId =
         req.params.id;
 
-      const operator =
-  operators.find(
-    item => item.id === catalogId
-  );
-
-if (operator) {
-
-  return res.json({
-    metas: [
-      {
-        id: operator.id,
-        type: "channel",
-        name: operator.name,
-        poster: operator.poster,
-        background: operator.background,
-        description:
-          operator.description || ""
-      }
-    ]
-  });
-
-}
 
       if (
         catalogId === "pt-services"
@@ -2394,10 +2346,12 @@ app.get(
 
 
       if (
-        type === "channel"
-       
-      )
-      {
+        type === "channel" &&
+        (
+          id === "m3u" ||
+          id === "pt-services"
+        )
+      ) {
 
         if (id === "pt-services") {
 
@@ -2529,33 +2483,7 @@ app.get(
       if (
         type === "channel"
       ) {
-const operator =
-  operators.find(
-    item => item.id === id
-  );
 
-if (operator) {
-
-  return res.json({
-    meta: {
-      id: operator.id,
-      type: "channel",
-      name: operator.name,
-
-      poster: operator.poster,
-
-      background:
-        operator.background,
-
-      logo:
-        operator.poster,
-
-      description:
-        operator.description || ""
-    }
-  });
-
-}
         if (
           id.startsWith("m3u:") ||
           id.startsWith("xtream:")
