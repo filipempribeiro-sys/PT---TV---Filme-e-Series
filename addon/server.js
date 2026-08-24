@@ -350,50 +350,81 @@ async function getIPTVChannels(config) {
   return [];
 }
 
+
 /* =========================================================
-   CONFIG VALIDATION
-   ========================================================= */
+ CONFIG VALIDATION
+ ========================================================= */
 
 function validateConfig(config) {
-  if (!config || typeof config !== "object") {
-    return "Configuração inválida.";
-  }
 
-  if (!["m3u", "xtream"].includes(config.mode)) {
-    return "Seleciona M3U ou Xtream Codes.";
-  }
+ if (
+ config.features &&
+ !config.features.iptv
+ ) {
+ return null;
+ }
 
-  if (config.mode === "m3u") {
-    if (!isValidHttpUrl(config.m3uUrl)) {
-      return "Indica um URL M3U válido.";
-    }
-  }
+ if (
+ !config ||
+ typeof config !== "object"
+ ) {
+ return "Configuração inválida.";
+ }
 
-  if (config.mode === "xtream") {
-    if (!isValidHttpUrl(config.xtreamServer)) {
-      return "Indica um URL de servidor Xtream válido.";
-    }
+ if (
+ !["m3u", "xtream"].includes(
+ config.mode
+ )
+ ) {
+ return "Seleciona M3U ou Xtream Codes.";
+ }
 
-    if (!config.username) {
-      return "Indica o username Xtream.";
-    }
+ if (config.mode === "m3u") {
 
-    if (!config.password) {
-      return "Indica a password Xtream.";
-    }
-  }
+ if (
+ !isValidHttpUrl(
+ config.m3uUrl
+ )
+ ) {
+ return "Indica um URL M3U válido.";
+ }
 
-  if (
-    config.epgUrl &&
-    !isValidHttpUrl(config.epgUrl)
-  ) {
-    return "O URL EPG não é válido.";
-  }
+ }
 
-  return null;
+ if (config.mode === "xtream") {
+
+ if (
+ !isValidHttpUrl(
+ config.xtreamServer
+ )
+ ) {
+ return "Indica um URL de servidor Xtream válido.";
+ }
+
+ if (!config.username) {
+ return "Indica o username Xtream.";
+ }
+
+ if (!config.password) {
+ return "Indica a password Xtream.";
+ }
+
+ }
+
+ if (
+ config.epgUrl &&
+ !isValidHttpUrl(
+ config.epgUrl
+ )
+ ) {
+ return "O URL EPG não é válido.";
+ }
+
+ return null;
+
 }
 
-/* =========================================================
+/* ========================================================= */
    CINEMETA
    ========================================================= */
 
@@ -1351,6 +1382,19 @@ function renderConfigurePage(config = {}) {
   const openButton =
     document.getElementById("openButton");
 
+const featuredEnabled =
+ document.getElementById("featuredEnabled");
+
+const streamersEnabled =
+ document.getElementById("streamersEnabled");
+
+const operatorsEnabled =
+ document.getElementById("operatorsEnabled");
+
+const iptvEnabled =
+ document.getElementById(
+ "iptvEnabled"
+ );
 
   function setMode(mode) {
 
@@ -1393,28 +1437,47 @@ function renderConfigurePage(config = {}) {
   }
 
 
-  function getConfig() {
+function getConfig() {
 
-    return {
-      mode: currentMode,
+ return {
 
-      m3uUrl:
-        m3uUrl.value.trim(),
+ features: {
 
-      xtreamServer:
-        xtreamServer.value.trim(),
+ featured:
+ featuredEnabled.checked,
 
-      username:
-        username.value.trim(),
+ streamers:
+ streamersEnabled.checked,
 
-      password:
-        password.value,
+ operators:
+ operatorsEnabled.checked,
 
-      epgUrl:
-        epgUrl.value.trim()
-    };
+ iptv:
+ iptvEnabled.checked
 
-  }
+ },
+
+ mode:
+ currentMode,
+
+ m3uUrl:
+ m3uUrl.value.trim(),
+
+ xtreamServer:
+ xtreamServer.value.trim(),
+
+ username:
+ username.value.trim(),
+
+ password:
+ password.value,
+
+ epgUrl:
+ epgUrl.value.trim()
+
+ };
+
+}
 
 
   function encodeConfig(config) {
@@ -1809,9 +1872,19 @@ app.post("/test-iptv", async (req, res) => {
    MANIFEST
    ========================================================= */
 
+
 function buildManifest(config) {
 
-  const manifest = {
+ const features =
+ config?.features || {};
+
+ const showOperators =
+ features.operators !== false;
+
+ const showIPTV =
+ features.iptv === true;
+
+ const manifest = {
     ...manifestTemplate,
 
     version: VERSION,
@@ -1855,13 +1928,19 @@ name: catalog.name
 })
 ),
 
-{
-type: "channel",
-id: "m3u",
-name: "📡 Minha IPTV"
-},
+...(showIPTV
+ ? [
+ {
+ type: "channel",
+ id: "m3u",
+ name: "📡 Minha IPTV"
+ }
+ ]
+ : []),
 
-...getOperatorCatalogs()
+...(showOperators
+ ? getOperatorCatalogs()
+ : [])
 
 ],
 
