@@ -2005,6 +2005,28 @@ app.get(
       const catalogId =
         req.params.id;
 
+      const operator =
+  operators.find(
+    item => item.id === catalogId
+  );
+
+if (operator) {
+
+  return res.json({
+    metas: [
+      {
+        id: operator.id,
+        type: "channel",
+        name: operator.name,
+        poster: operator.poster,
+        background: operator.background,
+        description:
+          operator.description || ""
+      }
+    ]
+  });
+
+}
 
       if (
         catalogId === "pt-services"
@@ -2372,12 +2394,10 @@ app.get(
 
 
       if (
-        type === "channel" &&
-        (
-          id === "m3u" ||
-          id === "pt-services"
-        )
-      ) {
+        type === "channel"
+       
+      )
+      {
 
         if (id === "pt-services") {
 
