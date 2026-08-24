@@ -834,6 +834,31 @@ return [
 const movieCatalogs = getMovieCatalogs();
 const seriesCatalogs = getSeriesCatalogs();
 
+console.log(
+  "operators:",
+  operators.length
+);
+
+console.log(
+  "streamers:",
+  streamers.length
+);
+
+console.log(
+  "catalogs:",
+  catalogs.length
+);
+
+console.log(
+  "movieCatalogs:",
+  movieCatalogs.length
+);
+
+console.log(
+  "seriesCatalogs:",
+  seriesCatalogs.length
+);
+
 function getOperatorCatalogs() {
 
 return operators.map(
