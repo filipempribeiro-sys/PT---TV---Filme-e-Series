@@ -2174,7 +2174,7 @@ if (
 return res.json({
  success: true,
  message:
- "Ligação Xtream efetuada com 
+ "Ligação Xtream efetuada com sucesso."
 
     }
 
