@@ -282,11 +282,18 @@ console.log(
   "XTREAM ACTION:",
   action
 );
- const url =
+
+let url =
  `${server}/player_api.php` +
  `?username=${encodeURIComponent(config.username)}` +
- `&password=${encodeURIComponent(config.password)}` +
+ `&password=${encodeURIComponent(config.password)}`;
+
+if (action) {
+
+ url +=
  `&action=${encodeURIComponent(action)}`;
+
+}
 
  console.log(
  "XTREAM URL:",
@@ -306,14 +313,20 @@ console.log(
 
  try {
 
- response =
+
+response =
  await fetch(url, {
  signal:
  controller.signal,
 
+ redirect: "follow",
+
  headers: {
  "User-Agent":
- `PT-HUB/${VERSION}`
+ "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+
+ "Accept":
+ "application/json,*/*"
  }
  });
 
@@ -2141,25 +2154,27 @@ app.post("/test-iptv", async (req, res) => {
       const data =
         await xtreamRequest(
           config,
-          "get_live_streams"
+          ""
         );
 
-      if (!Array.isArray(data)) {
+if (
+ !data ||
+ !data.user_info ||
+ data.user_info.auth !== 1
+) {
 
-        return res.status(400).json({
-          success: false,
-          error:
-            "O servidor Xtream não devolveu uma lista válida de canais."
-        });
+ return res.status(400).json({
+ success: false,
+ error:
+ "Autenticação Xtream inválida."
+ });
 
-      }
+}
 
-      return res.json({
-        success: true,
-        message:
-          `Ligação Xtream efetuada com sucesso. ${data.length} canais encontrados.`,
-        channels: data.length
-      });
+return res.json({
+ success: true,
+ message:
+ "Ligação Xtream efetuada com 
 
     }
 
