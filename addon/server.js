@@ -2176,8 +2176,7 @@ return res.json({
  message:
  "Ligação Xtream efetuada com sucesso."
 
-    }
-
+    });
 
     return res.status(400).json({
       success: false,
