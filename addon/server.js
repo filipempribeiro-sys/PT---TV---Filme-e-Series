@@ -273,7 +273,15 @@ async function xtreamRequest(config, action) {
  "Username ou password Xtream em falta."
  );
  }
+console.log(
+  "XTREAM SERVER:",
+  server
+);
 
+console.log(
+  "XTREAM ACTION:",
+  action
+);
  const url =
  `${server}/player_api.php` +
  `?username=${encodeURIComponent(config.username)}` +
@@ -305,7 +313,7 @@ async function xtreamRequest(config, action) {
 
  headers: {
  "User-Agent":
- "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+ `PT-HUB/${VERSION}`
  }
  });
 
