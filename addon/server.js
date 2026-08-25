@@ -305,7 +305,7 @@ async function xtreamRequest(config, action) {
 
  headers: {
  "User-Agent":
- `PT-HUB/${VERSION}`
+ "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
  }
  });
 
