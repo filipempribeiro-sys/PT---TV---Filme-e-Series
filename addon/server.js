@@ -251,36 +251,96 @@ async function fetchM3U(url) {
    XTREAM
    ========================================================= */
 
+
 async function xtreamRequest(config, action) {
-  const server = normalizeUrl(config.xtreamServer);
 
-  if (!server) {
-    throw new Error("Servidor Xtream não definido.");
-  }
+ const server =
+ normalizeUrl(
+ config.xtreamServer
+ );
 
-  if (!config.username || !config.password) {
-    throw new Error("Username ou password Xtream em falta.");
-  }
+ if (!server) {
+ throw new Error(
+ "Servidor Xtream não definido."
+ );
+ }
 
-  const url =
-    `${server}/player_api.php` +
-    `?username=${encodeURIComponent(config.username)}` +
-    `&password=${encodeURIComponent(config.password)}` +
-    `&action=${encodeURIComponent(action)}`;
+ if (
+ !config.username ||
+ !config.password
+ ) {
+ throw new Error(
+ "Username ou password Xtream em falta."
+ );
+ }
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": `PT-HUB/${VERSION}`
-    }
-  });
+ const url =
+ `${server}/player_api.php` +
+ `?username=${encodeURIComponent(config.username)}` +
+ `&password=${encodeURIComponent(config.password)}` +
+ `&action=${encodeURIComponent(action)}`;
 
-  if (!response.ok) {
-    throw new Error(
-      `Xtream respondeu HTTP ${response.status}`
-    );
-  }
+ console.log(
+ "XTREAM URL:",
+ url
+ );
 
-  return await response.json();
+ const controller =
+ new AbortController();
+
+ const timeout =
+ setTimeout(
+ () => controller.abort(),
+ 15000
+ );
+
+ let response;
+
+ try {
+
+ response =
+ await fetch(url, {
+ signal:
+ controller.signal,
+
+ headers: {
+ "User-Agent":
+ `PT-HUB/${VERSION}`
+ }
+ });
+
+ clearTimeout(timeout);
+
+ } catch (error) {
+
+ clearTimeout(timeout);
+
+ console.error(
+ "XTREAM FETCH ERROR:",
+ error
+ );
+
+ console.error(
+ "XTREAM URL:",
+ url
+ );
+
+ throw new Error(
+ `Falha ao contactar servidor Xtream (${error.cause?.code || error.message})`
+ );
+
+ }
+
+ if (!response.ok) {
+
+ throw new Error(
+ `Xtream respondeu HTTP ${response.status}`
+ );
+
+ }
+
+ return await response.json();
+
 }
 
 async function getXtreamChannels(config) {
@@ -928,30 +988,52 @@ const enabledIPTV =
 <title>PT•HUB — Configuração</title>
 
 <style>
+
+:root {
+ --pt-bg: #01050B;
+ --pt-bg-secondary: #04111A;
+ --pt-bg-card: #071C29;
+ --pt-bg-tech: #062F46;
+
+ --pt-gold: #DA921C;
+ --pt-gold-light: #F2CA4F;
+ --pt-bronze: #A7610C;
+
+ --pt-green: #027C1C;
+ --pt-green-light: #13D06C;
+
+ --pt-red: #E51306;
+ --pt-red-dark: #970200;
+
+ --pt-text: #EEECCB;
+ --pt-white: #FFFFFF;
+}
+
   * {
     box-sizing: border-box;
   }
 
-  body {
-    margin: 0;
-    padding: 0;
-    background:
-        radial-gradient(
-        circle at top,
-        rgba(0,120,255,0.18) 0%,
-        rgba(0,180,90,0.14) 30%,
-        rgba(255,180,0,0.10) 60%,
-        rgba(180,30,30,0.08) 80%,
-        #080808 100%
+body {
+ margin: 0;
+ padding: 0;
+
+ background:
+ radial-gradient(
+ circle at top,
+ var(--pt-bg-tech) 0%,
+ var(--pt-bg-secondary) 35%,
+ var(--pt-bg) 100%
  );
 
-    color: #ffffff;
-    font-family:
-      Arial,
-      Helvetica,
-      sans-serif;
-    min-height: 100vh;
-  }
+ color: var(--pt-text);
+
+ font-family:
+ Arial,
+ Helvetica,
+ sans-serif;
+
+ min-height: 100vh;
+}
 
   .container {
     width: 100%;
@@ -968,8 +1050,9 @@ const enabledIPTV =
   }
 
   .card {
-    background: rgba(25, 25, 25, 0.96);
-    border: 1px solid #333;
+    background: rgba(7,28,41,.95);
+    border: 1px solid
+        rgba(218,146,28,.30);
     border-radius: 18px;
     padding: 30px;
     box-shadow:
@@ -982,11 +1065,12 @@ const enabledIPTV =
     font-size: 30px;
   }
 
-  .subtitle {
-    text-align: center;
-    color: #aaa;
-    margin-bottom: 30px;
-  }
+
+.subtitle {
+ text-align: center;
+ color: var(--pt-gold-light);
+ margin-bottom: 30px;
+}
 
   label {
     display: block;
@@ -995,22 +1079,30 @@ const enabledIPTV =
     font-weight: 600;
   }
 
-  input,
-  select {
-    width: 100%;
-    padding: 13px 14px;
-    border-radius: 10px;
-    border: 1px solid #444;
-    background: #111;
-    color: #fff;
-    font-size: 15px;
-    outline: none;
-  }
+input,
+select {
+ width: 100%;
+ padding: 13px 14px;
+ border-radius: 10px;
 
-  input:focus,
-  select:focus {
-    border-color: #777;
-  }
+ border: 1px solid
+ rgba(218,146,28,.20);
+
+ background:
+ var(--pt-bg-card);
+
+ color:
+ var(--pt-text);
+
+ font-size: 15px;
+ outline: none;
+}
+
+input:focus,
+select:focus {
+ border-color:
+ var(--pt-gold);
+}
 
   .mode-buttons {
     display: grid;
@@ -1019,21 +1111,34 @@ const enabledIPTV =
     margin-bottom: 15px;
   }
 
-  .mode-button {
-    padding: 14px;
-    border-radius: 10px;
-    border: 1px solid #444;
-    background: #151515;
-    color: #ddd;
-    cursor: pointer;
-    font-size: 15px;
-  }
 
-  .mode-button.active {
-    background: #ffffff;
-    color: #000000;
-    border-color: #ffffff;
-  }
+.mode-button {
+ padding: 14px;
+ border-radius: 10px;
+
+ border: 1px solid
+ rgba(218,146,28,.20);
+
+ background:
+ var(--pt-bg-card);
+
+ color:
+ var(--pt-text);
+
+ cursor: pointer;
+ font-size: 15px;
+}
+
+.mode-button.active {
+ background:
+ var(--pt-gold);
+
+ color:
+ var(--pt-bg);
+
+ border-color:
+ var(--pt-gold);
+}
 
 .features-grid {
  display: grid;
@@ -1042,24 +1147,33 @@ const enabledIPTV =
  margin-bottom: 25px;
 }
 
+
 .feature-item {
  display: flex;
  align-items: center;
  gap: 10px;
  padding: 12px;
- border: 1px solid #333;
- border-radius: 10px;
- background: #111;
  margin: 0;
+
+ background: var(--pt-bg-card);
+
+ border: 1px solid
+ rgba(218,146,28,.20);
+
+ border-radius: 10px;
 }
 
 .feature-item:hover {
  border-color: #d4af37;
 }
 
+
 .feature-item:has(input:checked) {
- border-color: #d4af37;
- background: rgba(212,175,55,.08);
+ border-color:
+ var(--pt-gold);
+
+ background:
+ rgba(218,146,28,.10);
 }
 
 .feature-item input {
@@ -1091,44 +1205,64 @@ const enabledIPTV =
     font-weight: 700;
   }
 
-  .test {
-    background: #333;
-    color: #fff;
-  }
+.test {
+ background:
+ var(--pt-green);
 
-  .install {
-    background: #fff;
-    color: #000;
-  }
+ color:
+ var(--pt-white);
+}
+
+.install {
+ background:
+ var(--pt-gold);
+
+ color:
+ var(--pt-bg);
+
+ font-weight: 700;
+}
 
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .status {
-    margin-top: 20px;
-    padding: 14px;
-    border-radius: 10px;
-    background: #111;
-    border: 1px solid #333;
-    color: #bbb;
-    white-space: pre-wrap;
-    display: none;
-  }
+
+.status {
+ margin-top: 20px;
+ padding: 14px;
+ border-radius: 10px;
+
+ background:
+ var(--pt-bg-card);
+
+ border: 1px solid
+ rgba(218,146,28,.20);
+
+ color:
+ var(--pt-text);
+
+ white-space: pre-wrap;
+ display: none;
+}
 
   .status.show {
     display: block;
   }
 
-  .install-box {
-    display: none;
-    margin-top: 20px;
-    padding: 18px;
-    border-radius: 12px;
-    background: #101010;
-    border: 1px solid #333;
-  }
+.install-box {
+ display: none;
+ margin-top: 20px;
+ padding: 18px;
+ border-radius: 12px;
+
+ background:
+ var(--pt-bg-card);
+
+ border: 1px solid
+ rgba(218,146,28,.20);
+}
 
   .install-box.show {
     display: block;
@@ -1147,22 +1281,28 @@ const enabledIPTV =
     gap: 10px;
   }
 
-  .copy {
-    background: #333;
-    color: #fff;
-  }
+.copy {
+ background:
+ var(--pt-bg-tech);
 
-  .open {
-    background: #fff;
-    color: #000;
-  }
+ color:
+ var(--pt-white);
+}
 
-  .footer {
-    text-align: center;
-    color: #666;
-    margin-top: 25px;
-    font-size: 12px;
-  }
+.open {
+ background:
+ var(--pt-gold);
+
+ color:
+ var(--pt-bg);
+}
+
+.footer {
+ text-align: center;
+ color: var(--pt-bronze);
+ margin-top: 25px;
+ font-size: 12px;
+}
 
   @media (max-width: 600px) {
     .card {
@@ -2023,10 +2163,20 @@ app.post("/test-iptv", async (req, res) => {
 
   } catch (error) {
 
-    console.error(
-      "Erro no teste IPTV:",
-      error
-    );
+
+console.error(
+ "Erro no teste IPTV:",
+ error.message
+);
+
+console.error(
+ "Cause:",
+ error.cause
+);
+
+console.error(
+ error.stack
+);
 
     return res.status(500).json({
       success: false,
