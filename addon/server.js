@@ -2147,71 +2147,67 @@ app.post("/test-iptv", async (req, res) => {
       });
 
     }
+if (config.mode === "xtream") {
 
+  const data =
+    await xtreamRequest(
+      config,
+      ""
+    );
 
-    if (config.mode === "xtream") {
-
-      const data =
-        await xtreamRequest(
-          config,
-          ""
-        );
-
-if (
- !data ||
- !data.user_info ||
- data.user_info.auth !== 1
-) {
-
- return res.status(400).json({
- success: false,
- error:
- "Autenticação Xtream inválida."
- });
-
-}
-
-return res.json({
- success: true,
- message:
- "Ligação Xtream efetuada com sucesso."
-
-    });
+  if (
+    !data ||
+    !data.user_info ||
+    data.user_info.auth !== 1
+  ) {
 
     return res.status(400).json({
       success: false,
-      error: "Modo IPTV inválido."
-    });
-
-  } catch (error) {
-
-
-console.error(
- "Erro no teste IPTV:",
- error.message
-);
-
-console.error(
- "Cause:",
- error.cause
-);
-
-console.error(
- error.stack
-);
-
-    return res.status(500).json({
-      success: false,
       error:
-        error.message ||
-        "Não foi possível testar a ligação."
+        "Autenticação Xtream inválida."
     });
 
   }
 
+  return res.json({
+    success: true,
+    message:
+      "Ligação Xtream efetuada com sucesso."
+  });
+
+}
+
+return res.status(400).json({
+  success: false,
+  error: "Modo IPTV inválido."
 });
 
+} catch (error) {
 
+  console.error(
+    "Erro no teste IPTV:",
+    error.message
+  );
+
+  console.error(
+    "Cause:",
+    error.cause
+  );
+
+  console.error(
+    error.stack
+  );
+
+  return res.status(500).json({
+    success: false,
+    error:
+      error.message ||
+      "Não foi possível testar a ligação."
+  });
+
+}
+
+});
 /* =========================================================
    MANIFEST
    ========================================================= */
