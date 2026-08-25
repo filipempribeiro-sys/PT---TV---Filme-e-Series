@@ -936,12 +936,15 @@ const enabledIPTV =
     margin: 0;
     padding: 0;
     background:
-      radial-gradient(
+        radial-gradient(
         circle at top,
-        #202020 0%,
-        #101010 45%,
+        rgba(0,120,255,0.18) 0%,
+        rgba(0,180,90,0.14) 30%,
+        rgba(255,180,0,0.10) 60%,
+        rgba(180,30,30,0.08) 80%,
         #080808 100%
-      );
+ );
+
     color: #ffffff;
     font-family:
       Arial,
@@ -1048,6 +1051,15 @@ const enabledIPTV =
  border-radius: 10px;
  background: #111;
  margin: 0;
+}
+
+.feature-item:hover {
+ border-color: #d4af37;
+}
+
+.feature-item:has(input:checked) {
+ border-color: #d4af37;
+ background: rgba(212,175,55,.08);
 }
 
 .feature-item input {
@@ -1328,42 +1340,48 @@ const enabledIPTV =
     </div>
 
 
-    <label for="epgUrl">
-      URL EPG
-      <span style="color:#777;font-weight:normal;">
-        (opcional)
-      </span>
-    </label>
+<div id="epgContainer">
 
-    <input
-      id="epgUrl"
-      type="url"
-      placeholder="https://exemplo.com/epg.xml"
-      value="${escapeHtml(epgUrl)}"
-    >
+ <label for="epgUrl">
+ URL EPG
+ <span style="color:#777;font-weight:normal;">
+ (opcional)
+ </span>
+ </label>
+
+ <input
+ id="epgUrl"
+ type="url"
+ placeholder="https://exemplo.com/epg.xml"
+ value="${escapeHtml(epgUrl)}"
+ >
 
 </div>
+</div>
 
-    <div class="buttons">
+<div class="buttons">
 
-      <button
-        id="testButton"
-        class="test"
-        type="button"
-      >
-        Testar ligação
-      </button>
+ <div id="testButtonContainer">
 
-      <button
-        id="installButton"
-        class="install"
-        type="button"
-      >
-        Gerar instalação
-      </button>
+ <button
+ id="testButton"
+ class="test"
+ type="button"
+ >
+ Testar ligação
+ </button>
 
-    </div>
+ </div>
 
+ <button
+ id="installButton"
+ class="install"
+ type="button"
+ >
+ Gerar instalação
+ </button>
+
+</div>
 
     <div
       id="status"
@@ -1488,6 +1506,16 @@ const iptvContainer =
  "iptvContainer"
  );
 
+const epgContainer =
+ document.getElementById(
+ "epgContainer"
+ );
+
+const testButtonContainer =
+ document.getElementById(
+ "testButtonContainer"
+ );
+
   function setMode(mode) {
 
     currentMode = mode;
@@ -1509,6 +1537,7 @@ const iptvContainer =
       xtreamSection.classList.add("active");
 
     }
+   updateIPTVVisibility();
 
   }
 
@@ -1709,6 +1738,25 @@ function getConfig() {
         const config =
           getConfig();
 
+if (!config.features.iptv) {
+
+ const url =
+ getInstallUrl();
+
+ installUrl.textContent =
+ url;
+
+ installBox.classList.add(
+ "show"
+ );
+
+ showStatus(
+ "URL de instalação gerado com sucesso."
+ );
+
+ return;
+}
+
         if (
           currentMode === "m3u" &&
           !/^https?:\\/\\//i.test(
@@ -1834,8 +1882,25 @@ function getConfig() {
 
 function updateIPTVVisibility() {
 
+ const iptvActive =
+ iptvEnabled.checked;
+
  iptvContainer.style.display =
- iptvEnabled.checked
+ iptvActive
+ ? "block"
+ : "none";
+
+ testButtonContainer.style.display =
+ iptvActive
+ ? "block"
+ : "none";
+
+ const showEPG =
+ iptvActive &&
+ currentMode === "m3u";
+
+ epgContainer.style.display =
+ showEPG
  ? "block"
  : "none";
 
