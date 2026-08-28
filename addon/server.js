@@ -412,6 +412,120 @@ async function getXtreamChannels(config) {
 }
 
 /* =========================================================
+   IPTV-ORG
+   ========================================================= */
+
+const IPTVORG_CHANNELS_URL =
+  "https://iptv-org.github.io/api/channels.json";
+
+const IPTVORG_STREAMS_URL =
+  "https://iptv-org.github.io/api/streams.json";
+
+let iptvOrgCache = null;
+let iptvOrgCacheTime = 0;
+
+async function getIPTVOrgData() {
+
+  const now = Date.now();
+
+  if (
+    iptvOrgCache &&
+    (now - iptvOrgCacheTime) < (6 * 60 * 60 * 1000)
+  ) {
+    return iptvOrgCache;
+  }
+
+  const [channelsResponse, streamsResponse] = await Promise.all([
+    fetch(IPTVORG_CHANNELS_URL, {
+      headers: { "User-Agent": `PT-HUB/${VERSION}` }
+    }),
+    fetch(IPTVORG_STREAMS_URL, {
+      headers: { "User-Agent": `PT-HUB/${VERSION}` }
+    })
+  ]);
+
+  if (!channelsResponse.ok || !streamsResponse.ok) {
+    throw new Error(
+      "Não foi possível obter a base de dados IPTV-org."
+    );
+  }
+
+  const channels = await channelsResponse.json();
+  const streams = await streamsResponse.json();
+
+  const streamsByChannel = {};
+
+  for (const stream of streams) {
+    if (!stream.channel || !stream.url) {
+      continue;
+    }
+
+    if (!streamsByChannel[stream.channel]) {
+      streamsByChannel[stream.channel] = [];
+    }
+
+    streamsByChannel[stream.channel].push(stream);
+  }
+
+  iptvOrgCache = { channels, streamsByChannel };
+  iptvOrgCacheTime = now;
+
+  return iptvOrgCache;
+}
+
+async function getIPTVOrgChannels(config) {
+
+  const iptvOrg = config.iptvOrg || {};
+
+  const country =
+    String(iptvOrg.country || "").trim().toUpperCase();
+
+  const category =
+    String(iptvOrg.category || "").trim().toLowerCase();
+
+  const data = await getIPTVOrgData();
+
+  const results = [];
+
+  for (const channel of data.channels) {
+
+    if (country && channel.country !== country) {
+      continue;
+    }
+
+    if (
+      category &&
+      !(channel.categories || [])
+        .map((item) => String(item).toLowerCase())
+        .includes(category)
+    ) {
+      continue;
+    }
+
+    const streams =
+      data.streamsByChannel[channel.id] || [];
+
+    if (!streams.length) {
+      continue;
+    }
+
+    results.push({
+      id: `iptvorg:${channel.id}`,
+      type: "channel",
+      name: channel.name || channel.id,
+      logo: channel.logo || "",
+      group:
+        (channel.categories && channel.categories[0]) || "TV",
+      tvgId: channel.id,
+      url: streams[0].url
+    });
+
+  }
+
+  return results;
+}
+
+/* =========================================================
    IPTV CHANNELS
    ========================================================= */
 
@@ -421,11 +535,23 @@ async function getIPTVChannels(config) {
   }
 
   if (config.mode === "m3u") {
+
+    if (
+      config.m3uSource === "file" &&
+      config.m3uFileData
+    ) {
+      return parseM3U(config.m3uFileData);
+    }
+
     return await fetchM3U(config.m3uUrl);
   }
 
   if (config.mode === "xtream") {
     return await getXtreamChannels(config);
+  }
+
+  if (config.mode === "iptv-org") {
+    return await getIPTVOrgChannels(config);
   }
 
   return [];
@@ -453,16 +579,22 @@ function validateConfig(config) {
  }
 
  if (
- !["m3u", "xtream"].includes(
+ !["m3u", "xtream", "iptv-org"].includes(
  config.mode
  )
  ) {
- return "Seleciona M3U ou Xtream Codes.";
+ return "Seleciona IPTV-org, M3U ou Xtream Codes.";
  }
 
  if (config.mode === "m3u") {
 
- if (
+ if (config.m3uSource === "file") {
+
+ if (!config.m3uFileData) {
+ return "Seleciona um ficheiro M3U ou M3U8.";
+ }
+
+ } else if (
  !isValidHttpUrl(
  config.m3uUrl
  )
@@ -957,384 +1089,602 @@ name: `📺 ${operator.name}`
 );
 }
 
+function getOperatorById(operatorId) {
+  return operators.find(
+    (operator) => operator.id === operatorId
+  ) || null;
+}
+
+function getOperatorChannels(operator) {
+
+  if (!operator) {
+    return [];
+  }
+
+  if (Array.isArray(operator.channels)) {
+
+    return operator.channels.map((channel, index) => ({
+      id: `operator:${operator.id}:${channel.id || index}`,
+      type: "channel",
+      name: channel.name || operator.name,
+      logo: channel.logo || operator.logo || PT_HUB_LOGO,
+      group: operator.name,
+      tvgId: channel.tvgId || "",
+      url: channel.url
+    }));
+
+  }
+
+  return [];
+}
+
 /*
 =========================================================
    CONFIGURE PAGE
    ========================================================= */
 
 function renderConfigurePage(config = {}) {
+
   const mode =
-    config.mode === "xtream"
-      ? "xtream"
+    ["xtream", "iptv-org"].includes(config.mode)
+      ? config.mode
       : "m3u";
 
-  const m3uUrl =
-    config.m3uUrl || "";
+  const m3uUrl = config.m3uUrl || "";
+  const m3uSource = config.m3uSource === "file" ? "file" : "url";
+  const xtreamServer = config.xtreamServer || "";
+  const username = config.username || "";
+  const epgUrl = config.epgUrl || "";
 
-  const xtreamServer =
-    config.xtreamServer || "";
+  const features = config.features || {};
 
-  const username =
-    config.username || "";
+  const enabledFeatured = features.featured !== false;
+  const enabledStreamers = features.streamers !== false;
+  const enabledOperators = features.operators !== false;
+  const enabledIPTV = features.iptv === true;
 
-  const epgUrl =
-    config.epgUrl || "";
+  const featuredContent = features.featuredContent || {};
+  const featuredMoviesChecked = featuredContent.movies !== false;
+  const featuredSeriesChecked = featuredContent.series !== false;
 
-const features =
- config.features || {};
+  const selectedStreamers =
+    Array.isArray(features.selectedStreamers)
+      ? features.selectedStreamers
+      : [];
 
-const enabledFeatured =
- features.featured !== false;
+  const selectedOperators =
+    Array.isArray(features.selectedOperators)
+      ? features.selectedOperators
+      : [];
 
-const enabledStreamers =
- features.streamers !== false;
+  const iptvOrg = config.iptvOrg || {};
+  const iptvOrgCountry = iptvOrg.country || "";
+  const iptvOrgCategory = iptvOrg.category || "";
+  const iptvOrgCatalogName = iptvOrg.catalogName || "";
 
-const enabledOperators =
- features.operators !== false;
+  const xtreamShow = config.xtreamShow || {};
+  const xtreamShowLiveChecked = xtreamShow.live !== false;
 
-const enabledIPTV =
- features.iptv === true;
+  const xtreamEpgMode =
+    ["url", "none"].includes(config.xtreamEpgMode)
+      ? config.xtreamEpgMode
+      : "auto";
+
+  const xtreamEpgOffset =
+    Number.isFinite(config.xtreamEpgOffset)
+      ? config.xtreamEpgOffset
+      : 0;
+
+  const xtreamEpgUrl = config.xtreamEpgUrl || "";
+  const xtreamCatalogName = config.xtreamCatalogName || "";
+
+  const m3uEpgMode =
+    ["playlist", "none"].includes(config.m3uEpgMode)
+      ? config.m3uEpgMode
+      : "url";
+
+  const m3uEpgOffset =
+    Number.isFinite(config.m3uEpgOffset)
+      ? config.m3uEpgOffset
+      : 0;
+
+  const globalUserAgent = config.globalUserAgent || "";
+  const m3uCatalogName = config.m3uCatalogName || "";
+
+  function sanitizeId(value) {
+    return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  }
+
+  const streamerCheckboxes = streamers.map(function (streamer) {
+    const domId = "streamer_" + sanitizeId(streamer.id);
+    const checked = selectedStreamers.includes(streamer.id) ? "checked" : "";
+    return (
+      '        <label class="option-item">\n' +
+      '          <input type="checkbox" id="' + domId + '" value="' + escapeHtml(streamer.id) + '" ' + checked + '>\n' +
+      '          <span>' + escapeHtml(streamer.name) + '</span>\n' +
+      '        </label>\n'
+    );
+  }).join("");
+
+  const operatorCheckboxes = operators.map(function (operator) {
+    const domId = "operator_" + sanitizeId(operator.id);
+    const checked = selectedOperators.includes(operator.id) ? "checked" : "";
+    return (
+      '        <label class="option-item">\n' +
+      '          <input type="checkbox" id="' + domId + '" value="' + escapeHtml(operator.id) + '" ' + checked + '>\n' +
+      '          <span>' + escapeHtml(operator.name) + '</span>\n' +
+      '        </label>\n'
+    );
+  }).join("");
+
+  const streamerIdsJs =
+    JSON.stringify(
+      streamers.map(function (streamer) {
+        return "streamer_" + sanitizeId(streamer.id);
+      })
+    );
+
+  const operatorIdsJs =
+    JSON.stringify(
+      operators.map(function (operator) {
+        return "operator_" + sanitizeId(operator.id);
+      })
+    );
 
   return `
-
 <!DOCTYPE html>
 <html lang="pt-PT">
 <head>
 <meta charset="UTF-8">
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1.0"
-/>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PT•HUB — Configuração</title>
 
 <style>
-
 :root {
- --pt-bg: #01050B;
- --pt-bg-secondary: #04111A;
- --pt-bg-card: #071C29;
- --pt-bg-tech: #062F46;
+  --pt-bg: #01050B;
+  --pt-bg-secondary: #04111A;
+  --pt-bg-card: #071C29;
+  --pt-bg-tech: #062F46;
 
- --pt-gold: #DA921C;
- --pt-gold-light: #F2CA4F;
- --pt-bronze: #A7610C;
+  --pt-gold: #DA921C;
+  --pt-gold-light: #F2CA4F;
+  --pt-bronze: #A7610C;
 
- --pt-green: #027C1C;
- --pt-green-light: #13D06C;
+  --pt-green: #027C1C;
+  --pt-green-light: #13D06C;
 
- --pt-red: #E51306;
- --pt-red-dark: #970200;
+  --pt-red: #E51306;
+  --pt-red-dark: #970200;
 
- --pt-text: #EEECCB;
- --pt-white: #FFFFFF;
+  --pt-text: #EEECCB;
+  --pt-white: #FFFFFF;
 }
 
-  * {
-    box-sizing: border-box;
-  }
+* {
+  box-sizing: border-box;
+}
 
 body {
- margin: 0;
- padding: 0;
-
- background:
- radial-gradient(
- circle at top,
- var(--pt-bg-tech) 0%,
- var(--pt-bg-secondary) 35%,
- var(--pt-bg) 100%
- );
-
- color: var(--pt-text);
-
- font-family:
- Arial,
- Helvetica,
- sans-serif;
-
- min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  background:
+    radial-gradient(circle at top,
+      var(--pt-bg-tech) 0%,
+      var(--pt-bg-secondary) 35%,
+      var(--pt-bg) 100%);
+  color: var(--pt-text);
+  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
 }
 
-  .container {
-    width: 100%;
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 40px 20px 60px;
-  }
+.container {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px 20px 60px;
+}
 
-  .logo {
-    display: block;
-    width: 150px;
-    max-width: 70%;
-    margin: 0 auto 25px;
-  }
+.logo {
+  display: block;
+  width: 150px;
+  max-width: 70%;
+  margin: 0 auto 25px;
+}
 
-  .card {
-    background: rgba(7,28,41,.95);
-    border: 1px solid
-        rgba(218,146,28,.30);
-    border-radius: 18px;
-    padding: 30px;
-    box-shadow:
-      0 20px 60px rgba(0, 0, 0, 0.45);
-  }
+.card {
+  background: rgba(7,28,41,.95);
+  border: 1px solid rgba(218,146,28,.30);
+  border-radius: 18px;
+  padding: 30px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
 
-  h1 {
-    text-align: center;
-    margin: 0 0 8px;
-    font-size: 30px;
-  }
-
+h1 {
+  text-align: center;
+  margin: 0 0 8px;
+  font-size: 30px;
+}
 
 .subtitle {
- text-align: center;
- color: var(--pt-gold-light);
- margin-bottom: 30px;
+  text-align: center;
+  color: var(--pt-gold-light);
+  margin-bottom: 30px;
 }
 
-  label {
-    display: block;
-    margin-top: 18px;
-    margin-bottom: 8px;
-    font-weight: 600;
-  }
+label.field-label {
+  display: block;
+  margin-top: 18px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
 
-input,
+input:not([type="checkbox"]),
 select {
- width: 100%;
- padding: 13px 14px;
- border-radius: 10px;
-
- border: 1px solid
- rgba(218,146,28,.20);
-
- background:
- var(--pt-bg-card);
-
- color:
- var(--pt-text);
-
- font-size: 15px;
- outline: none;
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(218,146,28,.20);
+  background: var(--pt-bg-card);
+  color: var(--pt-text);
+  font-size: 15px;
+  outline: none;
 }
 
 input:focus,
 select:focus {
- border-color:
- var(--pt-gold);
+  border-color: var(--pt-gold);
 }
 
-  .mode-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 15px;
-  }
-
-
-.mode-button {
- padding: 14px;
- border-radius: 10px;
-
- border: 1px solid
- rgba(218,146,28,.20);
-
- background:
- var(--pt-bg-card);
-
- color:
- var(--pt-text);
-
- cursor: pointer;
- font-size: 15px;
-}
-
-.mode-button.active {
- background:
- var(--pt-gold);
-
- color:
- var(--pt-bg);
-
- border-color:
- var(--pt-gold);
+input[type="checkbox"] {
+  accent-color: var(--pt-gold);
 }
 
 .features-grid {
- display: grid;
- grid-template-columns: 1fr 1fr;
- gap: 12px;
- margin-bottom: 25px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-
 .feature-item {
- display: flex;
- align-items: center;
- gap: 10px;
- padding: 12px;
- margin: 0;
-
- background: var(--pt-bg-card);
-
- border: 1px solid
- rgba(218,146,28,.20);
-
- border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  margin: 0;
+  background: var(--pt-bg-card);
+  border: 1px solid rgba(218,146,28,.20);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: .18s ease;
 }
 
 .feature-item:hover {
- border-color: #d4af37;
+  border-color: var(--pt-gold-light);
+  transform: translateY(-1px);
 }
 
-
 .feature-item:has(input:checked) {
- border-color:
- var(--pt-gold);
-
- background:
- rgba(218,146,28,.10);
+  border-color: var(--pt-gold);
+  background: rgba(218,146,28,.10);
+  box-shadow: 0 0 18px rgba(218,146,28,.08);
 }
 
 .feature-item input {
- width: auto;
- margin: 0;
+  width: auto;
+  margin: 0;
 }
 
-  .section {
-    display: none;
-  }
+.config-panel {
+  display: none;
+  margin: 12px 0 0;
+  padding: 20px;
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(6,47,70,.95), rgba(7,28,41,.98));
+  border: 1px solid rgba(218,146,28,.28);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+}
 
-  .section.active {
-    display: block;
-  }
+.config-panel.active {
+  display: block;
+  animation: panelIn .18s ease-out;
+}
 
-  .buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 25px;
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
-  button {
-    border: 0;
-    border-radius: 10px;
-    padding: 14px 16px;
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: 700;
-  }
+.panel-title {
+  margin: 0 0 6px;
+  color: var(--pt-gold-light);
+  font-size: 18px;
+}
+
+.panel-description {
+  margin: 0 0 16px;
+  color: #b9c0b7;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.option-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: rgba(1,5,11,.34);
+  border: 1px solid rgba(218,146,28,.15);
+  cursor: pointer;
+}
+
+.option-item:hover {
+  border-color: rgba(218,146,28,.40);
+}
+
+.option-item input {
+  margin: 0;
+  width: auto;
+}
+
+.subsection {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(218,146,28,.14);
+}
+
+.subsection-title {
+  margin: 0 0 10px;
+  color: var(--pt-white);
+  font-size: 15px;
+}
+
+.help {
+  color: #929b96;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 7px;
+}
+
+.required {
+  color: var(--pt-red);
+}
+
+.mode-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.mode-button {
+  padding: 13px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(218,146,28,.20);
+  background: var(--pt-bg-card);
+  color: var(--pt-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.mode-button:hover {
+  border-color: var(--pt-gold-light);
+}
+
+.mode-button.active {
+  background: var(--pt-gold);
+  color: var(--pt-bg);
+  border-color: var(--pt-gold);
+}
+
+.section {
+  display: none;
+}
+
+.section.active {
+  display: block;
+}
+
+.source-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 10px 0 16px;
+}
+
+.source-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(218,146,28,.18);
+  background: rgba(1,5,11,.28);
+  cursor: pointer;
+}
+
+.source-option:has(input:checked) {
+  border-color: var(--pt-gold);
+  background: rgba(218,146,28,.08);
+}
+
+.source-option input {
+  width: auto;
+  margin: 0;
+}
+
+.public-playlists {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 10px;
+  background: rgba(1,5,11,.28);
+  border: 1px solid rgba(218,146,28,.12);
+}
+
+.public-title {
+  color: var(--pt-gold-light);
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.public-link {
+  display: block;
+  padding: 7px 0;
+  color: #c7cbc5;
+  font-size: 13px;
+}
+
+.buttons {
+ display: flex;
+ gap: 12px;
+ margin-top: 25px;
+}
+.buttons > * {
+ flex: 1;
+}
+
+#testButtonContainer {
+ display: flex;
+}
+
+#testButton {
+ width: 100%;
+}
+
+.buttons button {
+ width: 100%;
+}
+
+.buttons.single {
+ justify-content:center;
+}
+
+.buttons.single .install {
+ width:300px;
+ max-width:100%;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+}
 
 .test {
- background:
- var(--pt-green);
-
- color:
- var(--pt-white);
+  background: var(--pt-green);
+  color: var(--pt-white);
 }
 
 .install {
- background:
- var(--pt-gold);
-
- color:
- var(--pt-bg);
-
- font-weight: 700;
+  background: var(--pt-gold);
+  color: var(--pt-bg);
+  font-weight: 700;
 }
 
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
 
 .status {
- margin-top: 20px;
- padding: 14px;
- border-radius: 10px;
-
- background:
- var(--pt-bg-card);
-
- border: 1px solid
- rgba(218,146,28,.20);
-
- color:
- var(--pt-text);
-
- white-space: pre-wrap;
- display: none;
+  margin-top: 20px;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--pt-bg-card);
+  border: 1px solid rgba(218,146,28,.20);
+  color: var(--pt-text);
+  white-space: pre-wrap;
+  display: none;
 }
 
-  .status.show {
-    display: block;
-  }
+.status.show {
+  display: block;
+}
 
 .install-box {
- display: none;
- margin-top: 20px;
- padding: 18px;
- border-radius: 12px;
-
- background:
- var(--pt-bg-card);
-
- border: 1px solid
- rgba(218,146,28,.20);
+  display: none;
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--pt-bg-card);
+  border: 1px solid rgba(218,146,28,.20);
 }
 
-  .install-box.show {
-    display: block;
-  }
+.install-box.show {
+  display: block;
+}
 
-  .install-url {
-    word-break: break-all;
-    font-size: 13px;
-    color: #aaa;
-    margin: 10px 0 15px;
-  }
+.install-url {
+  word-break: break-all;
+  font-size: 13px;
+  color: #aaa;
+  margin: 10px 0 15px;
+}
 
-  .install-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
+.install-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 
 .copy {
- background:
- var(--pt-bg-tech);
-
- color:
- var(--pt-white);
+  background: var(--pt-bg-tech);
+  color: var(--pt-white);
 }
 
 .open {
- background:
- var(--pt-gold);
-
- color:
- var(--pt-bg);
+  background: var(--pt-gold);
+  color: var(--pt-bg);
 }
 
 .footer {
- text-align: center;
- color: var(--pt-bronze);
- margin-top: 25px;
- font-size: 12px;
+  text-align: center;
+  color: var(--pt-bronze);
+  margin-top: 25px;
+  font-size: 12px;
 }
 
-  @media (max-width: 600px) {
-    .card {
-      padding: 22px;
-    }
 
-    .buttons,
-    .install-actions {
-      grid-template-columns: 1fr;
-    }
-  }
+@media (max-width: 600px) {
+
+ .card {
+ padding:22px;
+ }
+
+ .features-grid,
+ .option-grid,
+ .source-toggle,
+ .mode-buttons,
+ .install-actions {
+
+ grid-template-columns:1fr;
+
+ }
+
+ .buttons {
+ flex-direction:column;
+ }
+}
+
 </style>
 </head>
 
@@ -1352,203 +1702,666 @@ select:focus {
 
     <h1>PT•HUB</h1>
 
+    <div class="subtitle">
+      Configuração PT•HUB
+    </div>
 
-<div class="subtitle">
- Configuração PT•HUB
-</div>
+    <label class="field-label">
+      Conteúdo
+    </label>
 
+    <div class="features-grid">
 
-<label>
- Conteúdo
-</label>
+      <label class="feature-item">
+        <input
+          type="checkbox"
+          id="featuredEnabled"
+          ${enabledFeatured ? "checked" : ""}
+        >
+        <span>Destaques</span>
+      </label>
 
-<div class="features-grid">
+      <label class="feature-item">
+        <input
+          type="checkbox"
+          id="streamersEnabled"
+          ${enabledStreamers ? "checked" : ""}
+        >
+        <span>Streamers</span>
+      </label>
 
- <label class="feature-item">
- <input
- type="checkbox"
- id="featuredEnabled"
- ${enabledFeatured ? "checked" : ""}
- >
- Destaques
- </label>
+      <label class="feature-item">
+        <input
+          type="checkbox"
+          id="operatorsEnabled"
+          ${enabledOperators ? "checked" : ""}
+        >
+        <span>Operadores PT</span>
+      </label>
 
- <label class="feature-item">
- <input
- type="checkbox"
- id="streamersEnabled"
- ${enabledStreamers ? "checked" : ""}
- >
- Streamers
- </label>
-
- <label class="feature-item">
- <input
- type="checkbox"
- id="operatorsEnabled"
- ${enabledOperators ? "checked" : ""}
- >
- Operadores PT
- </label>
-
- <label class="feature-item">
- <input
- type="checkbox"
- id="iptvEnabled"
- ${enabledIPTV ? "checked" : ""}
- >
- IPTV
- </label>
-
-</div>
-<div id="iptvContainer">
-
-    <div class="mode-buttons">
-
-      <button
-        type="button"
-        id="m3uButton"
-        class="mode-button ${
-          mode === "m3u"
-            ? "active"
-            : ""
-        }"
-      >
-        M3U URL
-      </button>
-
-      <button
-        type="button"
-        id="xtreamButton"
-        class="mode-button ${
-          mode === "xtream"
-            ? "active"
-            : ""
-        }"
-      >
-        Xtream Codes
-      </button>
+      <label class="feature-item">
+        <input
+          type="checkbox"
+          id="iptvEnabled"
+          ${enabledIPTV ? "checked" : ""}
+        >
+        <span>IPTV</span>
+      </label>
 
     </div>
 
+    <!-- =========================================================
+         DESTAQUES
+         ========================================================= -->
 
-    <div
-      id="m3uSection"
-      class="section ${
-        mode === "m3u"
-          ? "active"
-          : ""
-      }"
-    >
+    <div id="featuredContainer" class="config-panel">
 
-      <label for="m3uUrl">
-        URL da lista M3U
-      </label>
+      <h2 class="panel-title">Destaques</h2>
 
-      <input
-        id="m3uUrl"
-        type="url"
-        placeholder="https://exemplo.com/lista.m3u"
-        value="${escapeHtml(m3uUrl)}"
-      >
+      <p class="panel-description">
+        Escolhe o tipo de conteúdo de Destaques que queres disponibilizar.
+        Podes selecionar filmes, séries ou ambos.
+      </p>
+
+      <div class="option-grid">
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="featuredMovies"
+            ${featuredMoviesChecked ? "checked" : ""}
+          >
+          <span>Filmes</span>
+        </label>
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="featuredSeries"
+            ${featuredSeriesChecked ? "checked" : ""}
+          >
+          <span>Séries</span>
+        </label>
+
+      </div>
 
     </div>
 
+    <!-- =========================================================
+         STREAMERS
+         ========================================================= -->
 
-    <div
-      id="xtreamSection"
-      class="section ${
-        mode === "xtream"
-          ? "active"
-          : ""
-      }"
-    >
+    <div id="streamersContainer" class="config-panel">
 
-      <label for="xtreamServer">
-        Servidor Xtream
-      </label>
+      <h2 class="panel-title">Streamers</h2>
 
-      <input
-        id="xtreamServer"
-        type="url"
-        placeholder="https://servidor.com:8080"
+      <p class="panel-description">
+        Seleciona um ou vários streamers. Cada seleção pode ser instalada
+        individualmente ou em conjunto.
+      </p>
+
+      <div class="option-grid">
+${streamerCheckboxes}
+      </div>
+
+    </div>
+
+    <!-- =========================================================
+         OPERADORES
+         ========================================================= -->
+
+    <div id="operatorsContainer" class="config-panel">
+
+      <h2 class="panel-title">Operadores PT</h2>
+
+      <p class="panel-description">
+        Seleciona os operadores que queres disponibilizar no addon.
+        Podes escolher um ou vários.
+      </p>
+
+      <div class="option-grid">
+${operatorCheckboxes}
+      </div>
+
+    </div>
+
+    <!-- =========================================================
+         IPTV
+         ========================================================= -->
+
+    <div id="iptvContainer" class="config-panel">
+
+      <h2 class="panel-title">IPTV</h2>
+
+      <p class="panel-description">
+        Seleciona a fonte IPTV que queres utilizar. A configuração apresentada
+        muda automaticamente de acordo com a fonte escolhida.
+      </p>
+
+      <div class="mode-buttons">
+
+        <button
+          type="button"
+          id="iptvOrgButton"
+          class="mode-button"
+        >
+          IPTV-org Free
+        </button>
+
+        <button
+          type="button"
+          id="xtreamButton"
+          class="mode-button"
+        >
+          Xtream API
+        </button>
+
+        <button
+          type="button"
+          id="m3uButton"
+          class="mode-button"
+        >
+          M3U / M3U+
+        </button>
+
+      </div>
+
+      <!-- =======================================================
+           IPTV-ORG
+           ======================================================= -->
+
+      <div id="iptvOrgSection" class="section">
+
+        <h3 class="panel-title">Filtro de Canais</h3>
+
+        <p class="panel-description">
+          Utiliza a base de dados IPTV-org com milhares
+          de canais gratuitos de todo o mundo.
+          
+          Não são necessárias credenciais.
+        </p>
+
+        <label class="field-label" for="iptvOrgCountry">
+          País
+        </label>
+
+        <input
+          id="iptvOrgCountry"
+          type="text"
+          placeholder="Ex.: PT"
+        value="${escapeHtml(iptvOrgCountry)}"
+        >
+
+        <div class="help">
+          Deixa em branco para incluir todos os países.
+        </div>
+
+        <label class="field-label" for="iptvOrgCategory">
+          Categoria
+        </label>
+
+        <input
+          id="iptvOrgCategory"
+          type="text"
+          placeholder="Ex.: news, sports, movies"
+        value="${escapeHtml(iptvOrgCategory)}"
+        >
+
+        <div class="help">
+          Deixa em branco para incluir todas as categorias.
+        </div>
+
+        <div class="subsection">
+
+          <h3 class="subsection-title">Apresentação</h3>
+
+          <label class="field-label" for="iptvOrgCatalogName">
+            Nome do Catálogo
+          </label>
+
+          <input
+            id="iptvOrgCatalogName"
+            type="text"
+            placeholder="IPTV-org Free"
+          value="${escapeHtml(iptvOrgCatalogName)}"
+          >
+
+          <div class="help">
+            Nome apresentado na lista de canais do Stremio.
+            Deixa em branco para utilizar o nome predefinido.
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- =======================================================
+           XTREAM API
+           ======================================================= -->
+
+      <div id="xtreamSection" class="section">
+
+        <h3 class="panel-title">Credentials</h3>
+
+        <label class="field-label" for="xtreamServer">
+          Base URL <span class="required">*</span>
+        </label>
+
+        <input
+          id="xtreamServer"
+          type="url"
+          placeholder="https://servidor.com:8080"
         value="${escapeHtml(xtreamServer)}"
-      >
+        >
 
+        <div class="help">
+          Não incluir uma barra final.
+        </div>
 
-      <label for="username">
-        Username
-      </label>
+        <label class="field-label" for="username">
+          Username <span class="required">*</span>
+        </label>
 
-      <input
-        id="username"
-        type="text"
-        placeholder="Username"
+        <input
+          id="username"
+          type="text"
+          placeholder="Username"
         value="${escapeHtml(username)}"
-      >
+        >
 
+        <label class="field-label" for="password">
+          Password <span class="required">*</span>
+        </label>
 
-      <label for="password">
-        Password
-      </label>
+        <input
+          id="password"
+          type="password"
+          placeholder="Password"
+        >
 
-      <input
-        id="password"
-        type="password"
-        placeholder="Password"
-      >
+        <div class="subsection">
+
+          <h3 class="subsection-title">Show</h3>
+
+          <div class="option-grid">
+
+            <label class="option-item">
+              <input
+                type="checkbox"
+                id="xtreamShowLive"
+                ${xtreamShowLiveChecked ? "checked" : ""}
+              >
+              <span>Live TV</span>
+            </label>
+
+          </div>
+
+        </div>
+
+        <div class="subsection">
+
+          <h3 class="subsection-title">EPG Options</h3>
+
+          <label class="field-label" for="xtreamEpgMode">
+            EPG Source Mode
+          </label>
+
+          <select id="xtreamEpgMode">
+            <option value="auto" ${xtreamEpgMode === "auto" ? "selected" : ""}>Auto</option>
+            <option value="url" ${xtreamEpgMode === "url" ? "selected" : ""}>URL personalizada</option>
+            <option value="none" ${xtreamEpgMode === "none" ? "selected" : ""}>Desativado</option>
+          </select>
+
+          <label class="field-label" for="xtreamEpgOffset">
+            EPG Offset (hours)
+          </label>
+
+          <input
+            id="xtreamEpgOffset"
+            type="number"
+            step="1"
+            value="${xtreamEpgOffset}"
+            placeholder="0"
+          >
+
+          <div id="xtreamEpgUrlWrap">
+
+            <label class="field-label" for="xtreamEpgUrl">
+              EPG URL
+            </label>
+
+            <input
+              id="xtreamEpgUrl"
+              type="url"
+              placeholder="https://exemplo.com/epg.xml"
+            value="${escapeHtml(xtreamEpgUrl)}"
+            >
+
+          </div>
+
+        </div>
+
+        <div class="subsection">
+
+          <h3 class="subsection-title">Display</h3>
+
+          <label class="field-label" for="xtreamCatalogName">
+            Catalog Name
+          </label>
+
+          <input
+            id="xtreamCatalogName"
+            type="text"
+            placeholder="Xtream API"
+          value="${escapeHtml(xtreamCatalogName)}"
+          >
+
+          <div class="help">
+            Nome apresentado na lista de canais do Stremio.
+            Deixa em branco para utilizar o nome predefinido.
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- =======================================================
+           M3U / M3U+
+           ======================================================= -->
+
+      <div id="m3uSection" class="section">
+
+        <h3 class="panel-title">Playlist</h3>
+
+        <p class="panel-description">
+          Cola qualquer URL de playlist <strong>M3U ou M3U+</strong>.
+          Funciona com links Xtream Codes
+          <code>type=m3u_plus</code> e playlists M3U standard.
+          O URL de cada stream é extraído individualmente.
+        </p>
+
+        <div class="source-toggle">
+
+          <label class="source-option">
+            <input
+              type="radio"
+              name="m3uSource"
+              id="m3uSourceUrl"
+              value="url"
+              ${m3uSource === "url" ? "checked" : ""}
+            >
+            <span>Playlist por URL</span>
+          </label>
+
+          <label class="source-option">
+            <input
+              type="radio"
+              name="m3uSource"
+              id="m3uSourceFile"
+              value="file"
+            ${m3uSource === "file" ? "checked" : ""}
+            >
+            <span>Ficheiro M3U / M3U8</span>
+          </label>
+
+        </div>
+
+        <div id="m3uUrlSource">
+
+          <label class="field-label" for="m3uUrl">
+            Playlist URL <span class="required">*</span>
+          </label>
+
+          <input
+            id="m3uUrl"
+            type="url"
+            placeholder="https://exemplo.com/lista.m3u"
+          value="${escapeHtml(m3uUrl)}"
+          >
+
+        </div>
+
+        <div id="m3uFileSource" class="section">
+
+          <label class="field-label" for="m3uFile">
+            Ficheiro M3U / M3U8 <span class="required">*</span>
+          </label>
+
+          <input
+            id="m3uFile"
+            type="file"
+            accept=".m3u,.m3u8,audio/x-mpegurl,application/x-mpegURL"
+          >
+
+          <div id="m3uFileInfo" class="help">
+            Seleciona um ficheiro M3U ou M3U8 do teu computador.
+          </div>
+
+        </div>
+
+        <div class="public-playlists">
+
+          <div class="public-title">
+            Public Playlists — links de terceiros, não afiliados nem
+            endossados por este addon.
+          </div>
+
+          <div class="public-link">
+            <strong>CANAIS BR 1</strong> — Public Link
+          </div>
+
+          <div class="public-link">
+            <strong>CANAIS BR 2</strong> — Public Link
+          </div>
+
+          <div class="public-link">
+            <strong>CANAIS BR 3</strong> — Public Link
+          </div>
+
+          <div class="public-link">
+            <strong>CANAIS BR 4</strong> — Public Link
+          </div>
+
+          <div class="public-link">
+            <strong>CANAIS BR 5</strong> — Public Link
+          </div>
+
+          <div class="public-link">
+            <strong>CANAIS BR 6</strong> — Public Link
+          </div>
+
+        </div>
+
+        <div class="subsection">
+
+          <h3 class="subsection-title">EPG Options</h3>
+
+          <label class="field-label" for="m3uEpgMode">
+            EPG Source Mode
+          </label>
+
+          <select id="m3uEpgMode">
+            <option value="url" ${m3uEpgMode === "url" ? "selected" : ""}>URL personalizada</option>
+            <option value="playlist" ${m3uEpgMode === "playlist" ? "selected" : ""}>Da playlist / provider</option>
+            <option value="none" ${m3uEpgMode === "none" ? "selected" : ""}>Desativado</option>
+          </select>
+
+          <label class="field-label" for="epgUrl">
+            URL EPG
+            <span style="color:#777;font-weight:normal;">
+              (opcional)
+            </span>
+          </label>
+
+          <input
+            id="epgUrl"
+            type="url"
+            placeholder="https://exemplo.com/epg.xml"
+          value="${escapeHtml(epgUrl)}"
+          >
+
+          <label class="field-label" for="m3uEpgOffset">
+            EPG Offset (hours)
+          </label>
+
+          <input
+            id="m3uEpgOffset"
+            type="number"
+            step="1"
+            value="${m3uEpgOffset}"
+            placeholder="0"
+          >
+
+        </div>
+
+        <div class="subsection">
+
+          <h3 class="subsection-title">Advanced</h3>
+
+          <label class="field-label" for="globalUserAgent">
+            Global User-Agent
+          </label>
+
+          <input
+            id="globalUserAgent"
+            type="text"
+            placeholder="Deixa em branco salvo se o teu provider exigir um player específico"
+          value="${escapeHtml(globalUserAgent)}"
+          >
+
+          <div class="option-grid" style="margin-top:10px;">
+
+            <label class="option-item">
+              <input
+                type="radio"
+                name="userAgentPreset"
+                value=""
+                checked
+              >
+              <span>Sem preset</span>
+            </label>
+
+            <label class="option-item">
+              <input
+                type="radio"
+                name="userAgentPreset"
+                value="TiviMate"
+              >
+              <span>TiviMate</span>
+            </label>
+
+            <label class="option-item">
+              <input
+                type="radio"
+                name="userAgentPreset"
+                value="IPTV Smarters Pro"
+              >
+              <span>IPTV Smarters Pro</span>
+            </label>
+
+            <label class="option-item">
+              <input
+                type="radio"
+                name="userAgentPreset"
+                value="GSE Smart IPTV"
+              >
+              <span>GSE Smart IPTV</span>
+            </label>
+
+            <label class="option-item">
+              <input
+                type="radio"
+                name="userAgentPreset"
+                value="VLC"
+              >
+              <span>VLC</span>
+            </label>
+
+            <label class="option-item">
+              <input
+                type="radio"
+                name="userAgentPreset"
+                value="Kodi"
+              >
+              <span>Kodi</span>
+            </label>
+
+            <label class="option-item">
+              <input
+                type="radio"
+                name="userAgentPreset"
+                value="Custom"
+              >
+              <span>Custom…</span>
+            </label>
+
+          </div>
+
+          <div class="help">
+            Canais que tenham o seu próprio User-Agent na playlist
+            têm prioridade sobre esta definição.
+          </div>
+
+        </div>
+
+        <div class="subsection">
+
+          <h3 class="subsection-title">Display</h3>
+
+          <label class="field-label" for="m3uCatalogName">
+            Catalog Name
+          </label>
+
+          <input
+            id="m3uCatalogName"
+            type="text"
+            placeholder="Minha IPTV"
+          value="${escapeHtml(m3uCatalogName)}"
+          >
+
+          <div class="help">
+            Nome apresentado na lista de canais do Stremio.
+            Deixa em branco para utilizar o nome predefinido.
+          </div>
+
+        </div>
+
+      </div>
 
     </div>
 
+    <!-- =========================================================
+         BOTÕES
+         ========================================================= -->
 
-<div id="epgContainer">
+    <div class="buttons">
 
- <label for="epgUrl">
- URL EPG
- <span style="color:#777;font-weight:normal;">
- (opcional)
- </span>
- </label>
+      <div id="testButtonContainer">
 
- <input
- id="epgUrl"
- type="url"
- placeholder="https://exemplo.com/epg.xml"
- value="${escapeHtml(epgUrl)}"
- >
+        <button
+          id="testButton"
+          class="test"
+          type="button"
+        >
+          Testar ligação
+        </button>
 
-</div>
-</div>
+      </div>
 
-<div class="buttons">
+      <button
+        id="installButton"
+        class="install"
+        type="button"
+      >
+        Instalar
+      </button>
 
- <div id="testButtonContainer">
-
- <button
- id="testButton"
- class="test"
- type="button"
- >
- Testar ligação
- </button>
-
- </div>
-
- <button
- id="installButton"
- class="install"
- type="button"
- >
- Gerar instalação
- </button>
-
-</div>
+    </div>
 
     <div
       id="status"
       class="status"
     ></div>
-
 
     <div
       id="installBox"
@@ -1594,26 +2407,119 @@ select:focus {
 
 </div>
 
-
 <script>
 (function () {
 
+  /*
+   * ==============================================================
+   * ESTADO
+   * ==============================================================
+   */
+
   let currentMode = "${mode}";
 
-  const m3uButton =
-    document.getElementById("m3uButton");
+  /*
+   * ==============================================================
+   * ELEMENTOS PRINCIPAIS
+   * ==============================================================
+   */
+
+  const featuredEnabled =
+    document.getElementById("featuredEnabled");
+
+  const streamersEnabled =
+    document.getElementById("streamersEnabled");
+
+  const operatorsEnabled =
+    document.getElementById("operatorsEnabled");
+
+  const iptvEnabled =
+    document.getElementById("iptvEnabled");
+
+  const featuredContainer =
+    document.getElementById("featuredContainer");
+
+  const streamersContainer =
+    document.getElementById("streamersContainer");
+
+  const operatorsContainer =
+    document.getElementById("operatorsContainer");
+
+  const iptvContainer =
+    document.getElementById("iptvContainer");
+
+  /*
+   * ==============================================================
+   * DESTAQUES
+   * ==============================================================
+   */
+
+  const featuredMovies =
+    document.getElementById("featuredMovies");
+
+  const featuredSeries =
+    document.getElementById("featuredSeries");
+
+  /*
+   * ==============================================================
+   * STREAMERS
+   * ==============================================================
+   */
+
+  const streamerIds = ${streamerIdsJs};
+
+  /*
+   * ==============================================================
+   * OPERADORES
+   * ==============================================================
+   */
+
+  const operatorIds = ${operatorIdsJs};
+
+  /*
+   * ==============================================================
+   * IPTV
+   * ============================================================== 
+   */
+
+  const iptvOrgButton =
+    document.getElementById("iptvOrgButton");
 
   const xtreamButton =
     document.getElementById("xtreamButton");
 
-  const m3uSection =
-    document.getElementById("m3uSection");
+  const m3uButton =
+    document.getElementById("m3uButton");
+
+  const iptvOrgSection =
+    document.getElementById("iptvOrgSection");
 
   const xtreamSection =
     document.getElementById("xtreamSection");
 
-  const m3uUrl =
-    document.getElementById("m3uUrl");
+  const m3uSection =
+    document.getElementById("m3uSection");
+
+  /*
+   * ==============================================================
+   * IPTV-ORG
+   * ==============================================================
+   */
+
+  const iptvOrgCountry =
+    document.getElementById("iptvOrgCountry");
+
+  const iptvOrgCategory =
+    document.getElementById("iptvOrgCategory");
+
+  const iptvOrgCatalogName =
+    document.getElementById("iptvOrgCatalogName");
+
+  /*
+   * ==============================================================
+   * XTREAM
+   * ==============================================================
+   */
 
   const xtreamServer =
     document.getElementById("xtreamServer");
@@ -1624,8 +2530,65 @@ select:focus {
   const password =
     document.getElementById("password");
 
+  const xtreamShowLive =
+    document.getElementById("xtreamShowLive");
+
+  const xtreamEpgMode =
+    document.getElementById("xtreamEpgMode");
+
+  const xtreamEpgOffset =
+    document.getElementById("xtreamEpgOffset");
+
+  const xtreamEpgUrl =
+    document.getElementById("xtreamEpgUrl");
+
+  const xtreamEpgUrlWrap =
+    document.getElementById("xtreamEpgUrlWrap");
+
+  const xtreamCatalogName =
+    document.getElementById("xtreamCatalogName");
+
+  /*
+   * ==============================================================
+   * M3U
+   * ==============================================================
+   */
+
+  const m3uUrl =
+    document.getElementById("m3uUrl");
+
+  const m3uFile =
+    document.getElementById("m3uFile");
+
+  const m3uFileInfo =
+    document.getElementById("m3uFileInfo");
+
+  const m3uSourceUrl =
+    document.getElementById("m3uSourceUrl");
+
+  const m3uSourceFile =
+    document.getElementById("m3uSourceFile");
+
+  const m3uUrlSource =
+    document.getElementById("m3uUrlSource");
+
+  const m3uFileSource =
+    document.getElementById("m3uFileSource");
+
+  const m3uEpgMode =
+    document.getElementById("m3uEpgMode");
+
   const epgUrl =
     document.getElementById("epgUrl");
+
+  const m3uEpgOffset =
+    document.getElementById("m3uEpgOffset");
+
+  const globalUserAgent =
+    document.getElementById("globalUserAgent");
+
+  const m3uCatalogName =
+    document.getElementById("m3uCatalogName");
 
   const testButton =
     document.getElementById("testButton");
@@ -1648,119 +2611,400 @@ select:focus {
   const openButton =
     document.getElementById("openButton");
 
-const featuredEnabled =
- document.getElementById("featuredEnabled");
+  const testButtonContainer =
+    document.getElementById("testButtonContainer");
 
-const streamersEnabled =
- document.getElementById("streamersEnabled");
+  const buttons =
+    document.querySelector(".buttons");
 
-const operatorsEnabled =
- document.getElementById("operatorsEnabled");
 
-const iptvEnabled =
- document.getElementById(
- "iptvEnabled"
+  /*
+   * ==============================================================
+   * HELPERS
+   * ==============================================================
+   */
+
+  function showStatus(message) {
+    status.textContent = message;
+    status.classList.add("show");
+  }
+
+  function hideInstall() {
+    installBox.classList.remove("show");
+    installUrl.textContent = "";
+  }
+
+  function setPanelVisibility(panel, visible) {
+    panel.classList.toggle("active", !!visible);
+  }
+
+  /*
+   * ==============================================================
+   * CONTEÚDO — VISIBILIDADE DOS CONTAINERS
+   * ============================================================== 
+   */
+
+
+function updateContentVisibility() {
+
+ setPanelVisibility(
+ featuredContainer,
+ featuredEnabled.checked
  );
 
-const iptvContainer =
- document.getElementById(
- "iptvContainer"
+ setPanelVisibility(
+ streamersContainer,
+ streamersEnabled.checked
  );
 
-const epgContainer =
- document.getElementById(
- "epgContainer"
+ setPanelVisibility(
+ operatorsContainer,
+ operatorsEnabled.checked
  );
 
-const testButtonContainer =
- document.getElementById(
- "testButtonContainer"
+ setPanelVisibility(
+ iptvContainer,
+ iptvEnabled.checked
  );
+
+ testButtonContainer.style.display =
+ iptvEnabled.checked
+ ? "block"
+ : "none";
+
+ if (iptvEnabled.checked) {
+
+ buttons.classList.remove(
+ "single"
+ );
+
+ } else {
+
+ buttons.classList.add(
+ "single"
+ );
+
+ }
+}
+
+  /*
+   * ==============================================================
+   * IPTV — MODO
+   * ============================================================== 
+   */
 
   function setMode(mode) {
 
     currentMode = mode;
 
-    if (mode === "m3u") {
+    iptvOrgButton.classList.remove("active");
+    xtreamButton.classList.remove("active");
+    m3uButton.classList.remove("active");
 
-      m3uButton.classList.add("active");
-      xtreamButton.classList.remove("active");
+    iptvOrgSection.classList.remove("active");
+    xtreamSection.classList.remove("active");
+    m3uSection.classList.remove("active");
 
-      m3uSection.classList.add("active");
-      xtreamSection.classList.remove("active");
+    if (mode === "iptv-org") {
+
+      iptvOrgButton.classList.add("active");
+      iptvOrgSection.classList.add("active");
+
+    } else if (mode === "xtream") {
+
+      xtreamButton.classList.add("active");
+      xtreamSection.classList.add("active");
 
     } else {
 
-      m3uButton.classList.remove("active");
-      xtreamButton.classList.add("active");
-
-      m3uSection.classList.remove("active");
-      xtreamSection.classList.add("active");
+      currentMode = "m3u";
+      m3uButton.classList.add("active");
+      m3uSection.classList.add("active");
 
     }
-   updateIPTVVisibility();
 
+    updateXtreamEpgVisibility();
+    updateM3USourceVisibility();
   }
 
+  /*
+   * ==============================================================
+   * XTREAM — EPG
+   * ============================================================== 
+   */
 
-  function showStatus(message) {
+  function updateXtreamEpgVisibility() {
 
-    status.textContent = message;
-    status.classList.add("show");
+    if (!xtreamEpgMode) {
+      return;
+    }
 
+    xtreamEpgUrlWrap.style.display =
+      xtreamEpgMode.value === "url"
+        ? "block"
+        : "none";
   }
 
+  /*
+   * ==============================================================
+   * M3U — URL OU FICHEIRO
+   * ============================================================== 
+   */
 
-  function hideInstall() {
+  function updateM3USourceVisibility() {
 
-    installBox.classList.remove("show");
-    installUrl.textContent = "";
+    const source =
+      document.querySelector(
+        'input[name="m3uSource"]:checked'
+      );
 
+    const isFile =
+      source && source.value === "file";
+
+    m3uUrlSource.style.display =
+      isFile ? "none" : "block";
+
+    m3uFileSource.classList.toggle(
+      "active",
+      !!isFile
+    );
   }
 
+  /*
+   * ==============================================================
+   * SELEÇÕES
+   * ============================================================== 
+   */
 
-function getConfig() {
+  function getCheckedValues(ids) {
 
- return {
+    return ids
+      .map(function (id) {
+        const element =
+          document.getElementById(id);
 
- features: {
+        return element && element.checked
+          ? element.value
+          : null;
+      })
+      .filter(Boolean);
+  }
 
- featured:
- featuredEnabled.checked,
+  /*
+   * ==============================================================
+   * FICHEIRO M3U
+   * ============================================================== 
+   */
 
- streamers:
- streamersEnabled.checked,
+  let m3uFileData = "";
 
- operators:
- operatorsEnabled.checked,
+  m3uFile.addEventListener(
+    "change",
+    function () {
 
- iptv:
- iptvEnabled.checked
+      const file =
+        m3uFile.files &&
+        m3uFile.files[0];
 
- },
+      if (!file) {
 
- mode:
- currentMode,
+        m3uFileData = "";
 
- m3uUrl:
- m3uUrl.value.trim(),
+        m3uFileInfo.textContent =
+          "Seleciona um ficheiro M3U ou M3U8 do teu computador.";
 
- xtreamServer:
- xtreamServer.value.trim(),
+        return;
+      }
 
- username:
- username.value.trim(),
+      const lowerName =
+        file.name.toLowerCase();
 
- password:
- password.value,
+      if (
+        !lowerName.endsWith(".m3u") &&
+        !lowerName.endsWith(".m3u8")
+      ) {
 
- epgUrl:
- epgUrl.value.trim()
+        m3uFile.value = "";
+        m3uFileData = "";
 
- };
+        m3uFileInfo.textContent =
+          "Erro: seleciona um ficheiro .m3u ou .m3u8.";
 
-}
+        return;
+      }
 
+      const reader =
+        new FileReader();
+
+      reader.onload =
+        function (event) {
+
+          m3uFileData =
+            event.target.result || "";
+
+          m3uFileInfo.textContent =
+            "Ficheiro selecionado: " +
+            file.name +
+            " (" +
+            Math.round(file.size / 1024) +
+            " KB)";
+        };
+
+      reader.onerror =
+        function () {
+
+          m3uFileData = "";
+
+          m3uFileInfo.textContent =
+            "Não foi possível ler o ficheiro.";
+        };
+
+      reader.readAsText(file);
+    }
+  );
+
+  /*
+   * ==============================================================
+   * CONFIGURAÇÃO
+   * ============================================================== 
+   */
+
+  function getConfig() {
+
+    const m3uSourceElement =
+      document.querySelector(
+        'input[name="m3uSource"]:checked'
+      );
+
+    const m3uSource =
+      m3uSourceElement
+        ? m3uSourceElement.value
+        : "url";
+
+    return {
+
+      features: {
+
+        featured:
+          featuredEnabled.checked,
+
+        featuredContent: {
+          movies:
+            featuredMovies.checked,
+          series:
+            featuredSeries.checked
+        },
+
+        streamers:
+          streamersEnabled.checked,
+
+        selectedStreamers:
+          getCheckedValues(streamerIds),
+
+        operators:
+          operatorsEnabled.checked,
+
+        selectedOperators:
+          getCheckedValues(operatorIds),
+
+        iptv:
+          iptvEnabled.checked
+      },
+
+      mode:
+        currentMode,
+
+      /*
+       * IPTV-org
+       */
+
+      iptvOrg: {
+
+        country:
+          iptvOrgCountry.value.trim(),
+
+        category:
+          iptvOrgCategory.value.trim(),
+
+        catalogName:
+          iptvOrgCatalogName.value.trim()
+      },
+
+      /*
+       * Xtream
+       */
+
+      xtreamServer:
+        xtreamServer.value.trim(),
+
+      username:
+        username.value.trim(),
+
+      password:
+        password.value,
+
+      xtreamShow: {
+
+        live:
+          xtreamShowLive.checked
+      },
+
+      xtreamEpgMode:
+        xtreamEpgMode.value,
+
+      xtreamEpgOffset:
+        Number(xtreamEpgOffset.value || 0),
+
+      xtreamEpgUrl:
+        xtreamEpgUrl.value.trim(),
+
+      xtreamCatalogName:
+        xtreamCatalogName.value.trim(),
+
+      /*
+       * M3U / M3U+
+       */
+
+      m3uSource:
+        m3uSource,
+
+      m3uUrl:
+        m3uUrl.value.trim(),
+
+      /*
+       * Atenção:
+       * m3uFileData contém o conteúdo do ficheiro escolhido.
+       * O server.js deverá aceitar esta propriedade se for usada
+       * para instalar uma playlist local.
+       */
+
+      m3uFileData:
+        m3uSource === "file"
+          ? m3uFileData
+          : "",
+
+      epgUrl:
+        epgUrl.value.trim(),
+
+      m3uEpgMode:
+        m3uEpgMode.value,
+
+      m3uEpgOffset:
+        Number(m3uEpgOffset.value || 0),
+
+      globalUserAgent:
+        globalUserAgent.value.trim(),
+
+      m3uCatalogName:
+        m3uCatalogName.value.trim()
+    };
+  }
+
+  /*
+   * ==============================================================
+   * CODIFICAÇÃO
+   * ============================================================== 
+   */
 
   function encodeConfig(config) {
 
@@ -1780,9 +3024,13 @@ function getConfig() {
       .replace(/\\+/g, "-")
       .replace(/\\//g, "_")
       .replace(/=+$/g, "");
-
   }
 
+  /*
+   * ==============================================================
+   * URL DE INSTALAÇÃO
+   * ============================================================== 
+   */
 
   function getInstallUrl() {
 
@@ -1802,27 +3050,129 @@ function getConfig() {
       /^https?:\\/\\//i,
       "stremio://"
     );
-
   }
 
+  /*
+   * ==============================================================
+   * EVENTOS — CHECKBOXES
+   * ============================================================== 
+   */
 
-  m3uButton.addEventListener(
-    "click",
+  featuredEnabled.addEventListener(
+    "change",
     function () {
-      setMode("m3u");
+
+      updateContentVisibility();
       hideInstall();
     }
   );
 
+  streamersEnabled.addEventListener(
+    "change",
+    function () {
+
+      updateContentVisibility();
+      hideInstall();
+    }
+  );
+
+  operatorsEnabled.addEventListener(
+    "change",
+    function () {
+
+      updateContentVisibility();
+      hideInstall();
+    }
+  );
+
+  iptvEnabled.addEventListener(
+    "change",
+    function () {
+
+      updateContentVisibility();
+      hideInstall();
+    }
+  );
+
+  /*
+   * ==============================================================
+   * EVENTOS — IPTV
+   * ============================================================== 
+   */
+
+  iptvOrgButton.addEventListener(
+    "click",
+    function () {
+
+      setMode("iptv-org");
+      hideInstall();
+    }
+  );
 
   xtreamButton.addEventListener(
     "click",
     function () {
+
       setMode("xtream");
       hideInstall();
     }
   );
 
+  m3uButton.addEventListener(
+    "click",
+    function () {
+
+      setMode("m3u");
+      hideInstall();
+    }
+  );
+
+  xtreamEpgMode.addEventListener(
+    "change",
+    updateXtreamEpgVisibility
+  );
+
+  document
+    .querySelectorAll(
+      'input[name="m3uSource"]'
+    )
+    .forEach(function (element) {
+
+      element.addEventListener(
+        "change",
+        function () {
+
+          updateM3USourceVisibility();
+          hideInstall();
+        }
+      );
+
+    });
+
+  /*
+   * ==============================================================
+   * ALTERAÇÕES DE CONFIGURAÇÃO ESCONDEM INSTALAÇÃO ANTIGA
+   * ============================================================== 
+   */
+
+  document
+    .querySelectorAll(
+      "input, select"
+    )
+    .forEach(function (element) {
+
+      element.addEventListener(
+        "change",
+        hideInstall
+      );
+
+    });
+
+  /*
+   * ==============================================================
+   * TESTAR LIGAÇÃO
+   * ============================================================== 
+   */
 
   testButton.addEventListener(
     "click",
@@ -1860,6 +3210,7 @@ function getConfig() {
           await response.json();
 
         if (!response.ok) {
+
           throw new Error(
             data.error ||
             "Erro ao testar ligação."
@@ -1887,19 +3238,209 @@ function getConfig() {
     }
   );
 
+  /*
+   * ==============================================================
+   * VALIDAÇÃO M3U
+   * ============================================================== 
+   */
 
-  installButton.addEventListener(
-    "click",
-    function () {
+  function validateM3U(config) {
 
-      hideInstall();
+    if (config.m3uSource === "file") {
 
-      try {
+      if (!config.m3uFileData) {
 
-        const config =
-          getConfig();
+        showStatus(
+          "Seleciona um ficheiro M3U ou M3U8."
+        );
 
-if (!config.features.iptv) {
+        return false;
+      }
+
+      return true;
+    }
+
+    if (
+      !/^https?:\\/\\//i.test(
+        config.m3uUrl
+      )
+    ) {
+
+      showStatus(
+        "Indica um URL M3U válido."
+      );
+
+      return false;
+    }
+
+    return true;
+  }
+
+  /*
+   * ==============================================================
+   * VALIDAÇÃO IPTV-ORG
+   * ============================================================== 
+   */
+
+  function validateIPTVOrg(config) {
+
+    /*
+     * IPTV-org não necessita de credenciais.
+     * Country e Category são opcionais.
+     */
+
+    return true;
+  }
+
+  /*
+   * ==============================================================
+   * VALIDAÇÃO XTREAM
+   * ============================================================== 
+   */
+
+  function validateXtream(config) {
+
+    if (
+      !/^https?:\\/\\//i.test(
+        config.xtreamServer
+      )
+    ) {
+
+      showStatus(
+        "Indica um URL de servidor Xtream válido."
+      );
+
+      return false;
+    }
+
+    if (
+      !config.username ||
+      !config.password
+    ) {
+
+      showStatus(
+        "Indica username e password Xtream."
+      );
+
+      return false;
+    }
+
+    return true;
+  }
+
+
+/*
+ * ==============================================================
+ * GERAR INSTALAÇÃO
+ * ==============================================================
+ */
+
+installButton.addEventListener(
+ "click",
+ function () {
+
+ hideInstall();
+
+ try {
+
+ const config =
+ getConfig();
+
+ const hasContent =
+
+ config.features.featured ||
+
+ config.features.streamers ||
+
+ config.features.operators ||
+
+ config.features.iptv;
+
+ if (!hasContent) {
+
+ showStatus(
+ "Add-on não instalado. Deve selecionar pelo menos um conteúdo."
+ );
+
+ return;
+ }
+
+ /*
+ * Conteúdo
+ */
+
+ if (
+ config.features.featured &&
+ !config.features.featuredContent.movies &&
+ !config.features.featuredContent.series
+ ) {
+
+ showStatus(
+ "Em Destaques seleciona Filmes, Séries ou ambos."
+ );
+
+ return;
+ }
+
+ if (
+ config.features.streamers &&
+ config.features.selectedStreamers.length === 0
+ ) {
+
+ showStatus(
+ "Em Streamers seleciona pelo menos um streamer."
+ );
+
+ return;
+ }
+
+ if (
+ config.features.operators &&
+ config.features.selectedOperators.length === 0
+ ) {
+
+ showStatus(
+ "Em Operadores PT seleciona pelo menos um operador."
+ );
+
+ return;
+ }
+
+ /*
+ * IPTV
+ */
+
+ if (config.features.iptv) {
+
+ if (
+ currentMode === "m3u" &&
+ !validateM3U(config)
+ ) {
+
+ return;
+ }
+
+ if (
+ currentMode === "xtream" &&
+ !validateXtream(config)
+ ) {
+
+ return;
+ }
+
+ if (
+ currentMode === "iptv-org" &&
+ !validateIPTVOrg(config)
+ ) {
+
+ return;
+ }
+
+ }
+
+ /*
+ * GERAR URL
+ */
 
  const url =
  getInstallUrl();
@@ -1912,84 +3453,33 @@ if (!config.features.iptv) {
  );
 
  showStatus(
- "URL de instalação gerado com sucesso."
+ "URL de instalação gerada com sucesso."
  );
 
- return;
-}
+ setTimeout(() => {
 
-        if (
-          currentMode === "m3u" &&
-          !/^https?:\\/\\//i.test(
-            config.m3uUrl
-          )
-        ) {
+ window.location.href =
+ url;
 
-          showStatus(
-            "Indica um URL M3U válido."
-          );
+ }, 400);
 
-          return;
-        }
+ } catch (error) {
 
+ showStatus(
+ "Erro: " +
+ error.message
+ );
 
-        if (
-          currentMode === "xtream" &&
-          !/^https?:\\/\\//i.test(
-            config.xtreamServer
-          )
-        ) {
+ }
 
-          showStatus(
-            "Indica um URL de servidor Xtream válido."
-          );
+ }
+);
 
-          return;
-        }
-
-
-        if (
-          currentMode === "xtream" &&
-          (
-            !config.username ||
-            !config.password
-          )
-        ) {
-
-          showStatus(
-            "Indica username e password Xtream."
-          );
-
-          return;
-        }
-
-
-        const url =
-          getInstallUrl();
-
-        installUrl.textContent =
-          url;
-
-        installBox.classList.add(
-          "show"
-        );
-
-        showStatus(
-          "URL de instalação gerado com sucesso."
-        );
-
-      } catch (error) {
-
-        showStatus(
-          "Erro: " +
-          error.message
-        );
-
-      }
-
-    }
-  );
-
+  /*
+   * ==============================================================
+   * COPIAR URL
+   * ============================================================== 
+   */
 
   copyButton.addEventListener(
     "click",
@@ -2023,6 +3513,11 @@ if (!config.features.iptv) {
     }
   );
 
+  /*
+   * ==============================================================
+   * ABRIR NO STREMIO
+   * ============================================================== 
+   */
 
   openButton.addEventListener(
     "click",
@@ -2037,50 +3532,37 @@ if (!config.features.iptv) {
 
       window.location.href =
         url;
-
     }
   );
 
-function updateIPTVVisibility() {
+  /*
+   * ==============================================================
+   * INICIALIZAÇÃO
+   * ============================================================== 
+   */
 
- const iptvActive =
- iptvEnabled.checked;
+  updateContentVisibility();
 
- iptvContainer.style.display =
- iptvActive
- ? "block"
- : "none";
+  if (
+    currentMode !== "iptv-org" &&
+    currentMode !== "xtream" &&
+    currentMode !== "m3u"
+  ) {
 
- testButtonContainer.style.display =
- iptvActive
- ? "block"
- : "none";
+    currentMode = "iptv-org";
+  }
 
- const showEPG =
- iptvActive &&
- currentMode === "m3u";
+  setMode(currentMode);
 
- epgContainer.style.display =
- showEPG
- ? "block"
- : "none";
-
-}
-
-iptvEnabled.addEventListener(
- "change",
- updateIPTVVisibility
-);
-
-updateIPTVVisibility();
-
-setMode(currentMode);
+  updateXtreamEpgVisibility();
+  updateM3USourceVisibility();
 
 })();
 </script>
 
 </body>
 </html>
+
 `;
 }
 
@@ -2135,9 +3617,9 @@ app.post("/test-iptv", async (req, res) => {
     if (config.mode === "m3u") {
 
       const channels =
-        await fetchM3U(
-          config.m3uUrl
-        );
+        config.m3uSource === "file" && config.m3uFileData
+          ? parseM3U(config.m3uFileData)
+          : await fetchM3U(config.m3uUrl);
 
       return res.json({
         success: true,
@@ -2147,6 +3629,19 @@ app.post("/test-iptv", async (req, res) => {
       });
 
     }
+if (config.mode === "iptv-org") {
+
+  const channels =
+    await getIPTVOrgChannels(config);
+
+  return res.json({
+    success: true,
+    message:
+      `Ligação IPTV-org efetuada com sucesso. ${channels.length} canais encontrados.`,
+    channels: channels.length
+  });
+
+}
 if (config.mode === "xtream") {
 
   const data =
@@ -2218,11 +3713,132 @@ function buildManifest(config) {
  const features =
  config?.features || {};
 
+ const hasConfig =
+ !!config;
+
+ const showFeatured =
+ features.featured !== false;
+
+ const featuredContent =
+ features.featuredContent || {
+ movies: true,
+ series: true
+ };
+
+ const showStreamers =
+ features.streamers !== false;
+
+ const selectedStreamers =
+ Array.isArray(features.selectedStreamers)
+ ? features.selectedStreamers
+ : null;
+
  const showOperators =
  features.operators !== false;
 
+ const selectedOperators =
+ Array.isArray(features.selectedOperators)
+ ? features.selectedOperators
+ : null;
+
  const showIPTV =
  features.iptv === true;
+
+ function filterFeaturedCatalog(list, type) {
+
+ return list.filter((catalog) => {
+
+ if (catalog.id !== "featured") {
+ return true;
+ }
+
+ if (!hasConfig) {
+ return true;
+ }
+
+ if (!showFeatured) {
+ return false;
+ }
+
+ if (type === "movie") {
+ return featuredContent.movies !== false;
+ }
+
+ if (type === "series") {
+ return featuredContent.series !== false;
+ }
+
+ return true;
+
+ });
+
+ }
+
+ function filterStreamerCatalogs(list) {
+
+ if (!hasConfig) {
+ return list;
+ }
+
+ if (!showStreamers) {
+
+ return list.filter(
+ (catalog) =>
+ catalog.id === "featured" ||
+ catalog.id === "movie-top" ||
+ catalog.id === "series-top"
+ );
+
+ }
+
+ if (!selectedStreamers || !selectedStreamers.length) {
+ return list;
+ }
+
+ return list.filter((catalog) =>
+ catalog.id === "featured" ||
+ catalog.id === "movie-top" ||
+ catalog.id === "series-top" ||
+ selectedStreamers.includes(catalog.id)
+ );
+
+ }
+
+ const filteredMovieCatalogs =
+ filterStreamerCatalogs(
+ filterFeaturedCatalog(movieCatalogs, "movie")
+ );
+
+ const filteredSeriesCatalogs =
+ filterStreamerCatalogs(
+ filterFeaturedCatalog(seriesCatalogs, "series")
+ );
+
+ const filteredOperatorCatalogs =
+ (() => {
+
+ const all = getOperatorCatalogs();
+
+ if (!hasConfig) {
+ return all;
+ }
+
+ if (!selectedOperators || !selectedOperators.length) {
+ return all;
+ }
+
+ return all.filter((catalog) =>
+ selectedOperators.includes(catalog.id)
+ );
+
+ })();
+
+ const iptvCatalogName =
+ config?.mode === "xtream"
+ ? (config?.xtreamCatalogName || "📡 Xtream API")
+ : config?.mode === "iptv-org"
+ ? (config?.iptvOrg?.catalogName || "📡 IPTV-org Free")
+ : (config?.m3uCatalogName || "📡 Minha IPTV");
 
  const manifest = {
     ...manifestTemplate,
@@ -2252,7 +3868,7 @@ function buildManifest(config) {
 
  catalogs: [
 
-...movieCatalogs.map(
+...filteredMovieCatalogs.map(
 (catalog) => ({
 type: "movie",
 id: catalog.id,
@@ -2260,7 +3876,7 @@ name: catalog.name
 })
 ),
 
-...seriesCatalogs.map(
+...filteredSeriesCatalogs.map(
 (catalog) => ({
 type: "series",
 id: catalog.id,
@@ -2273,13 +3889,13 @@ name: catalog.name
  {
  type: "channel",
  id: "m3u",
- name: "📡 Minha IPTV"
+ name: iptvCatalogName
  }
  ]
  : []),
 
 ...(showOperators
- ? getOperatorCatalogs()
+ ? filteredOperatorCatalogs
  : [])
 
 ],
@@ -2488,6 +4104,31 @@ app.get(
 
             }
           )
+        });
+
+      }
+
+
+      const operator =
+        getOperatorById(catalogId);
+
+      if (operator) {
+
+        const channels =
+          getOperatorChannels(operator);
+
+        return res.json({
+          metas: channels.map((channel) => ({
+            id: channel.id,
+            type: "channel",
+            name: channel.name,
+            poster: channel.logo || PT_HUB_LOGO,
+            logo: channel.logo || PT_HUB_LOGO,
+            description:
+              channel.group
+                ? `Operador: ${channel.group}`
+                : ""
+          }))
         });
 
       }
@@ -2904,9 +4545,37 @@ app.get(
         type === "channel"
       ) {
 
+        if (id.startsWith("operator:")) {
+
+          const operatorId = id.split(":")[1];
+          const operator = getOperatorById(operatorId);
+          const channels = getOperatorChannels(operator);
+          const channel = channels.find((item) => item.id === id);
+
+          if (!channel) {
+            return res.json({ meta: null });
+          }
+
+          return res.json({
+            meta: {
+              id: channel.id,
+              type: "channel",
+              name: channel.name,
+              poster: channel.logo || PT_HUB_LOGO,
+              logo: channel.logo || PT_HUB_LOGO,
+              description:
+                channel.group
+                  ? `Operador: ${channel.group}`
+                  : ""
+            }
+          });
+
+        }
+
         if (
           id.startsWith("m3u:") ||
-          id.startsWith("xtream:")
+          id.startsWith("xtream:") ||
+          id.startsWith("iptvorg:")
         ) {
 
           if (!config) {
@@ -3012,6 +4681,30 @@ app.get(
       if (
         type === "channel"
       ) {
+
+        if (id.startsWith("operator:")) {
+
+          const operatorId = id.split(":")[1];
+          const operator = getOperatorById(operatorId);
+          const channels = getOperatorChannels(operator);
+          const channel = channels.find((item) => item.id === id);
+
+          if (!channel) {
+            return res.json({ streams: [] });
+          }
+
+          return res.json({
+            streams: [
+              {
+                name: "PT•HUB",
+                title: channel.name,
+                url: channel.url,
+                behaviorHints: { notWebReady: false }
+              }
+            ]
+          });
+
+        }
 
         if (!config) {
           return res.json({
