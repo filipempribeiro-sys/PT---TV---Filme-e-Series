@@ -37,6 +37,7 @@ app.use((req, res, next) => {
   }
   next();
 });
+
 /* =========================================================
    HELPERS
    ========================================================= */
@@ -81,7 +82,8 @@ function encodeConfig(config) {
     "utf8"
   ).toString("base64url");
 }
- function decodeConfig(value) {
+
+function decodeConfig(value) {
   try {
     if (!value) {
       return null;
@@ -111,7 +113,8 @@ function isValidHttpUrl(value) {
     return false;
   }
 }
- function escapeHtml(value) {
+
+function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -119,7 +122,8 @@ function isValidHttpUrl(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
- function normalizeUrl(value) {
+
+function normalizeUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
@@ -161,8 +165,12 @@ return response;
 }
 
 /* =========================================================
-   M3U
+   M3U CACHE & PARSER
    ========================================================= */
+
+const m3uCache = new Map();
+const M3U_CACHE_TTL = 5 * 60 * 1000;
+
 function parseM3U(content) {
   const lines = String(content || "")
     .replace(/\r/g, "")
@@ -252,9 +260,7 @@ function parseM3U(content) {
 
   return channels;
 }
- /* =========================================================
-   M3U FETCH
-   ========================================================= */
+
 async function fetchM3U(url) {
 
   if (!isValidHttpUrl(url)) {
@@ -318,10 +324,13 @@ async function fetchM3U(url) {
 
   return channels;
 }
+
 /* =========================================================
-   XTREAM
+   XTREAM CACHE & API
    ========================================================= */
 
+const xtreamCache = new Map();
+const XTREAM_CACHE_TTL = 5 * 60 * 1000;
 
 async function xtreamRequest(config, action) {
 
@@ -374,7 +383,6 @@ if (action) {
  let response;
 
  try {
-
 
 response =
  await fetch(url, {
@@ -512,6 +520,7 @@ const cacheKey =
 
   return channels;
 }
+
 /* =========================================================
  IPTV-ORG
  ========================================================= */
@@ -552,10 +561,6 @@ async function getIPTVOrgChannels(config) {
  return [];
  }
 
- /*
- * FILTRO PAÍS
- */
-
  if (country) {
 
  channels =
@@ -565,10 +570,6 @@ async function getIPTVOrgChannels(config) {
  );
 
  }
-
- /*
- * FILTRO CATEGORIA
- */
 
  if (category) {
 
@@ -653,29 +654,10 @@ async function getIPTVOrgChannels(config) {
  }
 
 }
-/*
-=========================================================
-  M3U CACHE
-=========================================================
-*/
-
-const m3uCache = new Map();
-
-const M3U_CACHE_TTL = 5 * 60 * 1000;
 
 /* =========================================================
-   XTREAM CACHE
-   ========================================================= */
-
-const xtreamCache = new Map();
-
-const XTREAM_CACHE_TTL = 5 * 60 * 1000;
-
-/*
-=========================================================
-  IPTV CHANNELS
-=========================================================
-*/
+ IPTV CHANNELS ENTRY POINT
+ ========================================================= */
 
 async function getIPTVChannels(config) {
 
@@ -683,12 +665,10 @@ async function getIPTVChannels(config) {
  return [];
  }
 
- /* IPTV-ORG */
  if (config.mode === "iptv-org") {
  return await getIPTVOrgChannels(config);
  }
 
- /* M3U */
  if (config.mode === "m3u") {
 
  if (
@@ -701,7 +681,6 @@ async function getIPTVChannels(config) {
  return await fetchM3U(config.m3uUrl);
  }
 
- /* XTREAM */
  if (config.mode === "xtream") {
  return await getXtreamChannels(config);
  }
@@ -712,7 +691,6 @@ async function getIPTVChannels(config) {
 /* =========================================================
  CONFIG VALIDATION
  ========================================================= */
-
 
 function validateConfig(config) {
 
@@ -829,7 +807,7 @@ async function getCinemetaMeta(type, id) {
 }
 
 /* =========================================================
-   JUSTWATCH STREAMER CATALOGS - 1.4.3
+   JUSTWATCH STREAMER CATALOGS
    ========================================================= */
 
 const JUSTWATCH_URL =
@@ -844,7 +822,6 @@ const streamerNames = {
   "disney-plus": "Disney Plus",
   "apple-tv-plus": "Apple TV Plus"
 };
-
 
 async function justWatchRequest(
  query,
@@ -936,7 +913,6 @@ shortName
 }
 `;
 
-
 const response =
  await fetchWithTimeout(
  JUSTWATCH_URL,
@@ -1018,7 +994,6 @@ async function getStreamerPackage(streamerId) {
     }) || null
   );
 }
-
 
 async function getJustWatchCatalog(
   type,
@@ -1127,28 +1102,28 @@ async function getJustWatchCatalog(
       continue;
     }
 
-metas.push({
-  id: imdbId,
-  type,
-  name: content.title || "Título",
+    metas.push({
+      id: imdbId,
+      type,
+      name: content.title || "Título",
 
-  poster:
-    `https://images.metahub.space/poster/medium/${imdbId}/img`,
+      poster:
+        `https://images.metahub.space/poster/medium/${imdbId}/img`,
 
-  background:
-    `https://images.metahub.space/background/medium/${imdbId}/img`
-});
-}
+      background:
+        `https://images.metahub.space/background/medium/${imdbId}/img`
+    });
+  }
 
-return {
-metas
-};
+  return {
+    metas
+  };
 
 }
 
 async function getFeaturedCatalog(type) {
 
-const streamers = [
+const streamersList = [
 "netflix",
 "hbomax",
 "prime-video",
@@ -1159,7 +1134,7 @@ const streamers = [
 const metas = [];
 const ids = new Set();
 
-for (const streamer of streamers) {
+for (const streamer of streamersList) {
 
 try {
 
@@ -1201,7 +1176,7 @@ metas: metas.slice(0, 50)
 STREAMER CATALOGS
 =========================================================
 */
- function getMovieCatalogs() {
+function getMovieCatalogs() {
 
 const specialCatalogs =
 catalogs.filter(
@@ -1261,8 +1236,7 @@ name: `📺 ${operator.name}`
 );
 }
 
-/*
-=========================================================
+/* =========================================================
    CONFIGURE PAGE
    ========================================================= */
 
@@ -1303,7 +1277,6 @@ const enabledIPTV =
  features.iptv === true;
 
   return `
-
 <!DOCTYPE html>
 <html lang="pt-PT">
 <head>
@@ -1735,7 +1708,6 @@ button:disabled {
   font-size: 12px;
 }
 
-
 @media (max-width: 600px) {
 
  .card {
@@ -1822,10 +1794,7 @@ button:disabled {
 
     </div>
 
-    <!-- =========================================================
-         DESTAQUES
-         ========================================================= -->
-
+    <!-- DESTAQUES -->
     <div id="featuredContainer" class="config-panel">
 
       <h2 class="panel-title">Destaques</h2>
@@ -1859,10 +1828,7 @@ button:disabled {
 
     </div>
 
-    <!-- =========================================================
-         STREAMERS
-         ========================================================= -->
-
+    <!-- STREAMERS -->
     <div id="streamersContainer" class="config-panel">
 
       <h2 class="panel-title">Streamers</h2>
@@ -1903,10 +1869,7 @@ button:disabled {
 
     </div>
 
-    <!-- =========================================================
-         OPERADORES
-         ========================================================= -->
-
+    <!-- OPERADORES -->
     <div id="operatorsContainer" class="config-panel">
 
       <h2 class="panel-title">Operadores PT</h2>
@@ -1942,10 +1905,7 @@ button:disabled {
 
     </div>
 
-    <!-- =========================================================
-         IPTV
-         ========================================================= -->
-
+    <!-- IPTV -->
     <div id="iptvContainer" class="config-panel">
 
       <h2 class="panel-title">IPTV</h2>
@@ -1983,10 +1943,7 @@ button:disabled {
 
       </div>
 
-      <!-- =======================================================
-           IPTV-ORG
-           ======================================================= -->
-
+      <!-- IPTV-ORG -->
       <div id="iptvOrgSection" class="section">
 
         <h3 class="panel-title">Filtro de Canais</h3>
@@ -2049,10 +2006,7 @@ button:disabled {
 
       </div>
 
-      <!-- =======================================================
-           XTREAM API
-           ======================================================= -->
-
+      <!-- XTREAM API -->
       <div id="xtreamSection" class="section">
 
         <h3 class="panel-title">Credentials</h3>
@@ -2065,6 +2019,7 @@ button:disabled {
           id="xtreamServer"
           type="url"
           placeholder="https://servidor.com:8080"
+          value="${xtreamServer}"
         >
 
         <div class="help">
@@ -2079,6 +2034,7 @@ button:disabled {
           id="username"
           type="text"
           placeholder="Username"
+          value="${username}"
         >
 
         <label class="field-label" for="password">
@@ -2175,10 +2131,7 @@ button:disabled {
 
       </div>
 
-      <!-- =======================================================
-           M3U / M3U+
-           ======================================================= -->
-
+      <!-- M3U / M3U+ -->
       <div id="m3uSection" class="section">
 
         <h3 class="panel-title">Playlist</h3>
@@ -2225,6 +2178,7 @@ button:disabled {
             id="m3uUrl"
             type="url"
             placeholder="https://exemplo.com/lista.m3u"
+            value="${m3uUrl}"
           >
 
         </div>
@@ -2305,6 +2259,7 @@ button:disabled {
             id="epgUrl"
             type="url"
             placeholder="https://exemplo.com/epg.xml"
+            value="${epgUrl}"
           >
 
           <label class="field-label" for="m3uEpgOffset">
@@ -2435,10 +2390,7 @@ button:disabled {
 
     </div>
 
-    <!-- =========================================================
-         BOTÕES
-         ========================================================= -->
-
+    <!-- BOTÕES -->
     <div class="buttons">
 
       <div id="testButtonContainer">
@@ -2515,19 +2467,7 @@ button:disabled {
 <script>
 (function () {
 
-  /*
-   * ==============================================================
-   * ESTADO
-   * ==============================================================
-   */
-
   let currentMode = "${mode}";
-
-  /*
-   * ==============================================================
-   * ELEMENTOS PRINCIPAIS
-   * ==============================================================
-   */
 
   const featuredEnabled =
     document.getElementById("featuredEnabled");
@@ -2553,23 +2493,11 @@ button:disabled {
   const iptvContainer =
     document.getElementById("iptvContainer");
 
-  /*
-   * ==============================================================
-   * DESTAQUES
-   * ==============================================================
-   */
-
   const featuredMovies =
     document.getElementById("featuredMovies");
 
   const featuredSeries =
     document.getElementById("featuredSeries");
-
-  /*
-   * ==============================================================
-   * STREAMERS
-   * ==============================================================
-   */
 
   const streamerIds = [
     "streamerNetflix",
@@ -2579,24 +2507,12 @@ button:disabled {
     "streamerApple"
   ];
 
-  /*
-   * ==============================================================
-   * OPERADORES
-   * ==============================================================
-   */
-
   const operatorIds = [
     "operatorMEO",
     "operatorNOS",
     "operatorVodafone",
     "operatorDIGI"
   ];
-
-  /*
-   * ==============================================================
-   * IPTV
-   * ============================================================== 
-   */
 
   const iptvOrgButton =
     document.getElementById("iptvOrgButton");
@@ -2616,12 +2532,6 @@ button:disabled {
   const m3uSection =
     document.getElementById("m3uSection");
 
-  /*
-   * ==============================================================
-   * IPTV-ORG
-   * ==============================================================
-   */
-
   const iptvOrgCountry =
     document.getElementById("iptvOrgCountry");
 
@@ -2630,12 +2540,6 @@ button:disabled {
 
   const iptvOrgCatalogName =
     document.getElementById("iptvOrgCatalogName");
-
-  /*
-   * ==============================================================
-   * XTREAM
-   * ==============================================================
-   */
 
   const xtreamServer =
     document.getElementById("xtreamServer");
@@ -2663,12 +2567,6 @@ button:disabled {
 
   const xtreamCatalogName =
     document.getElementById("xtreamCatalogName");
-
-  /*
-   * ==============================================================
-   * M3U
-   * ==============================================================
-   */
 
   const m3uUrl =
     document.getElementById("m3uUrl");
@@ -2733,13 +2631,6 @@ button:disabled {
   const buttons =
     document.querySelector(".buttons");
 
-
-  /*
-   * ==============================================================
-   * HELPERS
-   * ==============================================================
-   */
-
   function showStatus(message) {
     status.textContent = message;
     status.classList.add("show");
@@ -2753,13 +2644,6 @@ button:disabled {
   function setPanelVisibility(panel, visible) {
     panel.classList.toggle("active", !!visible);
   }
-
-  /*
-   * ==============================================================
-   * CONTEÚDO — VISIBILIDADE DOS CONTAINERS
-   * ============================================================== 
-   */
-
 
 function updateContentVisibility() {
 
@@ -2803,12 +2687,6 @@ function updateContentVisibility() {
  }
 }
 
-  /*
-   * ==============================================================
-   * IPTV — MODO
-   * ============================================================== 
-   */
-
   function setMode(mode) {
 
     currentMode = mode;
@@ -2843,12 +2721,6 @@ function updateContentVisibility() {
     updateM3USourceVisibility();
   }
 
-  /*
-   * ==============================================================
-   * XTREAM — EPG
-   * ============================================================== 
-   */
-
   function updateXtreamEpgVisibility() {
 
     if (!xtreamEpgMode) {
@@ -2860,12 +2732,6 @@ function updateContentVisibility() {
         ? "block"
         : "none";
   }
-
-  /*
-   * ==============================================================
-   * M3U — URL OU FICHEIRO
-   * ============================================================== 
-   */
 
   function updateM3USourceVisibility() {
 
@@ -2886,12 +2752,6 @@ function updateContentVisibility() {
     );
   }
 
-  /*
-   * ==============================================================
-   * SELEÇÕES
-   * ============================================================== 
-   */
-
   function getCheckedValues(ids) {
 
     return ids
@@ -2905,12 +2765,6 @@ function updateContentVisibility() {
       })
       .filter(Boolean);
   }
-
-  /*
-   * ==============================================================
-   * FICHEIRO M3U
-   * ============================================================== 
-   */
 
   let m3uFileData = "";
 
@@ -2979,12 +2833,6 @@ function updateContentVisibility() {
     }
   );
 
-  /*
-   * ==============================================================
-   * CONFIGURAÇÃO
-   * ============================================================== 
-   */
-
   function getConfig() {
 
     const m3uSourceElement =
@@ -3030,10 +2878,6 @@ function updateContentVisibility() {
       mode:
         currentMode,
 
-      /*
-       * IPTV-org
-       */
-
       iptvOrg: {
 
         country:
@@ -3045,10 +2889,6 @@ function updateContentVisibility() {
         catalogName:
           iptvOrgCatalogName.value.trim()
       },
-
-      /*
-       * Xtream
-       */
 
       xtreamServer:
         xtreamServer.value.trim(),
@@ -3077,22 +2917,11 @@ function updateContentVisibility() {
       xtreamCatalogName:
         xtreamCatalogName.value.trim(),
 
-      /*
-       * M3U / M3U+
-       */
-
       m3uSource:
         m3uSource,
 
       m3uUrl:
         m3uUrl.value.trim(),
-
-      /*
-       * Atenção:
-       * m3uFileData contém o conteúdo do ficheiro escolhido.
-       * O server.js deverá aceitar esta propriedade se for usada
-       * para instalar uma playlist local.
-       */
 
       m3uFileData:
         m3uSource === "file"
@@ -3116,12 +2945,6 @@ function updateContentVisibility() {
     };
   }
 
-  /*
-   * ==============================================================
-   * CODIFICAÇÃO
-   * ============================================================== 
-   */
-
   function encodeConfig(config) {
 
     const json =
@@ -3142,12 +2965,6 @@ function updateContentVisibility() {
       .replace(/=+$/g, "");
   }
 
-  /*
-   * ==============================================================
-   * URL DE INSTALAÇÃO
-   * ============================================================== 
-   */
-
   function getInstallUrl() {
 
     const config =
@@ -3167,12 +2984,6 @@ function updateContentVisibility() {
       "stremio://"
     );
   }
-
-  /*
-   * ==============================================================
-   * EVENTOS — CHECKBOXES
-   * ============================================================== 
-   */
 
   featuredEnabled.addEventListener(
     "change",
@@ -3209,12 +3020,6 @@ function updateContentVisibility() {
       hideInstall();
     }
   );
-
-  /*
-   * ==============================================================
-   * EVENTOS — IPTV
-   * ============================================================== 
-   */
 
   iptvOrgButton.addEventListener(
     "click",
@@ -3265,12 +3070,6 @@ function updateContentVisibility() {
 
     });
 
-  /*
-   * ==============================================================
-   * ALTERAÇÕES DE CONFIGURAÇÃO ESCONDEM INSTALAÇÃO ANTIGA
-   * ============================================================== 
-   */
-
   document
     .querySelectorAll(
       "input, select"
@@ -3283,12 +3082,6 @@ function updateContentVisibility() {
       );
 
     });
-
-  /*
-   * ==============================================================
-   * TESTAR LIGAÇÃO
-   * ============================================================== 
-   */
 
   testButton.addEventListener(
     "click",
@@ -3354,12 +3147,6 @@ function updateContentVisibility() {
     }
   );
 
-  /*
-   * ==============================================================
-   * VALIDAÇÃO M3U
-   * ============================================================== 
-   */
-
   function validateM3U(config) {
 
     if (config.m3uSource === "file") {
@@ -3392,27 +3179,9 @@ function updateContentVisibility() {
     return true;
   }
 
-  /*
-   * ==============================================================
-   * VALIDAÇÃO IPTV-ORG
-   * ============================================================== 
-   */
-
   function validateIPTVOrg(config) {
-
-    /*
-     * IPTV-org não necessita de credenciais.
-     * Country e Category são opcionais.
-     */
-
     return true;
   }
-
-  /*
-   * ==============================================================
-   * VALIDAÇÃO XTREAM
-   * ============================================================== 
-   */
 
   function validateXtream(config) {
 
@@ -3444,13 +3213,6 @@ function updateContentVisibility() {
     return true;
   }
 
-
-/*
- * ==============================================================
- * GERAR INSTALAÇÃO
- * ==============================================================
- */
-
 installButton.addEventListener(
  "click",
  function () {
@@ -3480,10 +3242,6 @@ installButton.addEventListener(
 
  return;
  }
-
- /*
- * Conteúdo
- */
 
  if (
  config.features.featured &&
@@ -3522,10 +3280,6 @@ installButton.addEventListener(
  return;
  }
 
- /*
- * IPTV
- */
-
  if (config.features.iptv) {
 
  if (
@@ -3553,10 +3307,6 @@ installButton.addEventListener(
  }
 
  }
-
- /*
- * GERAR URL
- */
 
  const url =
  getInstallUrl();
@@ -3591,12 +3341,6 @@ installButton.addEventListener(
  }
 );
 
-  /*
-   * ==============================================================
-   * COPIAR URL
-   * ============================================================== 
-   */
-
   copyButton.addEventListener(
     "click",
     async function () {
@@ -3629,12 +3373,6 @@ installButton.addEventListener(
     }
   );
 
-  /*
-   * ==============================================================
-   * ABRIR NO STREMIO
-   * ============================================================== 
-   */
-
   openButton.addEventListener(
     "click",
     function () {
@@ -3650,12 +3388,6 @@ installButton.addEventListener(
         url;
     }
   );
-
-  /*
-   * ==============================================================
-   * INICIALIZAÇÃO
-   * ============================================================== 
-   */
 
   updateContentVisibility();
 
@@ -3836,7 +3568,6 @@ return res.status(400).json({
 /* =========================================================
    MANIFEST
    ========================================================= */
-
 
 function buildManifest(config) {
 
@@ -4382,11 +4113,6 @@ app.get(
       const id =
         req.params.id;
 
-
-      /* -----------------------------------------------------
-         FILMES / SÉRIES
-         ----------------------------------------------------- */
-
       if (
         type === "movie" ||
         type === "series"
@@ -4401,11 +4127,6 @@ app.get(
         return res.json(data);
 
       }
-
-
-      /* -----------------------------------------------------
-         IPTV
-         ----------------------------------------------------- */
 
       if (
         type === "channel"
@@ -4469,7 +4190,6 @@ app.get(
 
       }
 
-
       return res.json({
         meta: null
       });
@@ -4489,7 +4209,6 @@ app.get(
 
   }
 );
-
 
 /* =========================================================
    STREAM
@@ -4511,10 +4230,6 @@ app.get(
 
       const id =
         req.params.id;
-
-      /* -----------------------------------------------------
-         IPTV
-         ----------------------------------------------------- */
 
       if (
         type === "channel"
@@ -4579,10 +4294,6 @@ app.get(
 
       }
 
-      /* -----------------------------------------------------
-         FILMES / SÉRIES
-         ----------------------------------------------------- */
-
       if (
         type === "movie" ||
         type === "series"
@@ -4614,7 +4325,12 @@ app.get(
   }
 );
 
-<!DOCTYPE html>
+/* =========================================================
+   ROOT LANDING PAGE
+   ========================================================= */
+
+app.get("/", (req, res) => {
+  res.send(`<!DOCTYPE html>
 <html lang="pt-PT">
 <head>
 
@@ -4714,9 +4430,7 @@ app.get(
 </body>
 </html>
 `);
-
 });
-
 
 /* =========================================================
    404
@@ -4732,7 +4446,6 @@ app.use(
 
   }
 );
-
 
 /* =========================================================
    ERROR HANDLER
@@ -4754,7 +4467,6 @@ app.use(
 
   }
 );
-
 
 /* =========================================================
    SERVER
