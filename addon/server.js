@@ -2,13 +2,28 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const dns = require("dns");
+
+/*
+ * Alguns servidores Xtream/IPTV rejeitam ou "resetam" ligações
+ * feitas via IPv6 (comum em plataformas como o Render). Forçar
+ * a resolução DNS a preferir IPv4 evita falhas ECONNRESET.
+ */
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch (error) {
+  console.error(
+    "Não foi possível definir preferência DNS IPv4:",
+    error.message
+  );
+}
 
 const app = express();
 
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.0";
+const VERSION = "1.5.0";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -33,6 +48,69 @@ app.use((req, res, next) => {
   }
   next();
 });
+/* =========================================================
+   ARMAZENAMENTO TEMPORÁRIO DE FICHEIROS M3U
+   =========================================================
+   Guardar o conteúdo do ficheiro M3U diretamente no URL de
+   instalação (stremio://...) produz um link demasiado grande,
+   que o Stremio/Nuvio rejeitam ao tentar abrir a app. Em vez
+   disso, o ficheiro é enviado para o servidor (/upload-m3u),
+   guardado aqui, e o URL de instalação passa a conter apenas
+   um ID curto (m3uFileId).
+   ========================================================= */
+
+const M3U_FILE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const M3U_FILE_MAX_BYTES = 8 * 1024 * 1024;
+
+const m3uFileStore = new Map();
+
+function cleanupM3UFileStore() {
+  const now = Date.now();
+
+  for (const [id, entry] of m3uFileStore) {
+    if (now - entry.createdAt > M3U_FILE_TTL_MS) {
+      m3uFileStore.delete(id);
+    }
+  }
+}
+
+setInterval(cleanupM3UFileStore, 60 * 60 * 1000);
+
+app.post(
+  "/upload-m3u",
+  express.text({
+    limit: "8mb",
+    type: () => true
+  }),
+  (req, res) => {
+
+    const content =
+      typeof req.body === "string" ? req.body : "";
+
+    if (!content.trim()) {
+      return res.status(400).json({
+        error: "Ficheiro M3U vazio ou inválido."
+      });
+    }
+
+    if (Buffer.byteLength(content, "utf8") > M3U_FILE_MAX_BYTES) {
+      return res.status(400).json({
+        error: "Ficheiro demasiado grande (máximo 8MB)."
+      });
+    }
+
+    const id = crypto.randomBytes(12).toString("hex");
+
+    m3uFileStore.set(id, {
+      content,
+      createdAt: Date.now()
+    });
+
+    res.json({ id });
+
+  }
+);
+
 /* =========================================================
    HELPERS
    ========================================================= */
@@ -154,25 +232,22 @@ function parseM3U(content) {
         name = line.slice(commaIndex + 1).trim();
       }
        const tvgIdMatch = attributes.match(
-        /tvg-id="([^"]*)"/i
+        /tvg-id=["']([^"']*)["']/i
       );
       const tvgNameMatch = attributes.match(
-        /tvg-name="([^"]*)"/i
+        /tvg-name=["']([^"']*)["']/i
       );
       const tvgLogoMatch = attributes.match(
         /tvg-logo=["']([^"']*)["']/i
       );
       const groupMatch = attributes.match(
-        /group-title="([^"]*)"/i
-      );
-       const groupMatchSingle = attributes.match(
-        /group-title='([^']*)'/i
+        /group-title=["']([^"']*)["']/i
       );
 
       currentInfo = {
         name:
-          tvgNameMatch?.[1] ||
           name ||
+          tvgNameMatch?.[1] ||
           "Canal IPTV",
 
         tvgId:
@@ -185,7 +260,6 @@ function parseM3U(content) {
 
         group:
           groupMatch?.[1] ||
-          groupMatchSingle?.[1] ||
           "TV"
       };
        continue;
@@ -300,6 +374,15 @@ if (action) {
  url
  );
 
+ const maxAttempts = 3;
+ let lastError = null;
+
+ for (
+ let attempt = 1;
+ attempt <= maxAttempts;
+ attempt++
+ ) {
+
  const controller =
  new AbortController();
 
@@ -309,12 +392,9 @@ if (action) {
  15000
  );
 
- let response;
-
  try {
 
-
-response =
+ const response =
  await fetch(url, {
  signal:
  controller.signal,
@@ -326,18 +406,30 @@ response =
  "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 
  "Accept":
- "application/json,*/*"
+ "application/json,*/*",
+
+ "Connection": "close"
  }
  });
 
  clearTimeout(timeout);
 
+ if (!response.ok) {
+ throw new Error(
+ `Xtream respondeu HTTP ${response.status}`
+ );
+ }
+
+ return await response.json();
+
  } catch (error) {
 
  clearTimeout(timeout);
 
+ lastError = error;
+
  console.error(
- "XTREAM FETCH ERROR:",
+ `XTREAM FETCH ERROR (tentativa ${attempt}/${maxAttempts}):`,
  error
  );
 
@@ -346,21 +438,35 @@ response =
  url
  );
 
+ const isNetworkError =
+ error.cause?.code ||
+ error.name === "AbortError";
+
+ if (
+ attempt < maxAttempts &&
+ isNetworkError
+ ) {
+
+ await new Promise(
+ (resolve) =>
+ setTimeout(resolve, 1200 * attempt)
+ );
+
+ continue;
+
+ }
+
  throw new Error(
  `Falha ao contactar servidor Xtream (${error.cause?.code || error.message})`
  );
 
  }
 
- if (!response.ok) {
-
- throw new Error(
- `Xtream respondeu HTTP ${response.status}`
- );
-
  }
 
- return await response.json();
+ throw new Error(
+ `Falha ao contactar servidor Xtream (${lastError?.cause?.code || lastError?.message})`
+ );
 
 }
 
@@ -421,6 +527,9 @@ const IPTVORG_CHANNELS_URL =
 const IPTVORG_STREAMS_URL =
   "https://iptv-org.github.io/api/streams.json";
 
+const IPTVORG_LOGOS_URL =
+  "https://iptv-org.github.io/api/logos.json";
+
 let iptvOrgCache = null;
 let iptvOrgCacheTime = 0;
 
@@ -435,13 +544,20 @@ async function getIPTVOrgData() {
     return iptvOrgCache;
   }
 
-  const [channelsResponse, streamsResponse] = await Promise.all([
+  const [
+    channelsResponse,
+    streamsResponse,
+    logosResponse
+  ] = await Promise.all([
     fetch(IPTVORG_CHANNELS_URL, {
       headers: { "User-Agent": `PT-HUB/${VERSION}` }
     }),
     fetch(IPTVORG_STREAMS_URL, {
       headers: { "User-Agent": `PT-HUB/${VERSION}` }
-    })
+    }),
+    fetch(IPTVORG_LOGOS_URL, {
+      headers: { "User-Agent": `PT-HUB/${VERSION}` }
+    }).catch(() => null)
   ]);
 
   if (!channelsResponse.ok || !streamsResponse.ok) {
@@ -452,6 +568,16 @@ async function getIPTVOrgData() {
 
   const channels = await channelsResponse.json();
   const streams = await streamsResponse.json();
+
+  let logos = [];
+
+  try {
+    if (logosResponse && logosResponse.ok) {
+      logos = await logosResponse.json();
+    }
+  } catch (error) {
+    logos = [];
+  }
 
   const streamsByChannel = {};
 
@@ -467,21 +593,85 @@ async function getIPTVOrgData() {
     streamsByChannel[stream.channel].push(stream);
   }
 
-  iptvOrgCache = { channels, streamsByChannel };
+  const logoByChannel = {};
+
+  for (const logo of logos) {
+    if (
+      logo.channel &&
+      !logoByChannel[logo.channel]
+    ) {
+      logoByChannel[logo.channel] = logo.url;
+    }
+  }
+
+  iptvOrgCache = {
+    channels,
+    streamsByChannel,
+    logoByChannel
+  };
+
   iptvOrgCacheTime = now;
 
   return iptvOrgCache;
+}
+
+const IPTVORG_COUNTRY_NAME_MAP = {
+  PORTUGAL: "PT",
+  BRASIL: "BR",
+  BRAZIL: "BR",
+  ESPANHA: "ES",
+  SPAIN: "ES",
+  "REINO UNIDO": "GB",
+  "UNITED KINGDOM": "GB",
+  FRANCA: "FR",
+  FRANÇA: "FR",
+  FRANCE: "FR",
+  ALEMANHA: "DE",
+  GERMANY: "DE",
+  ITALIA: "IT",
+  ITÁLIA: "IT",
+  ITALY: "IT",
+  "ESTADOS UNIDOS": "US",
+  USA: "US",
+  "UNITED STATES": "US"
+};
+
+function normalizeIPTVOrgCountry(value) {
+
+  const raw =
+    String(value || "").trim().toUpperCase();
+
+  if (!raw) {
+    return "";
+  }
+
+  if (raw.length === 2) {
+    return raw;
+  }
+
+  return IPTVORG_COUNTRY_NAME_MAP[raw] || raw;
 }
 
 async function getIPTVOrgChannels(config) {
 
   const iptvOrg = config.iptvOrg || {};
 
-  const country =
-    String(iptvOrg.country || "").trim().toUpperCase();
+  const rawCountry =
+    String(iptvOrg.country || "").trim();
 
-  const category =
+  const rawCategory =
     String(iptvOrg.category || "").trim().toLowerCase();
+
+  /*
+   * Se nada for indicado, assume Portugal por defeito
+   * (addon orientado a conteúdo português).
+   */
+  const country =
+    rawCountry || rawCategory
+      ? normalizeIPTVOrgCountry(rawCountry)
+      : "PT";
+
+  const category = rawCategory;
 
   const data = await getIPTVOrgData();
 
@@ -489,7 +679,10 @@ async function getIPTVOrgChannels(config) {
 
   for (const channel of data.channels) {
 
-    if (country && channel.country !== country) {
+    if (
+      country &&
+      String(channel.country || "").toUpperCase() !== country
+    ) {
       continue;
     }
 
@@ -497,7 +690,12 @@ async function getIPTVOrgChannels(config) {
       category &&
       !(channel.categories || [])
         .map((item) => String(item).toLowerCase())
-        .includes(category)
+        .some(
+          (item) =>
+            item === category ||
+            item.includes(category) ||
+            category.includes(item)
+        )
     ) {
       continue;
     }
@@ -513,7 +711,10 @@ async function getIPTVOrgChannels(config) {
       id: `iptvorg:${channel.id}`,
       type: "channel",
       name: channel.name || channel.id,
-      logo: channel.logo || "",
+      logo:
+        channel.logo ||
+        data.logoByChannel[channel.id] ||
+        "",
       group:
         (channel.categories && channel.categories[0]) || "TV",
       tvgId: channel.id,
@@ -536,11 +737,30 @@ async function getIPTVChannels(config) {
 
   if (config.mode === "m3u") {
 
-    if (
-      config.m3uSource === "file" &&
-      config.m3uFileData
-    ) {
-      return parseM3U(config.m3uFileData);
+    if (config.m3uSource === "file") {
+
+      if (config.m3uFileId) {
+
+        const stored = m3uFileStore.get(config.m3uFileId);
+
+        if (!stored) {
+          throw new Error(
+            "O ficheiro M3U expirou ou não foi encontrado. Volta a carregar o ficheiro na página de configuração e gera um novo link de instalação."
+          );
+        }
+
+        return parseM3U(stored.content);
+
+      }
+
+      if (config.m3uFileData) {
+        return parseM3U(config.m3uFileData);
+      }
+
+      throw new Error(
+        "Nenhum ficheiro M3U associado a esta configuração."
+      );
+
     }
 
     return await fetchM3U(config.m3uUrl);
@@ -590,7 +810,7 @@ function validateConfig(config) {
 
  if (config.m3uSource === "file") {
 
- if (!config.m3uFileData) {
+ if (!config.m3uFileId && !config.m3uFileData) {
  return "Seleciona um ficheiro M3U ou M3U8.";
  }
 
@@ -1138,14 +1358,14 @@ function renderConfigurePage(config = {}) {
 
   const features = config.features || {};
 
-  const enabledFeatured = features.featured !== false;
-  const enabledStreamers = features.streamers !== false;
-  const enabledOperators = features.operators !== false;
+  const enabledFeatured = features.featured === true;
+  const enabledStreamers = features.streamers === true;
+  const enabledOperators = features.operators === true;
   const enabledIPTV = features.iptv === true;
 
   const featuredContent = features.featuredContent || {};
-  const featuredMoviesChecked = featuredContent.movies !== false;
-  const featuredSeriesChecked = featuredContent.series !== false;
+  const featuredMoviesChecked = featuredContent.movies === true;
+  const featuredSeriesChecked = featuredContent.series === true;
 
   const selectedStreamers =
     Array.isArray(features.selectedStreamers)
@@ -2796,7 +3016,7 @@ function updateContentVisibility() {
    * ============================================================== 
    */
 
-  let m3uFileData = "";
+  let m3uFileId = "";
 
   m3uFile.addEventListener(
     "change",
@@ -2808,7 +3028,7 @@ function updateContentVisibility() {
 
       if (!file) {
 
-        m3uFileData = "";
+        m3uFileId = "";
 
         m3uFileInfo.textContent =
           "Seleciona um ficheiro M3U ou M3U8 do teu computador.";
@@ -2825,7 +3045,7 @@ function updateContentVisibility() {
       ) {
 
         m3uFile.value = "";
-        m3uFileData = "";
+        m3uFileId = "";
 
         m3uFileInfo.textContent =
           "Erro: seleciona um ficheiro .m3u ou .m3u8.";
@@ -2833,27 +3053,70 @@ function updateContentVisibility() {
         return;
       }
 
+      m3uFileId = "";
+
+      m3uFileInfo.textContent =
+        "A carregar " + file.name + "...";
+
       const reader =
         new FileReader();
 
       reader.onload =
-        function (event) {
+        async function (event) {
 
-          m3uFileData =
+          const content =
             event.target.result || "";
 
-          m3uFileInfo.textContent =
-            "Ficheiro selecionado: " +
-            file.name +
-            " (" +
-            Math.round(file.size / 1024) +
-            " KB)";
+          try {
+
+            const response =
+              await fetch("/upload-m3u", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "text/plain"
+                },
+                body: content
+              });
+
+            const data =
+              await response.json();
+
+            if (!response.ok || !data.id) {
+
+              m3uFileId = "";
+
+              m3uFileInfo.textContent =
+                "Erro: " +
+                (data.error ||
+                  "não foi possível carregar o ficheiro.");
+
+              return;
+            }
+
+            m3uFileId = data.id;
+
+            m3uFileInfo.textContent =
+              "Ficheiro carregado: " +
+              file.name +
+              " (" +
+              Math.round(file.size / 1024) +
+              " KB)";
+
+          } catch (error) {
+
+            m3uFileId = "";
+
+            m3uFileInfo.textContent =
+              "Erro ao enviar o ficheiro para o servidor.";
+
+          }
+
         };
 
       reader.onerror =
         function () {
 
-          m3uFileData = "";
+          m3uFileId = "";
 
           m3uFileInfo.textContent =
             "Não foi possível ler o ficheiro.";
@@ -2972,15 +3235,16 @@ function updateContentVisibility() {
         m3uUrl.value.trim(),
 
       /*
-       * Atenção:
-       * m3uFileData contém o conteúdo do ficheiro escolhido.
-       * O server.js deverá aceitar esta propriedade se for usada
-       * para instalar uma playlist local.
+       * Nota:
+       * m3uFileId é o identificador curto devolvido pelo
+       * servidor após o upload do ficheiro em /upload-m3u.
+       * O conteúdo do ficheiro NUNCA é embutido no link de
+       * instalação (fica demasiado grande para o Stremio/Nuvio).
        */
 
-      m3uFileData:
+      m3uFileId:
         m3uSource === "file"
-          ? m3uFileData
+          ? m3uFileId
           : "",
 
       epgUrl:
@@ -3248,7 +3512,7 @@ function updateContentVisibility() {
 
     if (config.m3uSource === "file") {
 
-      if (!config.m3uFileData) {
+      if (!config.m3uFileId) {
 
         showStatus(
           "Seleciona um ficheiro M3U ou M3U8."
@@ -3617,9 +3881,7 @@ app.post("/test-iptv", async (req, res) => {
     if (config.mode === "m3u") {
 
       const channels =
-        config.m3uSource === "file" && config.m3uFileData
-          ? parseM3U(config.m3uFileData)
-          : await fetchM3U(config.m3uUrl);
+        await getIPTVChannels(config);
 
       return res.json({
         success: true,
@@ -3717,7 +3979,7 @@ function buildManifest(config) {
  !!config;
 
  const showFeatured =
- features.featured !== false;
+ features.featured === true;
 
  const featuredContent =
  features.featuredContent || {
@@ -3726,7 +3988,7 @@ function buildManifest(config) {
  };
 
  const showStreamers =
- features.streamers !== false;
+ features.streamers === true;
 
  const selectedStreamers =
  Array.isArray(features.selectedStreamers)
@@ -3734,7 +3996,7 @@ function buildManifest(config) {
  : null;
 
  const showOperators =
- features.operators !== false;
+ features.operators === true;
 
  const selectedOperators =
  Array.isArray(features.selectedOperators)
@@ -3744,11 +4006,24 @@ function buildManifest(config) {
  const showIPTV =
  features.iptv === true;
 
- function filterFeaturedCatalog(list, type) {
+ function isSpecialCatalog(id) {
+ return (
+ id === "featured" ||
+ id === "movie-top" ||
+ id === "series-top"
+ );
+ }
+
+ /*
+  * "Destaques" e "Populares" (movie-top/series-top) são
+  * ambos catálogos globais (não pertencem a nenhum streamer
+  * específico) e ficam sob controlo do toggle "Destaques".
+  */
+ function filterSpecialCatalogs(list, type) {
 
  return list.filter((catalog) => {
 
- if (catalog.id !== "featured") {
+ if (!isSpecialCatalog(catalog.id)) {
  return true;
  }
 
@@ -3761,11 +4036,11 @@ function buildManifest(config) {
  }
 
  if (type === "movie") {
- return featuredContent.movies !== false;
+ return featuredContent.movies === true;
  }
 
  if (type === "series") {
- return featuredContent.series !== false;
+ return featuredContent.series === true;
  }
 
  return true;
@@ -3783,22 +4058,21 @@ function buildManifest(config) {
  if (!showStreamers) {
 
  return list.filter(
- (catalog) =>
- catalog.id === "featured" ||
- catalog.id === "movie-top" ||
- catalog.id === "series-top"
+ (catalog) => isSpecialCatalog(catalog.id)
  );
 
  }
 
  if (!selectedStreamers || !selectedStreamers.length) {
- return list;
+
+ return list.filter(
+ (catalog) => isSpecialCatalog(catalog.id)
+ );
+
  }
 
  return list.filter((catalog) =>
- catalog.id === "featured" ||
- catalog.id === "movie-top" ||
- catalog.id === "series-top" ||
+ isSpecialCatalog(catalog.id) ||
  selectedStreamers.includes(catalog.id)
  );
 
@@ -3806,12 +4080,12 @@ function buildManifest(config) {
 
  const filteredMovieCatalogs =
  filterStreamerCatalogs(
- filterFeaturedCatalog(movieCatalogs, "movie")
+ filterSpecialCatalogs(movieCatalogs, "movie")
  );
 
  const filteredSeriesCatalogs =
  filterStreamerCatalogs(
- filterFeaturedCatalog(seriesCatalogs, "series")
+ filterSpecialCatalogs(seriesCatalogs, "series")
  );
 
  const filteredOperatorCatalogs =
@@ -3824,7 +4098,7 @@ function buildManifest(config) {
  }
 
  if (!selectedOperators || !selectedOperators.length) {
- return all;
+ return [];
  }
 
  return all.filter((catalog) =>
@@ -3872,7 +4146,8 @@ function buildManifest(config) {
 (catalog) => ({
 type: "movie",
 id: catalog.id,
-name: catalog.name
+name: catalog.name,
+extra: [{ name: "search", isRequired: false }]
 })
 ),
 
@@ -3880,7 +4155,8 @@ name: catalog.name
 (catalog) => ({
 type: "series",
 id: catalog.id,
-name: catalog.name
+name: catalog.name,
+extra: [{ name: "search", isRequired: false }]
 })
 ),
 
@@ -3889,13 +4165,17 @@ name: catalog.name
  {
  type: "channel",
  id: "m3u",
- name: iptvCatalogName
+ name: iptvCatalogName,
+ extra: [{ name: "search", isRequired: false }]
  }
  ]
  : []),
 
 ...(showOperators
- ? filteredOperatorCatalogs
+ ? filteredOperatorCatalogs.map((catalog) => ({
+ ...catalog,
+ extra: [{ name: "search", isRequired: false }]
+ }))
  : [])
 
 ],
@@ -3996,6 +4276,55 @@ app.get(
   }
 );
 
+
+/* =========================================================
+   PESQUISA (extra=search)
+   ========================================================= */
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function filterMetasBySearch(metas, search) {
+  if (!search) {
+    return metas;
+  }
+
+  const needle = normalizeSearchText(search);
+
+  return metas.filter((meta) =>
+    normalizeSearchText(meta.name || meta.title || "").includes(needle)
+  );
+}
+
+function parseExtra(extraParam) {
+  const result = {};
+
+  if (!extraParam) {
+    return result;
+  }
+
+  try {
+
+    const decoded =
+      decodeURIComponent(extraParam);
+
+    const params =
+      new URLSearchParams(decoded);
+
+    for (const [key, value] of params) {
+      result[key] = value;
+    }
+
+  } catch (error) {
+    // parâmetros extra inválidos são ignorados
+  }
+
+  return result;
+}
 
 /* =========================================================
    CATALOG - TV SERVICES / IPTV
@@ -4155,6 +4484,100 @@ app.get(
 );
 
 
+app.get(
+  "/:config/catalog/channel/:id/:extra.json",
+  async (req, res) => {
+
+    try {
+
+      const config =
+        decodeConfig(req.params.config);
+
+      const catalogId =
+        req.params.id;
+
+      const { search } =
+        parseExtra(req.params.extra);
+
+      let metas = [];
+
+      if (catalogId === "pt-services") {
+
+        metas = services.map(
+          (service, index) => ({
+            id: service.id || `pttv:${index}`,
+            type: "channel",
+            name: service.name || "Serviço TV",
+            poster: service.logo || service.poster || PT_HUB_LOGO,
+            logo: service.logo || service.poster || PT_HUB_LOGO,
+            description: service.description || ""
+          })
+        );
+
+      } else if (catalogId === "m3u") {
+
+        if (config) {
+
+          const channels =
+            await getIPTVChannels(config);
+
+          metas = channels.map((channel) => ({
+            id: channel.id,
+            type: "channel",
+            name: channel.name,
+            poster: channel.logo || PT_HUB_LOGO,
+            logo: channel.logo || PT_HUB_LOGO,
+            description:
+              channel.group ? `Grupo: ${channel.group}` : ""
+          }));
+
+        }
+
+      } else {
+
+        const operator =
+          getOperatorById(catalogId);
+
+        if (operator) {
+
+          const channels =
+            getOperatorChannels(operator);
+
+          metas = channels.map((channel) => ({
+            id: channel.id,
+            type: "channel",
+            name: channel.name,
+            poster: channel.logo || PT_HUB_LOGO,
+            logo: channel.logo || PT_HUB_LOGO,
+            description:
+              channel.group ? `Operador: ${channel.group}` : ""
+          }));
+
+        }
+
+      }
+
+      return res.json({
+        metas: filterMetasBySearch(metas, search)
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erro na pesquisa de canais:",
+        error.message
+      );
+
+      return res.json({
+        metas: []
+      });
+
+    }
+
+  }
+);
+
+
 /* =========================================================
    CATALOG - FILMES
    ========================================================= */
@@ -4292,6 +4715,55 @@ id
 
 
 app.get(
+  "/:config/catalog/movie/:id/:extra.json",
+  async (req, res) => {
+
+    try {
+
+      const id = req.params.id;
+
+      const { search } =
+        parseExtra(req.params.extra);
+
+      const validCatalog =
+        movieCatalogs.some(
+          (catalog) => catalog.id === id
+        );
+
+      if (!validCatalog) {
+        return res.json({ metas: [] });
+      }
+
+      let data;
+
+      if (id === "featured") {
+        data = await getFeaturedCatalog("movie");
+      } else if (id === "movie-top") {
+        data = await getCinemetaCatalog("movie");
+      } else {
+        data = await getJustWatchCatalog("movie", id);
+      }
+
+      return res.json({
+        metas: filterMetasBySearch(data.metas || [], search)
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erro na pesquisa de filmes:",
+        error.message
+      );
+
+      return res.json({ metas: [] });
+
+    }
+
+  }
+);
+
+
+app.get(
   "/:config/catalog/series/:id.json",
   async (req, res) => {
 
@@ -4348,6 +4820,55 @@ id
       return res.json({
         metas: []
       });
+
+    }
+
+  }
+);
+
+
+app.get(
+  "/:config/catalog/series/:id/:extra.json",
+  async (req, res) => {
+
+    try {
+
+      const id = req.params.id;
+
+      const { search } =
+        parseExtra(req.params.extra);
+
+      const validCatalog =
+        seriesCatalogs.some(
+          (catalog) => catalog.id === id
+        );
+
+      if (!validCatalog) {
+        return res.json({ metas: [] });
+      }
+
+      let data;
+
+      if (id === "featured") {
+        data = await getFeaturedCatalog("series");
+      } else if (id === "series-top") {
+        data = await getCinemetaCatalog("series");
+      } else {
+        data = await getJustWatchCatalog("series", id);
+      }
+
+      return res.json({
+        metas: filterMetasBySearch(data.metas || [], search)
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erro na pesquisa de séries:",
+        error.message
+      );
+
+      return res.json({ metas: [] });
 
     }
 
@@ -4699,7 +5220,7 @@ app.get(
                 name: "PT•HUB",
                 title: channel.name,
                 url: channel.url,
-                behaviorHints: { notWebReady: false }
+                behaviorHints: { notWebReady: true }
               }
             ]
           });
@@ -4741,7 +5262,7 @@ app.get(
                 channel.url,
 
               behaviorHints: {
-                notWebReady: false
+                notWebReady: true
               }
             }
           ]
@@ -4793,107 +5314,7 @@ app.get(
 
 app.get("/", (req, res) => {
 
-  res.send(`
-<!DOCTYPE html>
-<html lang="pt-PT">
-<head>
-
-<meta charset="UTF-8">
-
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1.0"
-/>
-
-<title>PT•HUB</title>
-
-<style>
-
-  body {
-    margin: 0;
-    min-height: 100vh;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    background:
-      radial-gradient(
-        circle at top,
-        #202020,
-        #090909
-      );
-
-    color: #fff;
-
-    font-family:
-      Arial,
-      Helvetica,
-      sans-serif;
-  }
-
-  .box {
-    text-align: center;
-    padding: 30px;
-  }
-
-  img {
-    width: 170px;
-    max-width: 70%;
-    margin-bottom: 25px;
-  }
-
-  h1 {
-    font-size: 34px;
-    margin: 0 0 10px;
-  }
-
-  p {
-    color: #999;
-  }
-
-  a {
-    display: inline-block;
-    margin-top: 20px;
-    padding: 13px 22px;
-
-    border-radius: 10px;
-
-    background: #fff;
-    color: #000;
-
-    text-decoration: none;
-    font-weight: 700;
-  }
-
-</style>
-
-</head>
-
-<body>
-
-<div class="box">
-
-  <img
-    src="${PT_HUB_LOGO}"
-    alt="PT•HUB"
-  >
-
-  <h1>PT•HUB</h1>
-
-  <p>
-    IPTV, Filmes e Séries para Stremio
-  </p>
-
-  <a href="/configure">
-    Configurar IPTV
-  </a>
-
-</div>
-
-</body>
-</html>
-`);
+  res.redirect(302, "/configure");
 
 });
 
