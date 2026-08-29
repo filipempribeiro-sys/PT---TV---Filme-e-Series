@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const dns = require("dns");
+const zlib = require("zlib");
 
 /*
  * Alguns servidores Xtream/IPTV rejeitam ou "resetam" ligações
@@ -135,6 +136,49 @@ const addons = loadJSON("../data/addons.json", []);
 const operators = loadJSON("../data/operators.json",[]);
 const streamers = loadJSON("../data/streamers.json",[]);
 const catalogs = loadJSON("../data/catalogs.json",[]);
+const channelLogos = loadJSON("../data/channel-logos.json", []);
+
+function normalizeLogoMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+const channelLogosIndex =
+  channelLogos.map((entry) => ({
+    logo: entry.logo,
+    keywords:
+      (Array.isArray(entry.match) ? entry.match : [entry.match])
+        .filter(Boolean)
+        .map(normalizeLogoMatchText)
+  }));
+
+function findChannelLogo(channelName) {
+
+  const normalizedName =
+    normalizeLogoMatchText(channelName);
+
+  if (!normalizedName) {
+    return "";
+  }
+
+  for (const entry of channelLogosIndex) {
+
+    const matched =
+      entry.keywords.some((keyword) =>
+        keyword && normalizedName.includes(keyword)
+      );
+
+    if (matched && entry.logo) {
+      return entry.logo;
+    }
+
+  }
+
+  return "";
+}
 
 const manifestTemplate = loadJSON(
   "./manifest.json",
@@ -160,9 +204,33 @@ function encodeConfig(config) {
     if (!value) {
       return null;
     }
-     return JSON.parse(
-      Buffer.from(value, "base64url").toString("utf8")
-    );
+
+    const buffer =
+      Buffer.from(value, "base64url");
+
+    /*
+     * Formato novo (comprimido com pako/deflateRaw no browser,
+     * para links de instalação mais curtos). Se falhar, tenta o
+     * formato antigo (JSON simples em base64url) para não quebrar
+     * links de instalação já existentes.
+     */
+    try {
+
+      const inflated =
+        zlib.inflateRawSync(buffer);
+
+      return JSON.parse(
+        inflated.toString("utf8")
+      );
+
+    } catch (inflateError) {
+
+      return JSON.parse(
+        buffer.toString("utf8")
+      );
+
+    }
+
   } catch (error) {
     console.error("Erro a descodificar configuração:", error.message);
     return null;
@@ -279,7 +347,7 @@ function parseM3U(content) {
         id: `m3u:${idHash}`,
         type: "channel",
         name: currentInfo.name,
-        logo: currentInfo.logo,
+        logo: currentInfo.logo || findChannelLogo(currentInfo.name),
         group: currentInfo.group,
         tvgId: currentInfo.tvgId,
         url: line
@@ -599,7 +667,9 @@ async function getXtreamChannels(config) {
       logo:
         item.stream_icon ||
         item.logo ||
-        "",
+        findChannelLogo(
+          item.name || item.stream_display_name || ""
+        ),
 
       group:
         item.category_name ||
@@ -815,7 +885,7 @@ async function getIPTVOrgChannels(config) {
       logo:
         channel.logo ||
         data.logoByChannel[channel.id] ||
-        "",
+        findChannelLogo(channel.name || channel.id),
       group:
         (channel.categories && channel.categories[0]) || "TV",
       tvgId: channel.id,
@@ -1061,19 +1131,37 @@ async function justWatchRequest(query, variables) {
   return data.data;
 }
 
-let justWatchPackagesCache = null;
-let justWatchPackagesCacheTime = 0;
+function normalizeCountryCode(value) {
 
-async function getJustWatchPackages() {
+  const code =
+    String(value || "")
+      .trim()
+      .toUpperCase();
+
+  return /^[A-Z]{2}$/.test(code)
+    ? code
+    : JUSTWATCH_COUNTRY;
+
+}
+
+const justWatchPackagesCacheByCountry = new Map();
+
+async function getJustWatchPackages(country) {
+
+const countryCode =
+  normalizeCountryCode(country);
 
 const now = Date.now();
 
+const cached =
+  justWatchPackagesCacheByCountry.get(countryCode);
+
 if (
-justWatchPackagesCache &&
-(now - justWatchPackagesCacheTime) <
+cached &&
+(now - cached.time) <
 (60 * 60 * 1000)
 ) {
- return justWatchPackagesCache;
+ return cached.packages;
  }
 
 const query = `
@@ -1103,7 +1191,7 @@ headers: {
 body: JSON.stringify({
 operationName: "Packages",
 variables: {
-country: JUSTWATCH_COUNTRY,
+country: countryCode,
 platform: "WEB"
 },
 query
@@ -1126,19 +1214,21 @@ data.errors
 );
 }
 
-justWatchPackagesCache =
+const packages =
 data.data?.packages || [];
 
-justWatchPackagesCacheTime =
-Date.now();
+justWatchPackagesCacheByCountry.set(countryCode, {
+  packages,
+  time: Date.now()
+});
 
-return justWatchPackagesCache;
+return packages;
 
 }
 
-async function getStreamerPackage(streamerId) {
+async function getStreamerPackage(streamerId, country) {
   const packages =
-    await getJustWatchPackages();
+    await getJustWatchPackages(country);
 
   const target =
     streamerNames[streamerId];
@@ -1171,14 +1261,18 @@ async function getStreamerPackage(streamerId) {
 
 async function getJustWatchCatalog(
   type,
-  streamerId
+  streamerId,
+  country
 ) {
+  const countryCode =
+    normalizeCountryCode(country);
+
   const packageInfo =
-    await getStreamerPackage(streamerId);
+    await getStreamerPackage(streamerId, countryCode);
 
   if (!packageInfo?.shortName) {
     console.error(
-      `Streamer não encontrado no JustWatch: ${streamerId}`
+      `Streamer não encontrado no JustWatch: ${streamerId} (${countryCode})`
     );
 
     return {
@@ -1227,9 +1321,9 @@ async function getJustWatchCatalog(
   `;
 
   const variables = {
-    country: JUSTWATCH_COUNTRY,
+    country: countryCode,
 
-    first: 100,
+    first: 250,
 
     sortBy: "POPULAR",
 
@@ -1295,7 +1389,7 @@ metas
 
 }
 
-async function getFeaturedCatalog(type) {
+async function getFeaturedCatalog(type, country) {
 
 const streamers = [
 "netflix",
@@ -1315,10 +1409,11 @@ try {
 const data =
 await getJustWatchCatalog(
 type,
-streamer
+streamer,
+country
 );
 
-for (const meta of data.metas.slice(0, 10)) {
+for (const meta of data.metas.slice(0, 20)) {
 
 if (!ids.has(meta.id)) {
 
@@ -1341,7 +1436,7 @@ error.message
 }
 
 return {
-metas: metas.slice(0, 50)
+metas: metas.slice(0, 100)
 };
 }
 
@@ -1428,7 +1523,7 @@ function getOperatorChannels(operator) {
       id: `operator:${operator.id}:${channel.id || index}`,
       type: "channel",
       name: channel.name || operator.name,
-      logo: channel.logo || operator.logo || PT_HUB_LOGO,
+      logo: channel.logo || operator.logo || findChannelLogo(channel.name || operator.name) || PT_HUB_LOGO,
       group: operator.name,
       tvgId: channel.tvgId || "",
       url: channel.url
@@ -1452,6 +1547,7 @@ function renderConfigurePage(config = {}) {
       : "m3u";
 
   const m3uUrl = config.m3uUrl || "";
+  const catalogCountry = config.catalogCountry || "";
   const m3uSource = config.m3uSource === "file" ? "file" : "url";
   const xtreamServer = config.xtreamServer || "";
   const username = config.username || "";
@@ -1626,6 +1722,7 @@ function renderConfigurePage(config = {}) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PT•HUB — Configuração</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.2.0/pako.min.js"></script>
 
 <style>
 :root {
@@ -2208,6 +2305,23 @@ button:disabled {
         Seleciona um ou vários streamers. Para cada um, escolhe se queres
         Filmes, Séries ou ambos.
       </p>
+
+      <label class="field-label" for="catalogCountry">
+        País do Catálogo
+      </label>
+
+      <input
+        id="catalogCountry"
+        type="text"
+        maxlength="2"
+        placeholder="PT"
+        value="${escapeHtml(catalogCountry)}"
+      >
+
+      <div class="help">
+        Código de país de 2 letras (ex: PT, BR, ES). Define de que país vêm
+        os catálogos de Streamers e Destaques. Deixa em branco para Portugal.
+      </div>
 
       <div class="option-grid">
 ${streamerCheckboxes}
@@ -2967,6 +3081,9 @@ ${operatorCheckboxes}
   const m3uUrl =
     document.getElementById("m3uUrl");
 
+  const catalogCountry =
+    document.getElementById("catalogCountry");
+
   const m3uFile =
     document.getElementById("m3uFile");
 
@@ -3336,6 +3453,9 @@ function updateContentVisibility() {
 
     return {
 
+      catalogCountry:
+        catalogCountry.value.trim().toUpperCase(),
+
       features: {
 
         featured:
@@ -3463,17 +3583,95 @@ function updateContentVisibility() {
    * ============================================================== 
    */
 
+  function pruneConfig(value) {
+
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+
+      const result = {};
+
+      Object.keys(value).forEach(function (key) {
+
+        const pruned =
+          pruneConfig(value[key]);
+
+        const isEmptyString =
+          pruned === "";
+
+        const isEmptyArray =
+          Array.isArray(pruned) &&
+          pruned.length === 0;
+
+        const isEmptyObject =
+          pruned &&
+          typeof pruned === "object" &&
+          !Array.isArray(pruned) &&
+          Object.keys(pruned).length === 0;
+
+        if (
+          isEmptyString ||
+          isEmptyArray ||
+          isEmptyObject
+        ) {
+          return;
+        }
+
+        result[key] = pruned;
+
+      });
+
+      return result;
+    }
+
+    return value;
+  }
+
   function encodeConfig(config) {
 
     const json =
-      JSON.stringify(config);
+      JSON.stringify(pruneConfig(config));
 
-    const bytes =
-      new TextEncoder().encode(json);
+    /*
+     * Comprime com pako (deflateRaw) para encurtar o link de
+     * instalação o máximo possível — importante porque o
+     * Stremio rejeita links "stremio://" demasiado longos.
+     * Se o pako não estiver disponível por algum motivo,
+     * usa o método antigo (sem compressão) como reserva.
+     */
+
+    if (
+      typeof pako === "undefined" ||
+      !pako ||
+      typeof pako.deflateRaw !== "function"
+    ) {
+
+      const bytes =
+        new TextEncoder().encode(json);
+
+      let binary = "";
+
+      bytes.forEach(function (byte) {
+        binary += String.fromCharCode(byte);
+      });
+
+      return btoa(binary)
+        .replace(/\\+/g, "-")
+        .replace(/\\//g, "_")
+        .replace(/=+$/g, "");
+    }
+
+    const compressed =
+      pako.deflateRaw(json);
 
     let binary = "";
 
-    bytes.forEach(function (byte) {
+    compressed.forEach(function (byte) {
       binary += String.fromCharCode(byte);
     });
 
@@ -4390,7 +4588,7 @@ function buildManifest(config) {
     description:
       "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
 
-    logo: PT_HUB_LOGO,
+    logo: `${PT_HUB_LOGO}?v=${VERSION}`,
 
     resources: [
       "catalog",
@@ -4464,6 +4662,11 @@ function buildManifest(config) {
 
 app.get("/manifest.json", (req, res) => {
 
+  res.set(
+    "Cache-Control",
+    "no-cache, no-store, must-revalidate"
+  );
+
   res.json(
     buildManifest(null)
   );
@@ -4475,6 +4678,11 @@ app.get("/:config/manifest.json", (req, res) => {
 
   const config =
     decodeConfig(req.params.config);
+
+  res.set(
+    "Cache-Control",
+    "no-cache, no-store, must-revalidate"
+  );
 
   res.json(
     buildManifest(config)
@@ -4908,6 +5116,12 @@ app.get(
       const id =
         req.params.id;
 
+      const config =
+        decodeConfig(req.params.config);
+
+      const country =
+        config?.catalogCountry;
+
       const validCatalog =
         movieCatalogs.some(
           (catalog) =>
@@ -4924,7 +5138,8 @@ if (id === "featured") {
 
 return res.json(
 await getFeaturedCatalog(
-"movie"
+"movie",
+country
 )
 );
 
@@ -4943,7 +5158,8 @@ await getCinemetaCatalog(
 return res.json(
 await getJustWatchCatalog(
 "movie",
-id
+id,
+country
 )
 );
 
@@ -4972,6 +5188,12 @@ app.get(
 
       const id = req.params.id;
 
+      const config =
+        decodeConfig(req.params.config);
+
+      const country =
+        config?.catalogCountry;
+
       const { search } =
         parseExtra(req.params.extra);
 
@@ -4987,11 +5209,11 @@ app.get(
       let data;
 
       if (id === "featured") {
-        data = await getFeaturedCatalog("movie");
+        data = await getFeaturedCatalog("movie", country);
       } else if (id === "movie-top") {
         data = await getCinemetaCatalog("movie");
       } else {
-        data = await getJustWatchCatalog("movie", id);
+        data = await getJustWatchCatalog("movie", id, country);
       }
 
       return res.json({
@@ -5022,6 +5244,12 @@ app.get(
       const id =
         req.params.id;
 
+      const config =
+        decodeConfig(req.params.config);
+
+      const country =
+        config?.catalogCountry;
+
       const validCatalog =
         seriesCatalogs.some(
           (catalog) =>
@@ -5038,7 +5266,8 @@ if (id === "featured") {
 
 return res.json(
 await getFeaturedCatalog(
-"series"
+"series",
+country
 )
 );
 
@@ -5057,7 +5286,8 @@ await getCinemetaCatalog(
 return res.json(
 await getJustWatchCatalog(
 "series",
-id
+id,
+country
 )
 );
     } catch (error) {
@@ -5085,6 +5315,12 @@ app.get(
 
       const id = req.params.id;
 
+      const config =
+        decodeConfig(req.params.config);
+
+      const country =
+        config?.catalogCountry;
+
       const { search } =
         parseExtra(req.params.extra);
 
@@ -5100,11 +5336,11 @@ app.get(
       let data;
 
       if (id === "featured") {
-        data = await getFeaturedCatalog("series");
+        data = await getFeaturedCatalog("series", country);
       } else if (id === "series-top") {
         data = await getCinemetaCatalog("series");
       } else {
-        data = await getJustWatchCatalog("series", id);
+        data = await getJustWatchCatalog("series", id, country);
       }
 
       return res.json({
