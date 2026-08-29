@@ -326,6 +326,76 @@ async function fetchM3U(url) {
    ========================================================= */
 
 
+const https = require("https");
+const http = require("http");
+
+function legacyHttpRequest(targetUrl, timeoutMs) {
+
+  return new Promise((resolve, reject) => {
+
+    let parsed;
+
+    try {
+      parsed = new URL(targetUrl);
+    } catch (error) {
+      return reject(error);
+    }
+
+    const isHttps = parsed.protocol === "https:";
+    const lib = isHttps ? https : http;
+
+    const requestOptions = {
+      hostname: parsed.hostname,
+      port:
+        parsed.port ||
+        (isHttps ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      family: 4,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json,*/*",
+        "Connection": "close"
+      },
+      ...(isHttps
+        ? {
+            minVersion: "TLSv1",
+            ciphers: "DEFAULT@SECLEVEL=1",
+            rejectUnauthorized: false
+          }
+        : {})
+    };
+
+    const req = lib.request(requestOptions, (res) => {
+
+      const chunks = [];
+
+      res.on("data", (chunk) => chunks.push(chunk));
+
+      res.on("end", () => {
+        resolve({
+          statusCode: res.statusCode,
+          body: Buffer.concat(chunks).toString("utf8")
+        });
+      });
+
+    });
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(
+        new Error("Tempo limite excedido ao contactar o servidor Xtream.")
+      );
+    });
+
+    req.on("error", reject);
+
+    req.end();
+
+  });
+
+}
+
 async function xtreamRequest(config, action) {
 
  const server =
@@ -374,9 +444,13 @@ if (action) {
  url
  );
 
- const maxAttempts = 3;
+ const maxAttempts = 2;
  let lastError = null;
 
+ /*
+  * 1ª fase: fetch() nativo (undici), com repetição em caso
+  * de erro de rede transitório.
+  */
  for (
  let attempt = 1;
  attempt <= maxAttempts;
@@ -433,11 +507,6 @@ if (action) {
  error
  );
 
- console.error(
- "XTREAM URL:",
- url
- );
-
  const isNetworkError =
  error.cause?.code ||
  error.name === "AbortError";
@@ -449,24 +518,56 @@ if (action) {
 
  await new Promise(
  (resolve) =>
- setTimeout(resolve, 1200 * attempt)
+ setTimeout(resolve, 1000 * attempt)
  );
 
  continue;
 
  }
 
- throw new Error(
- `Falha ao contactar servidor Xtream (${error.cause?.code || error.message})`
- );
-
  }
 
  }
 
- throw new Error(
- `Falha ao contactar servidor Xtream (${lastError?.cause?.code || lastError?.message})`
+ /*
+  * 2ª fase: fetch() falhou de forma consistente (típico de
+  * bloqueio de IP ou TLS incompatível). Tenta com o módulo
+  * https/http nativo, com configuração mais tolerante —
+  * resolve o caso de servidores Xtream antigos/mal configurados.
+  */
+ try {
+
+ console.error(
+ "XTREAM: a tentar via https nativo (fallback)..."
  );
+
+ const result =
+ await legacyHttpRequest(url, 15000);
+
+ if (result.statusCode < 200 || result.statusCode >= 300) {
+ throw new Error(
+ `Xtream respondeu HTTP ${result.statusCode}`
+ );
+ }
+
+ return JSON.parse(result.body);
+
+ } catch (fallbackError) {
+
+ console.error(
+ "XTREAM FALLBACK ERROR:",
+ fallbackError
+ );
+
+ const originalCode =
+ lastError?.cause?.code ||
+ lastError?.message;
+
+ throw new Error(
+ `Falha ao contactar servidor Xtream (${originalCode}). O servidor pode estar a bloquear ligações a partir do Render — confirma com o teu fornecedor de IPTV se há bloqueio de IPs de hosting/cloud.`
+ );
+
+ }
 
 }
 
@@ -1367,10 +1468,19 @@ function renderConfigurePage(config = {}) {
   const featuredMoviesChecked = featuredContent.movies === true;
   const featuredSeriesChecked = featuredContent.series === true;
 
-  const selectedStreamers =
-    Array.isArray(features.selectedStreamers)
-      ? features.selectedStreamers
-      : [];
+  const selectedStreamerMovies =
+    Array.isArray(features.selectedStreamerMovies)
+      ? features.selectedStreamerMovies
+      : (Array.isArray(features.selectedStreamers)
+          ? features.selectedStreamers
+          : []);
+
+  const selectedStreamerSeries =
+    Array.isArray(features.selectedStreamerSeries)
+      ? features.selectedStreamerSeries
+      : (Array.isArray(features.selectedStreamers)
+          ? features.selectedStreamers
+          : []);
 
   const selectedOperators =
     Array.isArray(features.selectedOperators)
@@ -1416,13 +1526,48 @@ function renderConfigurePage(config = {}) {
   }
 
   const streamerCheckboxes = streamers.map(function (streamer) {
+
     const domId = "streamer_" + sanitizeId(streamer.id);
-    const checked = selectedStreamers.includes(streamer.id) ? "checked" : "";
+
+    const types =
+      Array.isArray(streamer.type) && streamer.type.length
+        ? streamer.type
+        : ["movie", "series"];
+
+    const moviesChecked =
+      selectedStreamerMovies.includes(streamer.id) ? "checked" : "";
+
+    const seriesChecked =
+      selectedStreamerSeries.includes(streamer.id) ? "checked" : "";
+
+    const movieOption =
+      types.includes("movie")
+        ? (
+          '          <label class="option-item">\n' +
+          '            <input type="checkbox" id="' + domId + '_movies" value="' + escapeHtml(streamer.id) + '" ' + moviesChecked + '>\n' +
+          '            <span>Filmes</span>\n' +
+          '          </label>\n'
+        )
+        : "";
+
+    const seriesOption =
+      types.includes("series")
+        ? (
+          '          <label class="option-item">\n' +
+          '            <input type="checkbox" id="' + domId + '_series" value="' + escapeHtml(streamer.id) + '" ' + seriesChecked + '>\n' +
+          '            <span>Séries</span>\n' +
+          '          </label>\n'
+        )
+        : "";
+
     return (
-      '        <label class="option-item">\n' +
-      '          <input type="checkbox" id="' + domId + '" value="' + escapeHtml(streamer.id) + '" ' + checked + '>\n' +
-      '          <span>' + escapeHtml(streamer.name) + '</span>\n' +
-      '        </label>\n'
+      '        <div class="streamer-block">\n' +
+      '          <div class="streamer-name">' + escapeHtml(streamer.name) + '</div>\n' +
+      '          <div class="streamer-options">\n' +
+      movieOption +
+      seriesOption +
+      '          </div>\n' +
+      '        </div>\n'
     );
   }).join("");
 
@@ -1437,11 +1582,34 @@ function renderConfigurePage(config = {}) {
     );
   }).join("");
 
-  const streamerIdsJs =
+  const streamerMovieIdsJs =
     JSON.stringify(
-      streamers.map(function (streamer) {
-        return "streamer_" + sanitizeId(streamer.id);
-      })
+      streamers
+        .filter(function (streamer) {
+          const types =
+            Array.isArray(streamer.type) && streamer.type.length
+              ? streamer.type
+              : ["movie", "series"];
+          return types.includes("movie");
+        })
+        .map(function (streamer) {
+          return "streamer_" + sanitizeId(streamer.id) + "_movies";
+        })
+    );
+
+  const streamerSeriesIdsJs =
+    JSON.stringify(
+      streamers
+        .filter(function (streamer) {
+          const types =
+            Array.isArray(streamer.type) && streamer.type.length
+              ? streamer.type
+              : ["movie", "series"];
+          return types.includes("series");
+        })
+        .map(function (streamer) {
+          return "streamer_" + sanitizeId(streamer.id) + "_series";
+        })
     );
 
   const operatorIdsJs =
@@ -1659,6 +1827,27 @@ input[type="checkbox"] {
 .option-item input {
   margin: 0;
   width: auto;
+}
+
+.streamer-block {
+  padding: 12px 4px;
+  border-bottom: 1px solid rgba(218,146,28,.10);
+}
+
+.streamer-block:last-child {
+  border-bottom: none;
+}
+
+.streamer-name {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.streamer-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .subsection {
@@ -2016,8 +2205,8 @@ button:disabled {
       <h2 class="panel-title">Streamers</h2>
 
       <p class="panel-description">
-        Seleciona um ou vários streamers. Cada seleção pode ser instalada
-        individualmente ou em conjunto.
+        Seleciona um ou vários streamers. Para cada um, escolhe se queres
+        Filmes, Séries ou ambos.
       </p>
 
       <div class="option-grid">
@@ -2686,7 +2875,8 @@ ${operatorCheckboxes}
    * ==============================================================
    */
 
-  const streamerIds = ${streamerIdsJs};
+  const streamerMovieIds = ${streamerMovieIdsJs};
+  const streamerSeriesIds = ${streamerSeriesIdsJs};
 
   /*
    * ==============================================================
@@ -3161,8 +3351,11 @@ function updateContentVisibility() {
         streamers:
           streamersEnabled.checked,
 
-        selectedStreamers:
-          getCheckedValues(streamerIds),
+        selectedStreamerMovies:
+          getCheckedValues(streamerMovieIds),
+
+        selectedStreamerSeries:
+          getCheckedValues(streamerSeriesIds),
 
         operators:
           operatorsEnabled.checked,
@@ -3648,11 +3841,12 @@ installButton.addEventListener(
 
  if (
  config.features.streamers &&
- config.features.selectedStreamers.length === 0
+ config.features.selectedStreamerMovies.length === 0 &&
+ config.features.selectedStreamerSeries.length === 0
  ) {
 
  showStatus(
- "Em Streamers seleciona pelo menos um streamer."
+ "Em Streamers seleciona pelo menos um streamer (Filmes e/ou Séries)."
  );
 
  return;
@@ -3990,10 +4184,19 @@ function buildManifest(config) {
  const showStreamers =
  features.streamers === true;
 
- const selectedStreamers =
- Array.isArray(features.selectedStreamers)
+ const selectedStreamerMovies =
+ Array.isArray(features.selectedStreamerMovies)
+ ? features.selectedStreamerMovies
+ : (Array.isArray(features.selectedStreamers)
  ? features.selectedStreamers
- : null;
+ : null);
+
+ const selectedStreamerSeries =
+ Array.isArray(features.selectedStreamerSeries)
+ ? features.selectedStreamerSeries
+ : (Array.isArray(features.selectedStreamers)
+ ? features.selectedStreamers
+ : null);
 
  const showOperators =
  features.operators === true;
@@ -4049,7 +4252,7 @@ function buildManifest(config) {
 
  }
 
- function filterStreamerCatalogs(list) {
+ function filterStreamerCatalogs(list, selected) {
 
  if (!hasConfig) {
  return list;
@@ -4063,7 +4266,7 @@ function buildManifest(config) {
 
  }
 
- if (!selectedStreamers || !selectedStreamers.length) {
+ if (!selected || !selected.length) {
 
  return list.filter(
  (catalog) => isSpecialCatalog(catalog.id)
@@ -4073,19 +4276,21 @@ function buildManifest(config) {
 
  return list.filter((catalog) =>
  isSpecialCatalog(catalog.id) ||
- selectedStreamers.includes(catalog.id)
+ selected.includes(catalog.id)
  );
 
  }
 
  const filteredMovieCatalogs =
  filterStreamerCatalogs(
- filterSpecialCatalogs(movieCatalogs, "movie")
+ filterSpecialCatalogs(movieCatalogs, "movie"),
+ selectedStreamerMovies
  );
 
  const filteredSeriesCatalogs =
  filterStreamerCatalogs(
- filterSpecialCatalogs(seriesCatalogs, "series")
+ filterSpecialCatalogs(seriesCatalogs, "series"),
+ selectedStreamerSeries
  );
 
  const filteredOperatorCatalogs =
@@ -4113,6 +4318,67 @@ function buildManifest(config) {
  : config?.mode === "iptv-org"
  ? (config?.iptvOrg?.catalogName || "📡 IPTV-org Free")
  : (config?.m3uCatalogName || "📡 Minha IPTV");
+
+ /*
+  * Ordena os catálogos de filmes/séries por STREAMER em vez
+  * de por tipo — isto controla a ordem das linhas no ecrã
+  * "Board" do Stremio. Fica: Populares, Destaques, e depois
+  * cada streamer com Filmes+Séries lado a lado.
+  */
+ function findCatalog(list, id) {
+ return list.find((catalog) => catalog.id === id);
+ }
+
+ const searchExtra = [{ name: "search", isRequired: false }];
+
+ const orderedMovieSeriesCatalogs = [];
+
+ const popularMovie = findCatalog(filteredMovieCatalogs, "movie-top");
+ const popularSeries = findCatalog(filteredSeriesCatalogs, "series-top");
+
+ if (popularMovie) {
+ orderedMovieSeriesCatalogs.push({
+ type: "movie", id: popularMovie.id, name: popularMovie.name, extra: searchExtra
+ });
+ }
+ if (popularSeries) {
+ orderedMovieSeriesCatalogs.push({
+ type: "series", id: popularSeries.id, name: popularSeries.name, extra: searchExtra
+ });
+ }
+
+ const featuredMovie = findCatalog(filteredMovieCatalogs, "featured");
+ const featuredSeriesCat = findCatalog(filteredSeriesCatalogs, "featured");
+
+ if (featuredMovie) {
+ orderedMovieSeriesCatalogs.push({
+ type: "movie", id: featuredMovie.id, name: featuredMovie.name, extra: searchExtra
+ });
+ }
+ if (featuredSeriesCat) {
+ orderedMovieSeriesCatalogs.push({
+ type: "series", id: featuredSeriesCat.id, name: featuredSeriesCat.name, extra: searchExtra
+ });
+ }
+
+ for (const streamer of streamers) {
+
+ const movieCat = findCatalog(filteredMovieCatalogs, streamer.id);
+ const seriesCat = findCatalog(filteredSeriesCatalogs, streamer.id);
+
+ if (movieCat) {
+ orderedMovieSeriesCatalogs.push({
+ type: "movie", id: movieCat.id, name: movieCat.name, extra: searchExtra
+ });
+ }
+
+ if (seriesCat) {
+ orderedMovieSeriesCatalogs.push({
+ type: "series", id: seriesCat.id, name: seriesCat.name, extra: searchExtra
+ });
+ }
+
+ }
 
  const manifest = {
     ...manifestTemplate,
@@ -4142,23 +4408,7 @@ function buildManifest(config) {
 
  catalogs: [
 
-...filteredMovieCatalogs.map(
-(catalog) => ({
-type: "movie",
-id: catalog.id,
-name: catalog.name,
-extra: [{ name: "search", isRequired: false }]
-})
-),
-
-...filteredSeriesCatalogs.map(
-(catalog) => ({
-type: "series",
-id: catalog.id,
-name: catalog.name,
-extra: [{ name: "search", isRequired: false }]
-})
-),
+...orderedMovieSeriesCatalogs,
 
 ...(showIPTV
  ? [
