@@ -1,6 +1,6 @@
 {
 "name": "pt-tv-hub",
-"version": "2.0",
+"version": "2.1",
 "private": true,
 "description": "PT•HUB - IPTV M3U, Xtream Codes, filmes e séries para Stremio.",
 "main": "server.js",
