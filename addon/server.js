@@ -1323,7 +1323,7 @@ async function getJustWatchCatalog(
   const variables = {
     country: countryCode,
 
-    first: 250,
+    first: 150,
 
     sortBy: "POPULAR",
 
