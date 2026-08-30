@@ -3251,6 +3251,12 @@ ${operatorCheckboxes}
   const iptvContainer =
     document.getElementById("iptvContainer");
 
+  const subtitlesContainer =
+    document.getElementById("subtitlesPanel");
+
+  const externalSourcesContainer =
+    document.getElementById("externalSourcesPanel");
+
   /*
    * ==============================================================
    * DESTAQUES
@@ -3472,6 +3478,16 @@ function updateContentVisibility() {
  setPanelVisibility(
  iptvContainer,
  iptvEnabled.checked
+ );
+
+ setPanelVisibility(
+ subtitlesContainer,
+ subtitlesEnabled.checked
+ );
+
+ setPanelVisibility(
+ externalSourcesContainer,
+ externalSourcesEnabled.checked
  );
 
  testButtonContainer.style.display =
@@ -4038,6 +4054,24 @@ function updateContentVisibility() {
   );
 
   iptvEnabled.addEventListener(
+    "change",
+    function () {
+
+      updateContentVisibility();
+      hideInstall();
+    }
+  );
+
+  subtitlesEnabled.addEventListener(
+    "change",
+    function () {
+
+      updateContentVisibility();
+      hideInstall();
+    }
+  );
+
+  externalSourcesEnabled.addEventListener(
     "change",
     function () {
 
