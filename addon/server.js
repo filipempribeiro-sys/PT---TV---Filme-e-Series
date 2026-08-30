@@ -1696,6 +1696,633 @@ function getOperatorById(operatorId) {
   ) || null;
 }
 
+
+/* =========================================================
+   CONTEÚDO PORTUGUÊS — FONTES EXTERNAS STREMIO
+   =========================================================
+   Duas famílias totalmente independentes:
+   - ptpt: filmes/séries com áudio/conteúdo em Português de Portugal
+   - portuguese: filmes/séries/novelas de produção portuguesa
+
+   O PT•HUB não inclui URLs de terceiros nem conhece providers à partida.
+   O utilizador adiciona os URLs na configuração e o addon lê apenas a
+   interface Stremio pública declarada no respetivo manifest.json.
+   ========================================================= */
+
+const PT_SOURCE_GROUPS = {
+  ptpt: {
+    key: "ptpt",
+    label: "Filmes e Séries em PT-PT",
+    prefix: "🗣️"
+  },
+  portuguese: {
+    key: "portuguese",
+    label: "Filmes, Séries e Novelas Portuguesas",
+    prefix: "🇵🇹"
+  }
+};
+
+/*
+ * Fontes conhecidas do PT•HUB. O utilizador seleciona-as por checkbox;
+ * os URLs ficam centralizados no código. URLs personalizados continuam
+ * disponíveis como opção avançada.
+ */
+const PT_PREDEFINED_SOURCES = {
+  ptpt: [
+    {
+      id: "cotonet",
+      name: "Cotonet",
+      manifestUrl: "https://cotonetnet-cotonet.hf.space/manifest.json"
+    }
+  ],
+  portuguese: [
+    {
+      id: "filmes-series-novelas-portuguesas",
+      name: "Filmes, Séries e Novelas Portuguesas",
+      manifestUrl: "https://filme-series-e-novelas-portuguesas.vercel.app/manifest.json"
+    }
+  ]
+};
+
+function getPredefinedPtSource(group, sourceId) {
+  const sources = Array.isArray(PT_PREDEFINED_SOURCES[group])
+    ? PT_PREDEFINED_SOURCES[group]
+    : [];
+
+  return sources.find((source) => source.id === sourceId) || null;
+}
+
+const ptSourceManifestCache = new Map();
+const ptSourceManifestInFlight = new Map();
+const PT_SOURCE_MANIFEST_CACHE_MS = 60 * 60 * 1000;
+const PT_SOURCE_CATALOG_TIMEOUT_MS = 12000;
+const PT_SOURCE_META_TIMEOUT_MS = 10000;
+const PT_SOURCE_STREAM_TIMEOUT_MS = 12000;
+
+function normalizeAddonBaseUrl(value) {
+  const normalized = normalizeUrl(value);
+  return normalized.replace(/\/manifest\.json$/i, "");
+}
+
+function getPtSourceUrls(config, group) {
+  const selected = config?.ptContentSelectedSources || {};
+  const selectedIds = Array.isArray(selected[group]) ? selected[group] : [];
+
+  const predefinedUrls = selectedIds
+    .map((sourceId) => getPredefinedPtSource(group, sourceId))
+    .filter(Boolean)
+    .map((source) => source.manifestUrl);
+
+  const custom = config?.ptContentExternalSources || {};
+  const customUrls = Array.isArray(custom[group]) ? custom[group] : [];
+
+  return [...new Set(
+    [...predefinedUrls, ...customUrls]
+      .map(normalizeAddonBaseUrl)
+      .filter(isValidHttpUrl)
+  )];
+}
+
+function getPtSourceHash(baseUrl) {
+  return crypto
+    .createHash("sha256")
+    .update(normalizeAddonBaseUrl(baseUrl))
+    .digest("hex")
+    .slice(0, 12);
+}
+
+function encodePtToken(value) {
+  return Buffer.from(String(value || ""), "utf8").toString("base64url");
+}
+
+function decodePtToken(value) {
+  try {
+    return Buffer.from(String(value || ""), "base64url").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function makePtCatalogId(group, baseUrl, originalCatalogId) {
+  return [
+    "pthubpt",
+    group,
+    getPtSourceHash(baseUrl),
+    encodePtToken(originalCatalogId)
+  ].join(":");
+}
+
+function parsePtCatalogId(value) {
+  const parts = String(value || "").split(":");
+
+  if (parts.length !== 4 || parts[0] !== "pthubpt") {
+    return null;
+  }
+
+  const [, group, sourceHash, catalogToken] = parts;
+
+  if (!PT_SOURCE_GROUPS[group]) {
+    return null;
+  }
+
+  const originalCatalogId = decodePtToken(catalogToken);
+
+  if (!sourceHash || !originalCatalogId) {
+    return null;
+  }
+
+  return { group, sourceHash, originalCatalogId };
+}
+
+function makePtMetaId(group, baseUrl, originalId) {
+  return [
+    "pthubptmeta",
+    group,
+    getPtSourceHash(baseUrl),
+    encodePtToken(originalId)
+  ].join(":");
+}
+
+function parsePtMetaId(value) {
+  const parts = String(value || "").split(":");
+
+  if (parts.length !== 4 || parts[0] !== "pthubptmeta") {
+    return null;
+  }
+
+  const [, group, sourceHash, idToken] = parts;
+
+  if (!PT_SOURCE_GROUPS[group]) {
+    return null;
+  }
+
+  const originalId = decodePtToken(idToken);
+
+  if (!sourceHash || !originalId) {
+    return null;
+  }
+
+  return { group, sourceHash, originalId };
+}
+
+function findPtSourceUrl(config, group, sourceHash) {
+  return (
+    getPtSourceUrls(config, group)
+      .find((url) => getPtSourceHash(url) === sourceHash) ||
+    null
+  );
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent": `PT-HUB/${VERSION}`,
+        "Accept": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function getPtSourceManifest(baseUrl) {
+  const normalizedBase = normalizeAddonBaseUrl(baseUrl);
+
+  if (!isValidHttpUrl(normalizedBase)) {
+    return null;
+  }
+
+  const cached = ptSourceManifestCache.get(normalizedBase);
+
+  if (
+    cached &&
+    (Date.now() - cached.time) < PT_SOURCE_MANIFEST_CACHE_MS
+  ) {
+    return cached.manifest;
+  }
+
+  if (ptSourceManifestInFlight.has(normalizedBase)) {
+    return ptSourceManifestInFlight.get(normalizedBase);
+  }
+
+  const request =
+    fetchJsonWithTimeout(
+      `${normalizedBase}/manifest.json`,
+      10000
+    )
+      .then((manifest) => {
+        const valid =
+          manifest &&
+          typeof manifest === "object" &&
+          Array.isArray(manifest.resources) &&
+          Array.isArray(manifest.catalogs);
+
+        const result = valid ? manifest : null;
+
+        ptSourceManifestCache.set(normalizedBase, {
+          manifest: result,
+          time: Date.now()
+        });
+
+        ptSourceManifestInFlight.delete(normalizedBase);
+        return result;
+      })
+      .catch((error) => {
+        console.error(
+          `Erro ao ler manifest da fonte PT ${normalizedBase}:`,
+          error.message
+        );
+
+        ptSourceManifestCache.set(normalizedBase, {
+          manifest: null,
+          time: Date.now()
+        });
+
+        ptSourceManifestInFlight.delete(normalizedBase);
+        return null;
+      });
+
+  ptSourceManifestInFlight.set(normalizedBase, request);
+  return request;
+}
+
+function sourceSupportsResource(manifest, resource) {
+  return Array.isArray(manifest?.resources) &&
+    manifest.resources.some((item) => {
+      if (typeof item === "string") {
+        return item === resource;
+      }
+
+      return item?.name === resource;
+    });
+}
+
+function normalizeCatalogExtra(catalog) {
+  if (Array.isArray(catalog?.extra)) {
+    return catalog.extra;
+  }
+
+  if (Array.isArray(catalog?.extraSupported)) {
+    return catalog.extraSupported.map((name) => ({
+      name,
+      isRequired: false
+    }));
+  }
+
+  return [];
+}
+
+function getPtCatalogDisplayName(group, sourceName, catalogName) {
+  const groupInfo = PT_SOURCE_GROUPS[group];
+  const source = String(sourceName || "Fonte externa").trim();
+  const catalog = String(catalogName || "Conteúdo").trim();
+
+  return `${groupInfo.prefix} ${source} — ${catalog}`;
+}
+
+async function getPtExternalManifestCatalogs(config) {
+  if (!config?.features?.ptContent) {
+    return [];
+  }
+
+  const jobs = [];
+
+  for (const group of Object.keys(PT_SOURCE_GROUPS)) {
+    for (const baseUrl of getPtSourceUrls(config, group)) {
+      jobs.push(
+        getPtSourceManifest(baseUrl)
+          .then((manifest) => ({
+            group,
+            baseUrl,
+            manifest
+          }))
+      );
+    }
+  }
+
+  const sources = await Promise.all(jobs);
+  const result = [];
+
+  for (const source of sources) {
+    const { group, baseUrl, manifest } = source;
+
+    if (!manifest || !sourceSupportsResource(manifest, "catalog")) {
+      continue;
+    }
+
+    for (const catalog of manifest.catalogs || []) {
+      if (!["movie", "series"].includes(catalog?.type)) {
+        continue;
+      }
+
+      if (!catalog?.id) {
+        continue;
+      }
+
+      result.push({
+        type: catalog.type,
+        id: makePtCatalogId(group, baseUrl, catalog.id),
+        name: getPtCatalogDisplayName(
+          group,
+          manifest.name,
+          catalog.name
+        ),
+        extra: normalizeCatalogExtra(catalog)
+      });
+    }
+  }
+
+  return result;
+}
+
+function buildExternalCatalogExtraPath(extraObject) {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(extraObject || {})) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+
+    params.set(key, String(value));
+  }
+
+  const value = params.toString();
+  return value ? `/${value}` : "";
+}
+
+function normalizeExternalMeta(meta, group, baseUrl, fallbackType) {
+  if (!meta || typeof meta !== "object" || !meta.id) {
+    return null;
+  }
+
+  const originalId = String(meta.id);
+
+  const normalized = {
+    ...meta,
+    id: makePtMetaId(group, baseUrl, originalId),
+    type: meta.type || fallbackType,
+    name: meta.name || meta.title || "Título",
+    poster: meta.poster || meta.logo || PT_HUB_LOGO,
+    background: meta.background || meta.poster || PT_HUB_BACKGROUND
+  };
+
+  if (Array.isArray(meta.videos)) {
+    normalized.videos =
+      meta.videos.map((video) => {
+        if (!video || !video.id) {
+          return video;
+        }
+
+        return {
+          ...video,
+          id: makePtMetaId(
+            group,
+            baseUrl,
+            String(video.id)
+          )
+        };
+      });
+  }
+
+  return normalized;
+}
+
+async function getPtExternalCatalog(config, type, catalogId, extra) {
+  const parsed = parsePtCatalogId(catalogId);
+
+  if (!parsed) {
+    return null;
+  }
+
+  const baseUrl =
+    findPtSourceUrl(
+      config,
+      parsed.group,
+      parsed.sourceHash
+    );
+
+  if (!baseUrl) {
+    return { metas: [] };
+  }
+
+  const manifest = await getPtSourceManifest(baseUrl);
+
+  if (!manifest || !sourceSupportsResource(manifest, "catalog")) {
+    return { metas: [] };
+  }
+
+  const declaredCatalog =
+    (manifest.catalogs || []).find(
+      (catalog) =>
+        catalog?.id === parsed.originalCatalogId &&
+        catalog?.type === type
+    );
+
+  if (!declaredCatalog) {
+    return { metas: [] };
+  }
+
+  const extraPath =
+    buildExternalCatalogExtraPath(extra);
+
+  const url =
+    `${baseUrl}/catalog/${encodeURIComponent(type)}/` +
+    `${encodeURIComponent(parsed.originalCatalogId)}` +
+    `${extraPath}.json`;
+
+  try {
+    const data =
+      await fetchJsonWithTimeout(
+        url,
+        PT_SOURCE_CATALOG_TIMEOUT_MS
+      );
+
+    const metas =
+      Array.isArray(data?.metas)
+        ? data.metas
+        : [];
+
+    return {
+      metas: metas
+        .map((meta) =>
+          normalizeExternalMeta(
+            meta,
+            parsed.group,
+            baseUrl,
+            type
+          )
+        )
+        .filter(Boolean)
+    };
+  } catch (error) {
+    console.error(
+      `Erro no catálogo PT externo ${baseUrl}:`,
+      error.message
+    );
+
+    return { metas: [] };
+  }
+}
+
+async function getPtExternalMeta(config, type, wrappedId) {
+  const parsed = parsePtMetaId(wrappedId);
+
+  if (!parsed) {
+    return null;
+  }
+
+  const baseUrl =
+    findPtSourceUrl(
+      config,
+      parsed.group,
+      parsed.sourceHash
+    );
+
+  if (!baseUrl) {
+    return { meta: null };
+  }
+
+  const manifest = await getPtSourceManifest(baseUrl);
+
+  if (!manifest || !sourceSupportsResource(manifest, "meta")) {
+    return { meta: null };
+  }
+
+  try {
+    const data =
+      await fetchJsonWithTimeout(
+        `${baseUrl}/meta/${encodeURIComponent(type)}/${encodeURIComponent(parsed.originalId)}.json`,
+        PT_SOURCE_META_TIMEOUT_MS
+      );
+
+    const sourceMeta = data?.meta;
+
+    if (!sourceMeta) {
+      return { meta: null };
+    }
+
+    let mergedMeta = { ...sourceMeta };
+
+    const imdbId =
+      sourceMeta.imdb_id ||
+      sourceMeta.imdbId ||
+      sourceMeta?.externalIds?.imdbId ||
+      (/^tt\d+$/i.test(parsed.originalId)
+        ? parsed.originalId
+        : null);
+
+    if (imdbId && ["movie", "series"].includes(type)) {
+      try {
+        const cinemeta =
+          await getCinemetaMeta(type, imdbId);
+
+        if (cinemeta?.meta) {
+          mergedMeta = {
+            ...cinemeta.meta,
+            ...sourceMeta,
+            id: sourceMeta.id || parsed.originalId,
+            name:
+              sourceMeta.name ||
+              sourceMeta.title ||
+              cinemeta.meta.name
+          };
+        }
+      } catch (error) {
+        console.error(
+          `Fallback Cinemeta PT-PT falhou para ${imdbId}:`,
+          error.message
+        );
+      }
+    }
+
+    const normalized =
+      normalizeExternalMeta(
+        mergedMeta,
+        parsed.group,
+        baseUrl,
+        type
+      );
+
+    return normalized
+      ? { meta: normalized }
+      : { meta: null };
+  } catch (error) {
+    console.error(
+      `Erro metadata PT externo ${baseUrl}:`,
+      error.message
+    );
+
+    return { meta: null };
+  }
+}
+
+async function getPtExternalStreams(config, type, wrappedId) {
+  const parsed = parsePtMetaId(wrappedId);
+
+  if (!parsed) {
+    return null;
+  }
+
+  const baseUrl =
+    findPtSourceUrl(
+      config,
+      parsed.group,
+      parsed.sourceHash
+    );
+
+  if (!baseUrl) {
+    return [];
+  }
+
+  const manifest = await getPtSourceManifest(baseUrl);
+
+  if (!manifest || !sourceSupportsResource(manifest, "stream")) {
+    return [];
+  }
+
+  const sourceName =
+    String(manifest.name || "Fonte externa").trim();
+
+  try {
+    const data =
+      await fetchJsonWithTimeout(
+        `${baseUrl}/stream/${encodeURIComponent(type)}/${encodeURIComponent(parsed.originalId)}.json`,
+        PT_SOURCE_STREAM_TIMEOUT_MS
+      );
+
+    const streams =
+      Array.isArray(data?.streams)
+        ? data.streams
+        : [];
+
+    return streams.map((stream) => ({
+      ...stream,
+      name:
+        `${PT_SOURCE_GROUPS[parsed.group].prefix} ${sourceName}` +
+        (stream.name ? `\n${stream.name}` : "")
+    }));
+  } catch (error) {
+    console.error(
+      `Erro streams PT externos ${baseUrl}:`,
+      error.message
+    );
+
+    return [];
+  }
+}
+
 /* =========================================================
    RTP PLAY
    =========================================================
@@ -1763,6 +2390,49 @@ function renderConfigurePage(config = {}) {
   const enabledPtContent = features.ptContent === true;
   const ptContent = features.ptContentSources || {};
   const rtpPlayChecked = ptContent.rtpPlay === true;
+
+  const selectedPtContentSources = config.ptContentSelectedSources || {};
+
+  const selectedPtPtSources =
+    Array.isArray(selectedPtContentSources.ptpt)
+      ? selectedPtContentSources.ptpt
+      : [];
+
+  const selectedPortugueseSources =
+    Array.isArray(selectedPtContentSources.portuguese)
+      ? selectedPtContentSources.portuguese
+      : [];
+
+  const ptPtEnabledChecked =
+    ptContent.ptPt === true ||
+    selectedPtPtSources.length > 0 ||
+    (Array.isArray(config?.ptContentExternalSources?.ptpt) &&
+      config.ptContentExternalSources.ptpt.length > 0);
+
+  const portugueseProductionEnabledChecked =
+    ptContent.portugueseProduction === true ||
+    selectedPortugueseSources.length > 0 ||
+    (Array.isArray(config?.ptContentExternalSources?.portuguese) &&
+      config.ptContentExternalSources.portuguese.length > 0);
+
+  const cotonetChecked =
+    selectedPtPtSources.includes("cotonet") ? "checked" : "";
+
+  const portugueseAddonChecked =
+    selectedPortugueseSources.includes("filmes-series-novelas-portuguesas")
+      ? "checked"
+      : "";
+
+  const ptPtSourcesText =
+    Array.isArray(config?.ptContentExternalSources?.ptpt)
+      ? config.ptContentExternalSources.ptpt.join("\n")
+      : "";
+
+  const portugueseSourcesText =
+    Array.isArray(config?.ptContentExternalSources?.portuguese)
+      ? config.ptContentExternalSources.portuguese.join("\n")
+      : "";
+
   const enabledExternalSources = features.externalSources === true;
 
   const externalStreamSourcesText =
@@ -3108,12 +3778,123 @@ ${operatorCheckboxes}
       <h2 class="panel-title">🇵🇹 Conteúdo Português</h2>
 
       <p class="panel-description">
-        Fontes de conteúdo português oficiais. Por agora só a RTP Play está
-        preparada na estrutura — a ligação aos dados públicos ainda está a
-        ser confirmada, por isso pode não devolver conteúdo já.
+        Mantém separadas duas famílias diferentes: conteúdos internacionais
+        disponíveis em Português de Portugal (PT-PT) e obras de produção
+        portuguesa. Cada família tem as suas próprias fontes externas.
       </p>
 
-      <div class="option-grid">
+      <div class="subsection" style="margin-top:0;padding-top:0;border-top:0;">
+
+        <h3 class="subsection-title">🗣️ Filmes e Séries em PT-PT</h3>
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="ptPtEnabled"
+            ${ptPtEnabledChecked ? "checked" : ""}
+          >
+          <span>Ativar Filmes e Séries em PT-PT</span>
+        </label>
+
+        <div class="subsection" style="margin-top:12px;">
+          <h4 class="subsection-title">Fontes disponíveis</h4>
+
+          <label class="option-item">
+            <input
+              type="checkbox"
+              id="ptSourceCotonet"
+              value="cotonet"
+              ${cotonetChecked}
+            >
+            <span>Cotonet</span>
+          </label>
+
+          <div class="help">
+            Filmes em Português de Portugal. O endereço do addon já está
+            integrado no PT•HUB; basta selecionar esta fonte.
+          </div>
+        </div>
+
+        <details class="subsection">
+          <summary class="subsection-title" style="cursor:pointer;">
+            Fonte personalizada (opcional)
+          </summary>
+
+          <label class="field-label" for="ptPtAddonSources">
+            URLs adicionais de addons PT-PT
+          </label>
+
+          <textarea
+            id="ptPtAddonSources"
+            rows="3"
+            placeholder="https://exemplo-addon.pt/manifest.json"
+          >${escapeHtml(ptPtSourcesText)}</textarea>
+
+          <div class="help">
+            Opcional. Um URL por linha para acrescentar outras fontes
+            Stremio compatíveis sem alterar o código do PT•HUB.
+          </div>
+        </details>
+
+      </div>
+
+      <div class="subsection">
+
+        <h3 class="subsection-title">🇵🇹 Filmes, Séries e Novelas Portuguesas</h3>
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="portugueseProductionEnabled"
+            ${portugueseProductionEnabledChecked ? "checked" : ""}
+          >
+          <span>Ativar Produção Portuguesa</span>
+        </label>
+
+        <div class="subsection" style="margin-top:12px;">
+          <h4 class="subsection-title">Fontes disponíveis</h4>
+
+          <label class="option-item">
+            <input
+              type="checkbox"
+              id="ptSourcePortugueseProductions"
+              value="filmes-series-novelas-portuguesas"
+              ${portugueseAddonChecked}
+            >
+            <span>Filmes, Séries e Novelas Portuguesas</span>
+          </label>
+
+          <div class="help">
+            Filmes, séries e novelas de produção portuguesa. O endereço
+            do addon já está integrado no PT•HUB.
+          </div>
+        </div>
+
+        <details class="subsection">
+          <summary class="subsection-title" style="cursor:pointer;">
+            Fonte personalizada (opcional)
+          </summary>
+
+          <label class="field-label" for="portugueseAddonSources">
+            URLs adicionais de addons de produção portuguesa
+          </label>
+
+          <textarea
+            id="portugueseAddonSources"
+            rows="3"
+            placeholder="https://exemplo-addon-portugues.pt/manifest.json"
+          >${escapeHtml(portugueseSourcesText)}</textarea>
+
+          <div class="help">
+            Opcional. Esta lista continua independente da família PT-PT.
+          </div>
+        </details>
+
+      </div>
+
+      <div class="subsection">
+
+        <h3 class="subsection-title">📡 RTP Play</h3>
 
         <label class="option-item">
           <input
@@ -3122,8 +3903,14 @@ ${operatorCheckboxes}
             value="rtpPlay"
             ${rtpPlayChecked ? "checked" : ""}
           >
-          <span>RTP Play</span>
+          <span>Ativar RTP Play</span>
         </label>
+
+        <div class="help">
+          Mantém-se preparado para integração através de interfaces
+          públicas/oficiais da RTP, sem contornar autenticação, DRM ou
+          proteções técnicas.
+        </div>
 
       </div>
 
@@ -3302,6 +4089,24 @@ ${operatorCheckboxes}
 
   const rtpPlayEnabled =
     document.getElementById("rtpPlayEnabled");
+
+  const ptPtEnabled =
+    document.getElementById("ptPtEnabled");
+
+  const ptPtAddonSources =
+    document.getElementById("ptPtAddonSources");
+
+  const ptSourceCotonet =
+    document.getElementById("ptSourceCotonet");
+
+  const portugueseProductionEnabled =
+    document.getElementById("portugueseProductionEnabled");
+
+  const portugueseAddonSources =
+    document.getElementById("portugueseAddonSources");
+
+  const ptSourcePortugueseProductions =
+    document.getElementById("ptSourcePortugueseProductions");
 
   const subtitlesEnabled =
     document.getElementById("subtitlesEnabled");
@@ -3870,6 +4675,12 @@ function updateContentVisibility() {
           ptContentEnabled.checked,
 
         ptContentSources: {
+          ptPt:
+            ptPtEnabled.checked,
+
+          portugueseProduction:
+            portugueseProductionEnabled.checked,
+
           rtpPlay:
             rtpPlayEnabled.checked
         },
@@ -3879,6 +4690,37 @@ function updateContentVisibility() {
 
         externalSources:
           externalSourcesEnabled.checked
+      },
+
+      ptContentSelectedSources: {
+        ptpt:
+          ptPtEnabled.checked && ptSourceCotonet.checked
+            ? ["cotonet"]
+            : [],
+
+        portuguese:
+          portugueseProductionEnabled.checked &&
+          ptSourcePortugueseProductions.checked
+            ? ["filmes-series-novelas-portuguesas"]
+            : []
+      },
+
+      ptContentExternalSources: {
+        ptpt:
+          ptPtEnabled.checked
+            ? ptPtAddonSources.value
+                .split("\\n")
+                .map(function (line) { return line.trim(); })
+                .filter(Boolean)
+            : [],
+
+        portuguese:
+          portugueseProductionEnabled.checked
+            ? portugueseAddonSources.value
+                .split("\\n")
+                .map(function (line) { return line.trim(); })
+                .filter(Boolean)
+            : []
       },
 
       externalStreamSources:
@@ -4163,6 +5005,18 @@ function updateContentVisibility() {
     }
   );
 
+  [
+    ptPtEnabled,
+    ptSourceCotonet,
+    portugueseProductionEnabled,
+    ptSourcePortugueseProductions,
+    rtpPlayEnabled
+  ].forEach(function (element) {
+    if (element) {
+      element.addEventListener("change", hideInstall);
+    }
+  });
+
   subtitlesEnabled.addEventListener(
     "change",
     function () {
@@ -4244,7 +5098,7 @@ function updateContentVisibility() {
 
   document
     .querySelectorAll(
-      "input, select"
+      "input, select, textarea"
     )
     .forEach(function (element) {
 
@@ -4441,7 +5295,11 @@ installButton.addEventListener(
 
  config.features.operators ||
 
- config.features.iptv;
+ config.features.iptv ||
+
+ config.features.ptContent ||
+
+ config.features.externalSources;
 
  if (!hasContent) {
 
@@ -4492,6 +5350,52 @@ installButton.addEventListener(
  );
 
  return;
+ }
+
+ if (config.features.ptContent) {
+
+ const ptSources =
+ config.features.ptContentSources || {};
+
+ if (
+ !ptSources.ptPt &&
+ !ptSources.portugueseProduction &&
+ !ptSources.rtpPlay
+ ) {
+
+ showStatus(
+ "Em Conteúdo Português ativa PT-PT, Produção Portuguesa, RTP Play ou uma combinação destas opções."
+ );
+
+ return;
+ }
+
+ if (
+ ptSources.ptPt &&
+ (!config.ptContentSelectedSources?.ptpt?.length) &&
+ (!config.ptContentExternalSources?.ptpt?.length)
+ ) {
+
+ showStatus(
+ "Em Filmes e Séries em PT-PT seleciona pelo menos uma fonte (ex.: Cotonet) ou adiciona uma fonte personalizada."
+ );
+
+ return;
+ }
+
+ if (
+ ptSources.portugueseProduction &&
+ (!config.ptContentSelectedSources?.portuguese?.length) &&
+ (!config.ptContentExternalSources?.portuguese?.length)
+ ) {
+
+ showStatus(
+ "Em Filmes, Séries e Novelas Portuguesas seleciona pelo menos uma fonte ou adiciona uma fonte personalizada."
+ );
+
+ return;
+ }
+
  }
 
  /*
@@ -4794,7 +5698,7 @@ return res.status(400).json({
    ========================================================= */
 
 
-function buildManifest(config) {
+async function buildManifest(config) {
 
  const features =
  config?.features || {};
@@ -4839,9 +5743,17 @@ function buildManifest(config) {
  const showIPTV =
  features.iptv === true;
 
+ const showPtContent =
+ features.ptContent === true;
+
  const showRtpPlay =
- features.ptContent === true &&
+ showPtContent &&
  features.ptContentSources?.rtpPlay === true;
+
+ const externalPtCatalogs =
+ showPtContent
+   ? await getPtExternalManifestCatalogs(config)
+   : [];
 
  function isSpecialCatalog(id) {
  return (
@@ -5049,6 +5961,8 @@ function buildManifest(config) {
 
 ...orderedMovieSeriesCatalogs,
 
+...externalPtCatalogs,
+
 ...(showIPTV
  ? [
  {
@@ -5092,6 +6006,7 @@ function buildManifest(config) {
       "pttv:",
       "m3u:",
       "xtream:",
+      "pthubptmeta:",
       "tt",
       "tmdb:"
     ],
@@ -5112,7 +6027,7 @@ function buildManifest(config) {
    MANIFEST ROUTES
    ========================================================= */
 
-app.get("/manifest.json", (req, res) => {
+app.get("/manifest.json", async (req, res) => {
 
   res.set(
     "Cache-Control",
@@ -5120,13 +6035,13 @@ app.get("/manifest.json", (req, res) => {
   );
 
   res.json(
-    buildManifest(null)
+    await buildManifest(null)
   );
 
 });
 
 
-app.get("/:config/manifest.json", (req, res) => {
+app.get("/:config/manifest.json", async (req, res) => {
 
   const config =
     decodeConfig(req.params.config);
@@ -5137,7 +6052,7 @@ app.get("/:config/manifest.json", (req, res) => {
   );
 
   res.json(
-    buildManifest(config)
+    await buildManifest(config)
   );
 
 });
@@ -5599,6 +6514,18 @@ app.get(
       const country =
         config?.catalogCountry;
 
+      const ptExternalCatalog =
+        await getPtExternalCatalog(
+          config,
+          "movie",
+          id,
+          {}
+        );
+
+      if (ptExternalCatalog) {
+        return res.json(ptExternalCatalog);
+      }
+
       const validCatalog =
         movieCatalogs.some(
           (catalog) =>
@@ -5671,8 +6598,22 @@ app.get(
       const country =
         config?.catalogCountry;
 
-      const { search } =
+      const extra =
         parseExtra(req.params.extra);
+
+      const { search } = extra;
+
+      const ptExternalCatalog =
+        await getPtExternalCatalog(
+          config,
+          "movie",
+          id,
+          extra
+        );
+
+      if (ptExternalCatalog) {
+        return res.json(ptExternalCatalog);
+      }
 
       const validCatalog =
         movieCatalogs.some(
@@ -5731,6 +6672,18 @@ app.get(
 
       const country =
         config?.catalogCountry;
+
+      const ptExternalCatalog =
+        await getPtExternalCatalog(
+          config,
+          "series",
+          id,
+          {}
+        );
+
+      if (ptExternalCatalog) {
+        return res.json(ptExternalCatalog);
+      }
 
       const validCatalog =
         seriesCatalogs.some(
@@ -5803,8 +6756,22 @@ app.get(
       const country =
         config?.catalogCountry;
 
-      const { search } =
+      const extra =
         parseExtra(req.params.extra);
+
+      const { search } = extra;
+
+      const ptExternalCatalog =
+        await getPtExternalCatalog(
+          config,
+          "series",
+          id,
+          extra
+        );
+
+      if (ptExternalCatalog) {
+        return res.json(ptExternalCatalog);
+      }
 
       const validCatalog =
         seriesCatalogs.some(
@@ -6019,6 +6986,19 @@ app.get(
         type === "movie" ||
         type === "series"
       ) {
+
+        if (id.startsWith("pthubptmeta:")) {
+          const data =
+            await getPtExternalMeta(
+              config,
+              type,
+              id
+            );
+
+          return res.json(
+            data || { meta: null }
+          );
+        }
 
         const data =
           await getCinemetaMeta(
@@ -6500,6 +7480,22 @@ app.get(
         type === "movie" ||
         type === "series"
       ) {
+
+        if (id.startsWith("pthubptmeta:")) {
+          const sourceStreams =
+            await getPtExternalStreams(
+              config,
+              type,
+              id
+            );
+
+          return res.json({
+            streams:
+              Array.isArray(sourceStreams)
+                ? sourceStreams
+                : []
+          });
+        }
 
         const streams =
           await getExternalStreams(
