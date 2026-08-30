@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "3.0.0";
+const VERSION = "3.0.2";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -3332,7 +3332,7 @@ function getHubHomeCatalog(config) {
                 type: "series",
                 name: d.name,
                 poster: d.poster,
-                posterShape: "landscape",
+                posterShape: "poster",
                 background: `${PT_HUB_BACKGROUND}?v=${VERSION}`,
                 logo: `${PT_HUB_LOGO}?v=${VERSION}`,
                 description: d.description
@@ -3522,8 +3522,83 @@ async function getHubAliasCatalog(config, type, id) {
   );
 }
 
+
+function encodeHubPlayableId(type, id) {
+  const encoded =
+    Buffer.from(String(id || ""), "utf8")
+      .toString("base64url");
+
+  return `pthubplay:${type}:${encoded}`;
+}
+
+function decodeHubPlayableId(value) {
+  const match =
+    String(value || "")
+      .match(/^pthubplay:(movie|series|channel):([A-Za-z0-9_-]+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return {
+      type: match[1],
+      id:
+        Buffer.from(match[2], "base64url")
+          .toString("utf8")
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function hubMetaToVideo(meta, originalType, season, episode, category) {
+  if (!meta?.id) {
+    return null;
+  }
+
+  return {
+    id: encodeHubPlayableId(originalType, meta.id),
+    title: meta.name || meta.title || "PT•HUB",
+    released:
+      meta.released ||
+      (meta.releaseInfo
+        ? `${String(meta.releaseInfo).slice(0, 4)}-01-01T00:00:00.000Z`
+        : undefined),
+    season,
+    episode,
+    overview:
+      [category, meta.description]
+        .filter(Boolean)
+        .join(" — "),
+    thumbnail:
+      meta.poster ||
+      meta.background ||
+      `${PT_HUB_BACKGROUND}?v=${VERSION}`
+  };
+}
+
+function hubChannelToVideo(channel, season, episode, category) {
+  if (!channel?.id) {
+    return null;
+  }
+
+  return {
+    id: encodeHubPlayableId("channel", channel.id),
+    title: channel.name || "Canal",
+    released: new Date().toISOString(),
+    season,
+    episode,
+    overview: category || channel.group || "Televisão",
+    thumbnail:
+      channel.logo ||
+      `${PT_HUB_LOGO}?v=${VERSION}`
+  };
+}
+
 async function getHubSectionMeta(req, config, section) {
-  const d = getHubSectionDefinition(section);
+  const d =
+    getHubSectionDefinition(section);
 
   if (!d) {
     return null;
@@ -3531,57 +3606,335 @@ async function getHubSectionMeta(req, config, section) {
 
   const links = [];
   const videos = [];
+  let seasonNumber = 0;
 
-  const add = (category, name, type, catalogId, key) => {
+  const addLink = (
+    category,
+    name,
+    type,
+    catalogId
+  ) => {
     links.push(
-      makeHubLink(req, category, name, type, catalogId)
-    );
-
-    videos.push(
-      makeHubVideo(
-        section,
-        key,
+      makeHubLink(
+        req,
+        category,
         name,
-        videos.length,
-        category
+        type,
+        catalogId
       )
     );
   };
 
+  const addMetaSeason = (
+    category,
+    metas,
+    originalType
+  ) => {
+    const list =
+      Array.isArray(metas)
+        ? metas.filter(Boolean)
+        : [];
+
+    if (!list.length) {
+      return;
+    }
+
+    seasonNumber += 1;
+
+    list.slice(0, 40).forEach(
+      (meta, index) => {
+
+        const video =
+          hubMetaToVideo(
+            meta,
+            originalType,
+            seasonNumber,
+            index + 1,
+            category
+          );
+
+        if (video) {
+          videos.push(video);
+        }
+
+      }
+    );
+  };
+
+  const addChannelSeason = (
+    category,
+    channels
+  ) => {
+    const list =
+      Array.isArray(channels)
+        ? channels.filter(Boolean)
+        : [];
+
+    if (!list.length) {
+      return;
+    }
+
+    seasonNumber += 1;
+
+    list.slice(0, 150).forEach(
+      (channel, index) => {
+
+        const video =
+          hubChannelToVideo(
+            channel,
+            seasonNumber,
+            index + 1,
+            category
+          );
+
+        if (video) {
+          videos.push(video);
+        }
+
+      }
+    );
+  };
+
   if (section === "destaques") {
-    add("Destaques", "Estreias no Cinema", "movie", "hub-destaques-cinema-movie", "cinema");
-    add("Destaques", "TOP 10 Filmes", "movie", "hub-destaques-top10-movie", "top10-movie");
-    add("Destaques", "TOP 10 Séries", "series", "hub-destaques-top10-series", "top10-series");
-    add("Destaques", "Novos Filmes", "movie", "hub-destaques-new-movie", "new-movie");
-    add("Destaques", "Novas Séries", "series", "hub-destaques-new-series", "new-series");
-    add("Destaques", "Em Alta • Filmes", "movie", "hub-destaques-featured-movie", "featured-movie");
-    add("Destaques", "Em Alta • Séries", "series", "hub-destaques-featured-series", "featured-series");
-    add("Para ti", "As Minhas Escolhas • Filmes", "movie", "hub-destaques-choices-movie", "choices-movie");
-    add("Para ti", "As Minhas Escolhas • Séries", "series", "hub-destaques-choices-series", "choices-series");
+
+    const definitions = [
+      {
+        category: "Estreias no Cinema",
+        type: "movie",
+        id: "hub-destaques-cinema-movie"
+      },
+      {
+        category: "TOP 10 Filmes",
+        type: "movie",
+        id: "hub-destaques-top10-movie"
+      },
+      {
+        category: "TOP 10 Séries",
+        type: "series",
+        id: "hub-destaques-top10-series"
+      },
+      {
+        category: "Novos Filmes",
+        type: "movie",
+        id: "hub-destaques-new-movie"
+      },
+      {
+        category: "Novas Séries",
+        type: "series",
+        id: "hub-destaques-new-series"
+      },
+      {
+        category: "Em Alta • Filmes",
+        type: "movie",
+        id: "hub-destaques-featured-movie"
+      },
+      {
+        category: "Em Alta • Séries",
+        type: "series",
+        id: "hub-destaques-featured-series"
+      },
+      {
+        category: "As Minhas Escolhas • Filmes",
+        type: "movie",
+        id: "hub-destaques-choices-movie"
+      },
+      {
+        category: "As Minhas Escolhas • Séries",
+        type: "series",
+        id: "hub-destaques-choices-series"
+      }
+    ];
+
+    const results =
+      await Promise.all(
+        definitions.map(
+          async (item) => {
+
+            try {
+
+              const data =
+                await getHubAliasCatalog(
+                  config,
+                  item.type,
+                  item.id
+                );
+
+              return {
+                ...item,
+                metas:
+                  Array.isArray(data?.metas)
+                    ? data.metas
+                    : []
+              };
+
+            } catch (error) {
+
+              console.error(
+                `Erro HUB Destaques ${item.id}:`,
+                error.message
+              );
+
+              return {
+                ...item,
+                metas: []
+              };
+
+            }
+
+          }
+        )
+      );
+
+    for (const item of results) {
+
+      addLink(
+        "Destaques",
+        item.category,
+        item.type,
+        item.id
+      );
+
+      addMetaSeason(
+        item.category,
+        item.metas,
+        item.type
+      );
+
+    }
+
   }
 
   if (section === "streamers") {
-    for (const streamerId of getHubStreamerSelection(config)) {
-      const label = getHubStreamerLabel(streamerId);
 
-      add(label, "Novidades • Filmes", "movie", `hub-streamer-${streamerId}-new-movie`, `${streamerId}-new-movie`);
-      add(label, "Novidades • Séries", "series", `hub-streamer-${streamerId}-new-series`, `${streamerId}-new-series`);
-      add(label, "TOP 10 Filmes", "movie", `hub-streamer-${streamerId}-top10-movie`, `${streamerId}-top10-movie`);
-      add(label, "TOP 10 Séries", "series", `hub-streamer-${streamerId}-top10-series`, `${streamerId}-top10-series`);
-      add(label, "As Minhas Escolhas • Filmes", "movie", `hub-streamer-${streamerId}-choices-movie`, `${streamerId}-choices-movie`);
-      add(label, "As Minhas Escolhas • Séries", "series", `hub-streamer-${streamerId}-choices-series`, `${streamerId}-choices-series`);
-      add(label, "Todos os Filmes", "movie", `hub-streamer-${streamerId}-all-movie`, `${streamerId}-all-movie`);
-      add(label, "Todas as Séries", "series", `hub-streamer-${streamerId}-all-series`, `${streamerId}-all-series`);
+    const selected =
+      getHubStreamerSelection(config);
+
+    const jobs = [];
+
+    for (const streamerId of selected) {
+
+      const label =
+        getHubStreamerLabel(streamerId);
+
+      const definitions = [
+        {
+          category: `${label} • Novidades Filmes`,
+          type: "movie",
+          mode: "new"
+        },
+        {
+          category: `${label} • Novidades Séries`,
+          type: "series",
+          mode: "new"
+        },
+        {
+          category: `${label} • TOP 10 Filmes`,
+          type: "movie",
+          mode: "top10"
+        },
+        {
+          category: `${label} • TOP 10 Séries`,
+          type: "series",
+          mode: "top10"
+        },
+        {
+          category: `${label} • As Minhas Escolhas • Filmes`,
+          type: "movie",
+          mode: "choices"
+        },
+        {
+          category: `${label} • As Minhas Escolhas • Séries`,
+          type: "series",
+          mode: "choices"
+        },
+        {
+          category: `${label} • Filmes`,
+          type: "movie",
+          mode: "all"
+        },
+        {
+          category: `${label} • Séries`,
+          type: "series",
+          mode: "all"
+        }
+      ];
+
+      for (const item of definitions) {
+
+        const catalogId =
+          `hub-streamer-${streamerId}-${item.mode}-${item.type}`;
+
+        addLink(
+          label,
+          item.category,
+          item.type,
+          catalogId
+        );
+
+        jobs.push(
+          getStreamerDiscoveryCatalog(
+            item.type,
+            streamerId,
+            item.mode,
+            config?.catalogCountry
+          )
+            .then((data) => ({
+              ...item,
+              catalogId,
+              metas:
+                Array.isArray(data?.metas)
+                  ? data.metas
+                  : []
+            }))
+            .catch((error) => {
+
+              console.error(
+                `Erro HUB Streamer ${catalogId}:`,
+                error.message
+              );
+
+              return {
+                ...item,
+                catalogId,
+                metas: []
+              };
+
+            })
+        );
+
+      }
+
     }
+
+    const results =
+      await Promise.all(jobs);
+
+    for (const item of results) {
+      addMetaSeason(
+        item.category,
+        item.metas,
+        item.type
+      );
+    }
+
   }
 
-  if (section === "portugues" || section === "adultos") {
+  if (
+    section === "portugues" ||
+    section === "adultos"
+  ) {
+
     const catalogs =
-      await getPtExternalManifestCatalogs(config);
+      await getPtExternalManifestCatalogs(
+        config
+      );
 
     for (const catalog of catalogs) {
+
       const decoded =
-        parsePtCatalogId(catalog.id);
+        parsePtCatalogId(
+          catalog.id
+        );
 
       if (!decoded) {
         continue;
@@ -3596,76 +3949,153 @@ async function getHubSectionMeta(req, config, section) {
 
       if (
         section === "portugues" &&
-        !["ptpt", "portuguese"].includes(decoded.group)
+        !["ptpt", "portuguese"]
+          .includes(decoded.group)
       ) {
         continue;
       }
 
       const category =
         decoded.group === "ptpt"
-          ? "Filmes em PT-PT"
+          ? catalog.name
           : decoded.group === "portuguese"
-          ? "Produções Portuguesas"
-          : "Adultos";
+          ? catalog.name
+          : `Adultos • ${catalog.name}`;
 
-      add(
+      addLink(
+        decoded.group === "adult"
+          ? "Adultos"
+          : "Português",
         category,
-        catalog.name,
         catalog.type,
-        catalog.id,
-        `${decoded.group}-${videos.length}`
+        catalog.id
       );
+
+      try {
+
+        const data =
+          await getPtExternalCatalog(
+            config,
+            catalog.type,
+            catalog.id,
+            {}
+          );
+
+        addMetaSeason(
+          category,
+          data?.metas || [],
+          catalog.type
+        );
+
+      } catch (error) {
+
+        console.error(
+          `Erro HUB ${section} ${catalog.id}:`,
+          error.message
+        );
+
+      }
+
     }
+
   }
 
   if (
     section === "iptv" &&
     config?.features?.iptv === true
   ) {
-    const name =
-      config?.mode === "xtream"
-        ? (config?.xtreamCatalogName || "Xtream API")
-        : config?.mode === "iptv-org"
-        ? (config?.iptvOrg?.catalogName || "IPTV-org FREE")
-        : (config?.m3uCatalogName || "Minha IPTV");
 
-    add("Televisão", name, "channel", "m3u", "iptv");
+    try {
+
+      const channels =
+        await getIPTVChannels(
+          config
+        );
+
+      const name =
+        config?.mode === "xtream"
+          ? (config?.xtreamCatalogName || "Xtream API")
+          : config?.mode === "iptv-org"
+          ? (config?.iptvOrg?.catalogName || "IPTV-org FREE")
+          : (config?.m3uCatalogName || "Minha IPTV");
+
+      addChannelSeason(
+        name,
+        channels
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Erro HUB IPTV:",
+        error.message
+      );
+
+    }
+
   }
 
   if (section === "operadores") {
+
     const selected =
-      Array.isArray(config?.features?.selectedOperators)
+      Array.isArray(
+        config?.features?.selectedOperators
+      )
         ? config.features.selectedOperators
         : [];
 
     for (const operatorId of selected) {
+
       const operator =
-        getOperatorById(operatorId);
+        getOperatorById(
+          operatorId
+        );
 
       if (!operator) {
         continue;
       }
 
-      add(
-        "Operadores PT",
+      const channels =
+        getOperatorChannels(
+          operator
+        );
+
+      addChannelSeason(
         operator.name,
-        "channel",
-        operator.id,
-        `operator-${operator.id}`
+        channels
       );
+
     }
+
   }
 
   return {
-    id: `${PT_HUB_META_PREFIX}${section}`,
-    type: "series",
-    name: d.name,
-    poster: d.poster,
-    posterShape: "landscape",
-    background: `${PT_HUB_BACKGROUND}?v=${VERSION}`,
-    logo: `${PT_HUB_LOGO}?v=${VERSION}`,
+    id:
+      `${PT_HUB_META_PREFIX}${section}`,
+
+    type:
+      "series",
+
+    name:
+      d.name,
+
+    poster:
+      d.poster,
+
+    posterShape:
+      "poster",
+
+    background:
+      `${PT_HUB_BACKGROUND}?v=${VERSION}`,
+
+    logo:
+      `${PT_HUB_LOGO}?v=${VERSION}`,
+
     description:
-      `${d.description}\n\nSeleciona uma opção para abrir o respetivo catálogo.`,
+      videos.length
+        ? `${d.description}\n\nOs conteúdos desta área aparecem abaixo e podem ser reproduzidos diretamente.`
+        : `${d.description}\n\nAinda não foi possível carregar conteúdos desta área.`,
+
     links,
     videos
   };
@@ -5554,6 +5984,151 @@ app.get(
 
       if (
         type === "series" &&
+        id.startsWith("pthubplay:")
+      ) {
+
+        const playable =
+          decodeHubPlayableId(
+            id
+          );
+
+        if (!playable) {
+          return res.json({
+            streams: []
+          });
+        }
+
+        if (
+          playable.type === "movie" ||
+          playable.type === "series"
+        ) {
+
+          if (
+            playable.id.startsWith(
+              "pthubptmeta:"
+            )
+          ) {
+
+            const sourceStreams =
+              await getPtExternalStreams(
+                config,
+                playable.type,
+                playable.id
+              );
+
+            return res.json({
+              streams:
+                Array.isArray(sourceStreams)
+                  ? sourceStreams
+                  : []
+            });
+
+          }
+
+          const streams =
+            await getExternalStreams(
+              config,
+              playable.type,
+              playable.id
+            );
+
+          return res.json({
+            streams
+          });
+
+        }
+
+        if (
+          playable.type === "channel"
+        ) {
+
+          if (
+            playable.id.startsWith(
+              "operator:"
+            )
+          ) {
+
+            const operatorId =
+              playable.id.split(":")[1];
+
+            const operator =
+              getOperatorById(
+                operatorId
+              );
+
+            const channels =
+              getOperatorChannels(
+                operator
+              );
+
+            const channel =
+              channels.find(
+                (item) =>
+                  item.id === playable.id
+              );
+
+            if (!channel) {
+              return res.json({
+                streams: []
+              });
+            }
+
+            return res.json({
+              streams: [
+                {
+                  name: "PT•HUB",
+                  title: channel.name,
+                  url: channel.url,
+                  behaviorHints: {
+                    notWebReady: true
+                  }
+                }
+              ]
+            });
+
+          }
+
+          const channels =
+            await getIPTVChannels(
+              config
+            );
+
+          const channel =
+            channels.find(
+              (item) =>
+                item.id === playable.id
+            );
+
+          if (!channel) {
+            return res.json({
+              streams: []
+            });
+          }
+
+          return res.json({
+            streams: [
+              {
+                name: "PT•HUB",
+                title: channel.name,
+                url: channel.url,
+                behaviorHints: {
+                  notWebReady: true
+                }
+              }
+            ]
+          });
+
+        }
+
+        return res.json({
+          streams: []
+        });
+
+      }
+
+
+      if (
+        type === "series" &&
         id.startsWith("pthubnav:")
       ) {
         const parts =
@@ -5753,8 +6328,40 @@ app.get(
         return res.json({ subtitles: [] });
       }
 
+      let subtitleType =
+        req.params.type;
+
+      let subtitleId =
+        req.params.id;
+
+      if (
+        subtitleType === "series" &&
+        subtitleId.startsWith("pthubplay:")
+      ) {
+
+        const playable =
+          decodeHubPlayableId(
+            subtitleId
+          );
+
+        if (
+          playable &&
+          (
+            playable.type === "movie" ||
+            playable.type === "series"
+          )
+        ) {
+          subtitleType =
+            playable.type;
+
+          subtitleId =
+            playable.id;
+        }
+
+      }
+
       const url =
-        `${OPENSUBTITLES_BASE}/subtitles/${encodeURIComponent(req.params.type)}/${encodeURIComponent(req.params.id)}.json`;
+        `${OPENSUBTITLES_BASE}/subtitles/${encodeURIComponent(subtitleType)}/${encodeURIComponent(subtitleId)}.json`;
 
       const response =
         await fetch(url, {
