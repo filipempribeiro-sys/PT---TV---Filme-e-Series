@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.1.0";
+const VERSION = "2.1";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -1713,12 +1713,17 @@ const PT_SOURCE_GROUPS = {
   ptpt: {
     key: "ptpt",
     label: "Filmes e Séries em PT-PT",
-    prefix: "🗣️"
+    prefix: "🇵🇹"
   },
   portuguese: {
     key: "portuguese",
     label: "Filmes, Séries e Novelas Portuguesas",
     prefix: "🇵🇹"
+  },
+  adult: {
+    key: "adult",
+    label: "Adultos",
+    prefix: "🔞"
   }
 };
 
@@ -1741,6 +1746,18 @@ const PT_PREDEFINED_SOURCES = {
       name: "Filmes, Séries e Novelas Portuguesas",
       manifestUrl: "https://filme-series-e-novelas-portuguesas.vercel.app/manifest.json"
     }
+  ],
+  adult: [
+    { id: "dirty-pink", name: "Dirty Pink", manifestUrl: "https://dirty-pink.ers.pw/manifest.json" },
+    { id: "tpb-adult", name: "TPB Adult", manifestUrl: "https://tpb-adult-addon.click/manifest.json" },
+    { id: "jaxxx-v2", name: "JAXXX V2", manifestUrl: "https://07b88951aaab-jaxxx-v2.baby-beamup.club/manifest.json" },
+    { id: "xclub", name: "XClub", manifestUrl: "https://xclub-stremio.vercel.app/manifest.json" },
+    { id: "hianime", name: "HiAnime", manifestUrl: "https://streamio-hianime.onrender.com/manifest.json" },
+    { id: "asa", name: "ASA", manifestUrl: "https://asa.00696900.xyz/manifest.json" },
+    { id: "hentaistream", name: "HentaiStream", manifestUrl: "https://hentaistream-addon.keypop3750.workers.dev/manifest.json" },
+    { id: "hanime", name: "HAnime", manifestUrl: "https://hanime-stremio.fly.dev/manifest.json" },
+    { id: "xclub-rd", name: "XClub RD", manifestUrl: "https://xclub-rd-bov3.vercel.app/manifest.json" },
+    { id: "adult-video", name: "Adult Video", manifestUrl: "https://av.sudolocal.qzz.io/manifest.json" }
   ]
 };
 
@@ -1765,6 +1782,31 @@ function normalizeAddonBaseUrl(value) {
 }
 
 function getPtSourceUrls(config, group) {
+  /*
+   * Adultos: uma única opção na configuração ativa automaticamente
+   * todos os providers predefinidos. Não existem checkboxes individuais.
+   * Mantemos suporte silencioso a URLs personalizados de configurações
+   * antigas para não quebrar links já gerados.
+   */
+  if (group === "adult") {
+    if (config?.features?.adultContent !== true) {
+      return [];
+    }
+
+    const predefinedUrls = (PT_PREDEFINED_SOURCES.adult || [])
+      .map((source) => source.manifestUrl);
+
+    const legacyCustom = Array.isArray(config?.adultContentExternalSources)
+      ? config.adultContentExternalSources
+      : [];
+
+    return [...new Set(
+      [...predefinedUrls, ...legacyCustom]
+        .map(normalizeAddonBaseUrl)
+        .filter(isValidHttpUrl)
+    )];
+  }
+
   const selected = config?.ptContentSelectedSources || {};
   const selectedIds = Array.isArray(selected[group]) ? selected[group] : [];
 
@@ -1984,12 +2026,62 @@ function normalizeCatalogExtra(catalog) {
   return [];
 }
 
-function getPtCatalogDisplayName(group, sourceName, catalogName) {
-  const groupInfo = PT_SOURCE_GROUPS[group];
-  const source = String(sourceName || "Fonte externa").trim();
-  const catalog = String(catalogName || "Conteúdo").trim();
+function getPtCatalogDisplayName(group, sourceName, catalogName, catalogId, type) {
+  const text = normalizeSearchText(
+    `${catalogId || ""} ${catalogName || ""}`
+  );
 
-  return `${groupInfo.prefix} ${source} — ${catalog}`;
+  if (group === "ptpt") {
+    const base = type === "series"
+      ? "🇵🇹 Séries em PT-PT"
+      : "🇵🇹 Filmes em PT-PT";
+
+    if (/\b(todos?|all|principal|main|default)\b/.test(text)) {
+      return base;
+    }
+
+    if (/\b(a-z|az|alfabetico|alfabetica)\b/.test(text)) {
+      return `${base} • A-Z`;
+    }
+
+    if (/\b(recentes?|recent|new|novos?)\b/.test(text)) {
+      return `${base} • Recentes`;
+    }
+
+    if (/\b(antigos?|old|classicos?)\b/.test(text)) {
+      return `${base} • Antigos`;
+    }
+
+    if (/\b(rating|avaliacao|melhor)\b/.test(text)) {
+      return `${base} • Melhor Avaliação`;
+    }
+
+    const suffix = String(catalogName || "").trim();
+    return suffix ? `${base} • ${suffix}` : base;
+  }
+
+  if (group === "portuguese") {
+    if (/novela/.test(text)) {
+      return "🇵🇹 Novelas Portuguesas";
+    }
+
+    if (type === "movie") {
+      return "🇵🇹 Filmes Portugueses";
+    }
+
+    if (type === "series") {
+      return "🇵🇹 Séries Portuguesas";
+    }
+
+    return "🇵🇹 Conteúdo Português";
+  }
+
+  if (group === "adult") {
+    const suffix = String(catalogName || "").trim();
+    return suffix ? `🔞 Adultos • ${suffix}` : "🔞 Adultos";
+  }
+
+  return `${PT_SOURCE_GROUPS[group]?.prefix || ""} ${String(catalogName || sourceName || "Conteúdo").trim()}`.trim();
 }
 
 
@@ -2331,13 +2423,32 @@ async function getPtHubAggregateCatalog(config, type, catalogId, extra = {}) {
 }
 
 async function getPtExternalManifestCatalogs(config) {
-  if (!config?.features?.ptContent) {
-    return [];
+  const ptSources = config?.features?.ptContentSources || {};
+
+  function groupEnabled(group) {
+    if (group === "ptpt") {
+      return config?.features?.ptContent === true && ptSources.ptPt === true;
+    }
+
+    if (group === "portuguese") {
+      return config?.features?.ptContent === true &&
+        ptSources.portugueseProduction === true;
+    }
+
+    if (group === "adult") {
+      return config?.features?.adultContent === true;
+    }
+
+    return false;
   }
 
   const jobs = [];
 
   for (const group of Object.keys(PT_SOURCE_GROUPS)) {
+    if (!groupEnabled(group)) {
+      continue;
+    }
+
     for (const baseUrl of getPtSourceUrls(config, group)) {
       jobs.push(
         getPtSourceManifest(baseUrl)
@@ -2375,7 +2486,9 @@ async function getPtExternalManifestCatalogs(config) {
         name: getPtCatalogDisplayName(
           group,
           manifest.name,
-          catalog.name
+          catalog.name,
+          catalog.id,
+          catalog.type
         ),
         extra: normalizeCatalogExtra(catalog)
       });
@@ -2648,7 +2761,9 @@ async function getPtExternalStreams(config, type, wrappedId) {
     const groupLabel =
       parsed.group === "ptpt"
         ? "PT-PT"
-        : "Produção Portuguesa";
+        : parsed.group === "adult"
+          ? "Adultos"
+          : "Produção Portuguesa";
 
     return streams.map((stream) => ({
       ...stream,
@@ -2733,6 +2848,7 @@ function renderConfigurePage(config = {}) {
   const enabledIPTV = features.iptv === true;
   const enabledSubtitles = features.subtitles === true;
   const enabledPtContent = features.ptContent === true;
+  const enabledAdultContent = features.adultContent === true;
   const ptContent = features.ptContentSources || {};
   const rtpPlayChecked = ptContent.rtpPlay === true;
 
@@ -3482,6 +3598,15 @@ button:disabled {
       <label class="feature-item">
         <input
           type="checkbox"
+          id="adultContentEnabled"
+          ${enabledAdultContent ? "checked" : ""}
+        >
+        <span>Adultos</span>
+      </label>
+
+      <label class="feature-item">
+        <input
+          type="checkbox"
           id="iptvEnabled"
           ${enabledIPTV ? "checked" : ""}
         >
@@ -3733,6 +3858,28 @@ ${streamerCheckboxes}
           proteções técnicas.
         </div>
 
+      </div>
+
+    </div>
+
+    <!-- =========================================================
+         ADULTOS
+         ========================================================= -->
+
+    <div id="adultContentContainer" class="config-panel">
+
+      <h2 class="panel-title">🔞 Adultos</h2>
+
+      <p class="panel-description">
+        Conteúdo destinado exclusivamente a adultos. Ao ativar esta opção,
+        o PT•HUB carrega automaticamente todas as fontes adultas
+        predefinidas e apresenta os respetivos catálogos com identidade
+        PT•HUB. Não é necessário selecionar providers nem introduzir URLs.
+      </p>
+
+      <div class="help">
+        Se uma fonte estiver temporariamente indisponível, é ignorada sem
+        impedir o funcionamento das restantes fontes ou do PT•HUB.
       </div>
 
     </div>
@@ -4432,6 +4579,9 @@ ${operatorCheckboxes}
   const ptContentEnabled =
     document.getElementById("ptContentEnabled");
 
+  const adultContentEnabled =
+    document.getElementById("adultContentEnabled");
+
   const rtpPlayEnabled =
     document.getElementById("rtpPlayEnabled");
 
@@ -4479,6 +4629,9 @@ ${operatorCheckboxes}
 
   const ptContentContainer =
     document.getElementById("ptContentContainer");
+
+  const adultContentContainer =
+    document.getElementById("adultContentContainer");
 
   const subtitlesContainer =
     document.getElementById("subtitlesPanel");
@@ -4712,6 +4865,11 @@ function updateContentVisibility() {
  setPanelVisibility(
  ptContentContainer,
  ptContentEnabled.checked
+ );
+
+ setPanelVisibility(
+ adultContentContainer,
+ adultContentEnabled.checked
  );
 
  setPanelVisibility(
@@ -5018,6 +5176,9 @@ function updateContentVisibility() {
 
         ptContent:
           ptContentEnabled.checked,
+
+        adultContent:
+          adultContentEnabled.checked,
 
         ptContentSources: {
           ptPt:
@@ -5350,6 +5511,14 @@ function updateContentVisibility() {
     }
   );
 
+  adultContentEnabled.addEventListener(
+    "change",
+    function () {
+      updateContentVisibility();
+      hideInstall();
+    }
+  );
+
   [
     ptPtEnabled,
     ptSourceCotonet,
@@ -5643,6 +5812,8 @@ installButton.addEventListener(
  config.features.iptv ||
 
  config.features.ptContent ||
+
+ config.features.adultContent ||
 
  config.features.externalSources;
 
@@ -6095,10 +6266,10 @@ async function buildManifest(config) {
  showPtContent &&
  features.ptContentSources?.rtpPlay === true;
 
- const ptHubCatalogs =
- showPtContent
-   ? getPtHubManifestCatalogs(config)
-   : [];
+ const externalIdentityCatalogs =
+   (showPtContent || features.adultContent === true)
+     ? await getPtExternalManifestCatalogs(config)
+     : [];
 
  function isSpecialCatalog(id) {
  return (
@@ -6306,7 +6477,7 @@ async function buildManifest(config) {
 
 ...orderedMovieSeriesCatalogs,
 
-...ptHubCatalogs,
+...externalIdentityCatalogs,
 
 ...(showIPTV
  ? [
@@ -6359,7 +6530,8 @@ async function buildManifest(config) {
     behaviorHints: {
       configurable: true,
       configurationRequired: false,
-      p2p: false
+      p2p: false,
+      adult: features.adultContent === true
     }
   };
 
