@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.1";
+const VERSION = "2.1.2";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -1116,9 +1116,157 @@ async function getCinemetaCatalog(type, search) {
 }
 
 async function getCinemetaMeta(type, id) {
-  return await cinemetaFetch(
+  const data = await cinemetaFetch(
     `/meta/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`
   );
+
+  // O cliente Stremio/Nuvio decide se mostra trailer/preview, mas o PT•HUB
+  // garante sempre os visuais necessários para uma página de detalhe rica.
+  if (data?.meta && /^tt\d+$/.test(String(id || ""))) {
+    data.meta.poster =
+      data.meta.poster ||
+      `https://images.metahub.space/poster/medium/${id}/img`;
+
+    data.meta.background =
+      data.meta.background ||
+      `https://images.metahub.space/background/medium/${id}/img`;
+
+    data.meta.logo =
+      data.meta.logo ||
+      `https://images.metahub.space/logo/medium/${id}/img`;
+  }
+
+  return data;
+}
+
+/* =========================================================
+   NOVIDADES / ESTREIAS - JUSTWATCH + CINEMETA/METAHUB
+   ========================================================= */
+
+const discoveryCatalogCache = new Map();
+const DISCOVERY_CATALOG_CACHE_MS = 30 * 60 * 1000;
+
+function normalizeDiscoveryMeta(type, content) {
+  const imdbId = content?.externalIds?.imdbId;
+
+  if (!imdbId) {
+    return null;
+  }
+
+  return {
+    id: imdbId,
+    type,
+    name: content?.title || "Título",
+    poster:
+      `https://images.metahub.space/poster/medium/${imdbId}/img`,
+    background:
+      `https://images.metahub.space/background/medium/${imdbId}/img`,
+    releaseInfo:
+      content?.originalReleaseYear
+        ? String(content.originalReleaseYear)
+        : undefined
+  };
+}
+
+async function getDiscoveryCatalog(type, mode, country) {
+  const countryCode = normalizeCountryCode(country);
+  const cacheKey = `${mode}:${type}:${countryCode}`;
+  const now = Date.now();
+  const cached = discoveryCatalogCache.get(cacheKey);
+
+  if (cached && (now - cached.time) < DISCOVERY_CATALOG_CACHE_MS) {
+    return cached.data;
+  }
+
+  const objectType = type === "movie" ? "MOVIE" : "SHOW";
+
+  const query = `
+    query GetPopularTitles(
+      $country: Country!
+      $filter: TitleFilter
+      $first: Int!
+      $sortBy: PopularTitlesSorting!
+    ) {
+      popularTitles(
+        country: $country
+        filter: $filter
+        first: $first
+        sortBy: $sortBy
+      ) {
+        edges {
+          node {
+            objectType
+            content(country: $country, language: pt) {
+              title
+              originalReleaseYear
+              externalIds { imdbId }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const filter = {
+    objectTypes: [objectType]
+  };
+
+  // JustWatch expõe CINEMA como tipo de monetização. Isto permite uma
+  // linha de estreias em sala independente dos streamers configurados.
+  if (mode === "cinema") {
+    filter.monetizationTypes = ["CINEMA"];
+  }
+
+  const variables = {
+    country: countryCode,
+    first: 100,
+    sortBy: mode === "popular" ? "POPULAR" : "TRENDING",
+    filter
+  };
+
+  const data = await justWatchRequest(query, variables);
+  const edges = data?.popularTitles?.edges || [];
+  const currentYear = new Date().getUTCFullYear();
+  const ids = new Set();
+  const metas = [];
+
+  for (const edge of edges) {
+    const content = edge?.node?.content;
+
+    if (!content) {
+      continue;
+    }
+
+    if (mode === "new") {
+      const year = Number(content.originalReleaseYear || 0);
+
+      // Mantém a montra concentrada em obras recentes. Inclui o ano
+      // anterior para evitar uma linha vazia nos primeiros meses do ano.
+      if (!year || year < (currentYear - 1)) {
+        continue;
+      }
+    }
+
+    const meta = normalizeDiscoveryMeta(type, content);
+
+    if (!meta || ids.has(meta.id)) {
+      continue;
+    }
+
+    ids.add(meta.id);
+    metas.push(meta);
+  }
+
+  if (mode === "new") {
+    metas.sort((a, b) =>
+      Number(b.releaseInfo || 0) - Number(a.releaseInfo || 0)
+    );
+  }
+
+  const result = { metas: metas.slice(0, 100) };
+  discoveryCatalogCache.set(cacheKey, { data: result, time: Date.now() });
+
+  return result;
 }
 
 /* =========================================================
@@ -1638,6 +1786,11 @@ catalog =>
 catalog.type === "movie"
 );
 
+const discoveryCatalogs = [
+  { id: "cinema-new", name: "🎬 Estreias no Cinema" },
+  { id: "movie-new", name: "🆕 Novos Filmes" }
+];
+
 const streamerCatalogs =
 streamers.map(
 streamer => ({
@@ -1648,6 +1801,7 @@ name:
 );
 
 return [
+...discoveryCatalogs,
 ...specialCatalogs,
 ...streamerCatalogs
 ];
@@ -1661,6 +1815,10 @@ catalog =>
 catalog.type === "series"
 );
 
+const discoveryCatalogs = [
+  { id: "series-new", name: "🆕 Novas Séries" }
+];
+
 const streamerCatalogs =
 streamers.map(
 streamer => ({
@@ -1671,6 +1829,7 @@ name:
 );
 
 return [
+...discoveryCatalogs,
 ...specialCatalogs,
 ...streamerCatalogs
 ];
@@ -6275,7 +6434,10 @@ async function buildManifest(config) {
  return (
  id === "featured" ||
  id === "movie-top" ||
- id === "series-top"
+ id === "series-top" ||
+ id === "cinema-new" ||
+ id === "movie-new" ||
+ id === "series-new"
  );
  }
 
@@ -6394,6 +6556,28 @@ async function buildManifest(config) {
  const searchExtra = [{ name: "search", isRequired: false }];
 
  const orderedMovieSeriesCatalogs = [];
+
+ // TOP PT•HUB: novidades primeiro; Populares e Em Destaque mantêm-se
+ // imediatamente a seguir para preservar descoberta de catálogo.
+ const cinemaNew = findCatalog(filteredMovieCatalogs, "cinema-new");
+ const movieNew = findCatalog(filteredMovieCatalogs, "movie-new");
+ const seriesNew = findCatalog(filteredSeriesCatalogs, "series-new");
+
+ if (cinemaNew) {
+   orderedMovieSeriesCatalogs.push({
+     type: "movie", id: cinemaNew.id, name: cinemaNew.name, extra: searchExtra
+   });
+ }
+ if (movieNew) {
+   orderedMovieSeriesCatalogs.push({
+     type: "movie", id: movieNew.id, name: movieNew.name, extra: searchExtra
+   });
+ }
+ if (seriesNew) {
+   orderedMovieSeriesCatalogs.push({
+     type: "series", id: seriesNew.id, name: seriesNew.name, extra: searchExtra
+   });
+ }
 
  const popularMovie = findCatalog(filteredMovieCatalogs, "movie-top");
  const popularSeries = findCatalog(filteredSeriesCatalogs, "series-top");
@@ -7068,6 +7252,30 @@ app.get(
         });
       }
 
+if (id === "cinema-new") {
+
+return res.json(
+await getDiscoveryCatalog(
+"movie",
+"cinema",
+country
+)
+);
+
+}
+
+if (id === "movie-new") {
+
+return res.json(
+await getDiscoveryCatalog(
+"movie",
+"new",
+country
+)
+);
+
+}
+
 if (id === "featured") {
 
 return res.json(
@@ -7170,7 +7378,11 @@ app.get(
       let data;
       let alreadyFiltered = false;
 
-      if (id === "featured") {
+      if (id === "cinema-new") {
+        data = await getDiscoveryCatalog("movie", "cinema", country);
+      } else if (id === "movie-new") {
+        data = await getDiscoveryCatalog("movie", "new", country);
+      } else if (id === "featured") {
         data = await getFeaturedCatalog("movie", country);
       } else if (id === "movie-top") {
         data = await getCinemetaCatalog("movie", search);
@@ -7252,6 +7464,18 @@ app.get(
           metas: []
         });
       }
+
+if (id === "series-new") {
+
+return res.json(
+await getDiscoveryCatalog(
+"series",
+"new",
+country
+)
+);
+
+}
 
 if (id === "featured") {
 
@@ -7354,7 +7578,9 @@ app.get(
       let data;
       let alreadyFiltered = false;
 
-      if (id === "featured") {
+      if (id === "series-new") {
+        data = await getDiscoveryCatalog("series", "new", country);
+      } else if (id === "featured") {
         data = await getFeaturedCatalog("series", country);
       } else if (id === "series-top") {
         data = await getCinemetaCatalog("series", search);
