@@ -1696,6 +1696,21 @@ function getOperatorById(operatorId) {
   ) || null;
 }
 
+/* =========================================================
+   RTP PLAY
+   =========================================================
+   Ainda sem integração de dados: a RTP não disponibiliza uma
+   API pública documentada (só existem APIs não-oficiais de
+   terceiros, feitas por engenharia reversa da app móvel, que
+   optámos por não usar). Esta função existe para já a estrutura
+   ficar pronta — assim que houver uma fonte pública confirmada
+   (feed RSS, API oficial, etc.), implementa-se aqui.
+   ========================================================= */
+
+async function getRtpPlayChannels() {
+  return [];
+}
+
 function getOperatorChannels(operator) {
 
   if (!operator) {
@@ -1745,6 +1760,9 @@ function renderConfigurePage(config = {}) {
   const enabledOperators = features.operators === true;
   const enabledIPTV = features.iptv === true;
   const enabledSubtitles = features.subtitles === true;
+  const enabledPtContent = features.ptContent === true;
+  const ptContent = features.ptContentSources || {};
+  const rtpPlayChecked = ptContent.rtpPlay === true;
   const enabledExternalSources = features.externalSources === true;
 
   const externalStreamSourcesText =
@@ -2458,6 +2476,15 @@ button:disabled {
       <label class="feature-item">
         <input
           type="checkbox"
+          id="ptContentEnabled"
+          ${enabledPtContent ? "checked" : ""}
+        >
+        <span>Conteúdo Português</span>
+      </label>
+
+      <label class="feature-item">
+        <input
+          type="checkbox"
           id="subtitlesEnabled"
           ${enabledSubtitles ? "checked" : ""}
         >
@@ -3073,6 +3100,36 @@ ${operatorCheckboxes}
     </div>
 
     <!-- =========================================================
+         CONTEÚDO PORTUGUÊS
+         ========================================================= -->
+
+    <div id="ptContentContainer" class="config-panel">
+
+      <h2 class="panel-title">🇵🇹 Conteúdo Português</h2>
+
+      <p class="panel-description">
+        Fontes de conteúdo português oficiais. Por agora só a RTP Play está
+        preparada na estrutura — a ligação aos dados públicos ainda está a
+        ser confirmada, por isso pode não devolver conteúdo já.
+      </p>
+
+      <div class="option-grid">
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="rtpPlayEnabled"
+            value="rtpPlay"
+            ${rtpPlayChecked ? "checked" : ""}
+          >
+          <span>RTP Play</span>
+        </label>
+
+      </div>
+
+    </div>
+
+    <!-- =========================================================
          LEGENDAS
          ========================================================= -->
 
@@ -3240,6 +3297,12 @@ ${operatorCheckboxes}
   const iptvEnabled =
     document.getElementById("iptvEnabled");
 
+  const ptContentEnabled =
+    document.getElementById("ptContentEnabled");
+
+  const rtpPlayEnabled =
+    document.getElementById("rtpPlayEnabled");
+
   const subtitlesEnabled =
     document.getElementById("subtitlesEnabled");
 
@@ -3263,6 +3326,9 @@ ${operatorCheckboxes}
 
   const iptvContainer =
     document.getElementById("iptvContainer");
+
+  const ptContentContainer =
+    document.getElementById("ptContentContainer");
 
   const subtitlesContainer =
     document.getElementById("subtitlesPanel");
@@ -3491,6 +3557,11 @@ function updateContentVisibility() {
  setPanelVisibility(
  iptvContainer,
  iptvEnabled.checked
+ );
+
+ setPanelVisibility(
+ ptContentContainer,
+ ptContentEnabled.checked
  );
 
  setPanelVisibility(
@@ -3795,6 +3866,14 @@ function updateContentVisibility() {
         iptv:
           iptvEnabled.checked,
 
+        ptContent:
+          ptContentEnabled.checked,
+
+        ptContentSources: {
+          rtpPlay:
+            rtpPlayEnabled.checked
+        },
+
         subtitles:
           subtitlesEnabled.checked,
 
@@ -4067,6 +4146,15 @@ function updateContentVisibility() {
   );
 
   iptvEnabled.addEventListener(
+    "change",
+    function () {
+
+      updateContentVisibility();
+      hideInstall();
+    }
+  );
+
+  ptContentEnabled.addEventListener(
     "change",
     function () {
 
@@ -4751,6 +4839,10 @@ function buildManifest(config) {
  const showIPTV =
  features.iptv === true;
 
+ const showRtpPlay =
+ features.ptContent === true &&
+ features.ptContentSources?.rtpPlay === true;
+
  function isSpecialCatalog(id) {
  return (
  id === "featured" ||
@@ -4973,6 +5065,17 @@ function buildManifest(config) {
  ...catalog,
  extra: [{ name: "search", isRequired: false }]
  }))
+ : []),
+
+...(showRtpPlay
+ ? [
+ {
+ type: "channel",
+ id: "rtp-play",
+ name: "🇵🇹 RTP Play",
+ extra: [{ name: "search", isRequired: false }]
+ }
+ ]
  : [])
 
 ],
@@ -5240,6 +5343,31 @@ app.get(
 
             }
           )
+        });
+
+      }
+
+
+      if (catalogId === "rtp-play") {
+
+        /*
+         * RTP Play: estrutura preparada, mas ainda sem fonte de
+         * dados pública confirmada — devolve vazio até existir
+         * uma integração legítima (ver getRtpPlayChannels()).
+         */
+
+        const channels =
+          await getRtpPlayChannels();
+
+        return res.json({
+          metas: channels.map((channel) => ({
+            id: channel.id,
+            type: "channel",
+            name: channel.name,
+            poster: channel.logo || PT_HUB_LOGO,
+            logo: channel.logo || PT_HUB_LOGO,
+            description: channel.group || "RTP Play"
+          }))
         });
 
       }
@@ -6065,6 +6193,62 @@ function detectStreamSeeds(stream) {
 
 }
 
+const externalSourceNameCache = new Map();
+
+async function getExternalSourceName(normalizedBase) {
+
+  const cached =
+    externalSourceNameCache.get(normalizedBase);
+
+  if (
+    cached &&
+    (Date.now() - cached.time) < (24 * 60 * 60 * 1000)
+  ) {
+    return cached.name;
+  }
+
+  try {
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const response =
+      await fetch(`${normalizedBase}/manifest.json`, {
+        signal: controller.signal,
+        headers: { "User-Agent": `PT-HUB/${VERSION}` }
+      });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const manifest = await response.json();
+
+    const name =
+      String(manifest?.name || "").trim() || null;
+
+    externalSourceNameCache.set(normalizedBase, {
+      name,
+      time: Date.now()
+    });
+
+    return name;
+
+  } catch (error) {
+
+    externalSourceNameCache.set(normalizedBase, {
+      name: null,
+      time: Date.now()
+    });
+
+    return null;
+
+  }
+
+}
+
 async function fetchExternalStreamSource(baseUrl, type, id) {
 
   const normalizedBase =
@@ -6085,14 +6269,17 @@ async function fetchExternalStreamSource(baseUrl, type, id) {
 
   try {
 
-    const response =
-      await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": `PT-HUB/${VERSION}`,
-          "Accept": "application/json"
-        }
-      });
+    const [response, sourceName] =
+      await Promise.all([
+        fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": `PT-HUB/${VERSION}`,
+            "Accept": "application/json"
+          }
+        }),
+        getExternalSourceName(normalizedBase)
+      ]);
 
     clearTimeout(timeout);
 
@@ -6103,9 +6290,21 @@ async function fetchExternalStreamSource(baseUrl, type, id) {
     const data =
       await response.json();
 
-    return Array.isArray(data?.streams)
-      ? data.streams
-      : [];
+    const streams =
+      Array.isArray(data?.streams)
+        ? data.streams
+        : [];
+
+    if (!sourceName) {
+      return streams;
+    }
+
+    return streams.map((stream) => ({
+      ...stream,
+      name:
+        `🔗 ${sourceName}` +
+        (stream.name ? `\n${stream.name}` : "")
+    }));
 
   } catch (error) {
 
