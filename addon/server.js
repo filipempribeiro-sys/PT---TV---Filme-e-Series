@@ -4139,14 +4139,25 @@ app.get(
       let data;
       let alreadyFiltered = false;
 
-      if (id === "cinema-new") {
+      if (
+        search &&
+        ["cinema-new", "movie-new", "featured"].includes(id)
+      ) {
+        data = await getCinemetaCatalog("movie", search);
+        alreadyFiltered = true;
+      } else if (id === "cinema-new") {
         data = await getDiscoveryCatalog("movie", "cinema", country);
       } else if (id === "movie-new") {
         data = await getDiscoveryCatalog("movie", "new", country);
       } else if (id === "featured") {
         data = await getFeaturedCatalog("movie", country);
       } else if (id === "movie-top") {
-        data = await getDiscoveryCatalog("movie", "popular", country);
+        if (search) {
+          data = await getCinemetaCatalog("movie", search);
+          alreadyFiltered = true;
+        } else {
+          data = await getDiscoveryCatalog("movie", "popular", country);
+        }
       } else {
         data = await getJustWatchCatalog("movie", id, country);
       }
@@ -4340,12 +4351,23 @@ app.get(
       let data;
       let alreadyFiltered = false;
 
-      if (id === "series-new") {
+      if (
+        search &&
+        ["series-new", "featured"].includes(id)
+      ) {
+        data = await getCinemetaCatalog("series", search);
+        alreadyFiltered = true;
+      } else if (id === "series-new") {
         data = await getDiscoveryCatalog("series", "new", country);
       } else if (id === "featured") {
         data = await getFeaturedCatalog("series", country);
       } else if (id === "series-top") {
-        data = await getDiscoveryCatalog("series", "popular", country);
+        if (search) {
+          data = await getCinemetaCatalog("series", search);
+          alreadyFiltered = true;
+        } else {
+          data = await getDiscoveryCatalog("series", "popular", country);
+        }
       } else {
         data = await getJustWatchCatalog("series", id, country);
       }
