@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.1.0";
+const VERSION = "2.0";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -1096,39 +1096,110 @@ const streamerNames = {
   "apple-tv-plus": "Apple TV Plus"
 };
 
+/*
+ * Fila global simples: nunca mais do que 1 pedido ao JustWatch
+ * de cada vez, com um pequeno intervalo entre pedidos. Isto
+ * evita o "cache stampede" (várias catálogos em simultâneo a
+ * disparar pedidos ao mesmo tempo) que estava a causar HTTP 429.
+ */
+let justWatchQueue = Promise.resolve();
+
+function queueJustWatchRequest(task) {
+
+  const run = () =>
+    task().finally(
+      () => new Promise((resolve) => setTimeout(resolve, 350))
+    );
+
+  const result =
+    justWatchQueue.then(run, run);
+
+  justWatchQueue =
+    result.catch(() => {});
+
+  return result;
+
+}
+
+async function fetchWithRetry429(doFetch, maxAttempts) {
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+
+    try {
+
+      return await doFetch();
+
+    } catch (error) {
+
+      lastError = error;
+
+      const is429 =
+        String(error.message || "").includes("429");
+
+      if (!is429 || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const waitMs =
+        1500 * attempt;
+
+      console.error(
+        `JustWatch 429 - a aguardar ${waitMs}ms antes de repetir (tentativa ${attempt}/${maxAttempts})`
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+
+    }
+
+  }
+
+  throw lastError;
+
+}
+
 async function justWatchRequest(query, variables) {
-  const response = await fetch(JUSTWATCH_URL, {
-    method: "POST",
 
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": `PT-HUB/${VERSION}`
-    },
+  return queueJustWatchRequest(() =>
+    fetchWithRetry429(async () => {
 
-    body: JSON.stringify({
-      operationName: "GetPopularTitles",
-      variables,
-      query
-    })
-  });
+      const response = await fetch(JUSTWATCH_URL, {
+        method: "POST",
 
-  if (!response.ok) {
-    throw new Error(
-      `JustWatch respondeu HTTP ${response.status}`
-    );
-  }
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": `PT-HUB/${VERSION}`
+        },
 
-  const data = await response.json();
+        body: JSON.stringify({
+          operationName: "GetPopularTitles",
+          variables,
+          query
+        })
+      });
 
-  if (data.errors) {
-    throw new Error(
-      data.errors
-        .map((error) => error.message)
-        .join("; ")
-    );
-  }
+      if (!response.ok) {
+        throw new Error(
+          `JustWatch respondeu HTTP ${response.status}`
+        );
+      }
 
-  return data.data;
+      const data = await response.json();
+
+      if (data.errors) {
+        throw new Error(
+          data.errors
+            .map((error) => error.message)
+            .join("; ")
+        );
+      }
+
+      return data.data;
+
+    }, 4)
+  );
+
 }
 
 function normalizeCountryCode(value) {
@@ -1145,6 +1216,7 @@ function normalizeCountryCode(value) {
 }
 
 const justWatchPackagesCacheByCountry = new Map();
+const justWatchPackagesInFlight = new Map();
 
 async function getJustWatchPackages(country) {
 
@@ -1164,6 +1236,10 @@ cached &&
  return cached.packages;
  }
 
+if (justWatchPackagesInFlight.has(countryCode)) {
+  return justWatchPackagesInFlight.get(countryCode);
+}
+
 const query = `
 query Packages(
 $country: Country!
@@ -1180,49 +1256,67 @@ shortName
 }
 `;
 
-const response = await fetch(JUSTWATCH_URL, {
-method: "POST",
+const requestPromise = queueJustWatchRequest(() =>
+  fetchWithRetry429(async () => {
 
-headers: {
-"Content-Type": "application/json",
-"User-Agent": `PT-HUB/${VERSION}`
-},
+    const response = await fetch(JUSTWATCH_URL, {
+      method: "POST",
 
-body: JSON.stringify({
-operationName: "Packages",
-variables: {
-country: countryCode,
-platform: "WEB"
-},
-query
-})
-});
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": `PT-HUB/${VERSION}`
+      },
 
-if (!response.ok) {
-throw new Error(
-`JustWatch Packages respondeu HTTP ${response.status}`
-);
-}
+      body: JSON.stringify({
+        operationName: "Packages",
+        variables: {
+          country: countryCode,
+          platform: "WEB"
+        },
+        query
+      })
+    });
 
-const data = await response.json();
+    if (!response.ok) {
+      throw new Error(
+        `JustWatch Packages respondeu HTTP ${response.status}`
+      );
+    }
 
-if (data.errors) {
-throw new Error(
-data.errors
-.map((error) => error.message)
-.join("; ")
-);
-}
+    const data = await response.json();
 
-const packages =
-data.data?.packages || [];
+    if (data.errors) {
+      throw new Error(
+        data.errors
+          .map((error) => error.message)
+          .join("; ")
+      );
+    }
 
-justWatchPackagesCacheByCountry.set(countryCode, {
-  packages,
-  time: Date.now()
-});
+    return data.data?.packages || [];
 
-return packages;
+  }, 4)
+)
+  .then((packages) => {
+
+    justWatchPackagesCacheByCountry.set(countryCode, {
+      packages,
+      time: Date.now()
+    });
+
+    justWatchPackagesInFlight.delete(countryCode);
+
+    return packages;
+
+  })
+  .catch((error) => {
+    justWatchPackagesInFlight.delete(countryCode);
+    throw error;
+  });
+
+justWatchPackagesInFlight.set(countryCode, requestPromise);
+
+return requestPromise;
 
 }
 
@@ -1259,6 +1353,10 @@ async function getStreamerPackage(streamerId, country) {
 }
 
 
+const justWatchCatalogCache = new Map();
+const justWatchCatalogInFlight = new Map();
+const JUSTWATCH_CATALOG_CACHE_MS = 30 * 60 * 1000;
+
 async function getJustWatchCatalog(
   type,
   streamerId,
@@ -1267,6 +1365,47 @@ async function getJustWatchCatalog(
   const countryCode =
     normalizeCountryCode(country);
 
+  const cacheKey =
+    `${type}:${streamerId}:${countryCode}`;
+
+  const now = Date.now();
+
+  const cached =
+    justWatchCatalogCache.get(cacheKey);
+
+  if (
+    cached &&
+    (now - cached.time) < JUSTWATCH_CATALOG_CACHE_MS
+  ) {
+    return cached.data;
+  }
+
+  if (justWatchCatalogInFlight.has(cacheKey)) {
+    return justWatchCatalogInFlight.get(cacheKey);
+  }
+
+  const requestPromise =
+    fetchJustWatchCatalogUncached(type, streamerId, countryCode)
+      .then((data) => {
+        justWatchCatalogCache.set(cacheKey, { data, time: Date.now() });
+        justWatchCatalogInFlight.delete(cacheKey);
+        return data;
+      })
+      .catch((error) => {
+        justWatchCatalogInFlight.delete(cacheKey);
+        throw error;
+      });
+
+  justWatchCatalogInFlight.set(cacheKey, requestPromise);
+
+  return requestPromise;
+}
+
+async function fetchJustWatchCatalogUncached(
+  type,
+  streamerId,
+  countryCode
+) {
   const packageInfo =
     await getStreamerPackage(streamerId, countryCode);
 
@@ -1323,7 +1462,7 @@ async function getJustWatchCatalog(
   const variables = {
     country: countryCode,
 
-    first: 100,
+    first: 150,
 
     sortBy: "POPULAR",
 
@@ -5657,6 +5796,183 @@ app.get(
 
   }
 );
+
+
+/* =========================================================
+   FONTES EXTERNAS DE STREAMS (ex: Torrentio e semelhantes)
+   ========================================================= 
+   Agrega resultados de qualquer addon Stremio compatível que
+   o utilizador indique na configuração, e limita a quantidade
+   de resultados apresentados por qualidade de vídeo.
+   ========================================================= */
+
+function detectStreamQuality(stream) {
+
+  const text =
+    `${stream.name || ""} ${stream.title || stream.description || ""}`
+      .toLowerCase();
+
+  if (/\b(2160p|4k|uhd)\b/.test(text)) {
+    return "4K";
+  }
+
+  if (/\b1080p\b/.test(text)) {
+    return "1080p";
+  }
+
+  if (/\b720p\b/.test(text)) {
+    return "720p";
+  }
+
+  if (/\b(480p|sd)\b/.test(text)) {
+    return "480p";
+  }
+
+  return "Outra";
+
+}
+
+function detectStreamSeeds(stream) {
+
+  const text =
+    `${stream.name || ""} ${stream.title || stream.description || ""}`;
+
+  const match =
+    text.match(/👤\D{0,3}(\d+)/) ||
+    text.match(/(\d+)\s*seeds?/i);
+
+  return match ? parseInt(match[1], 10) : 0;
+
+}
+
+async function fetchExternalStreamSource(baseUrl, type, id) {
+
+  const normalizedBase =
+    normalizeUrl(baseUrl).replace(/\/manifest\.json$/i, "");
+
+  if (!isValidHttpUrl(normalizedBase)) {
+    return [];
+  }
+
+  const url =
+    `${normalizedBase}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`;
+
+  const controller =
+    new AbortController();
+
+  const timeout =
+    setTimeout(() => controller.abort(), 12000);
+
+  try {
+
+    const response =
+      await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": `PT-HUB/${VERSION}`,
+          "Accept": "application/json"
+        }
+      });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data =
+      await response.json();
+
+    return Array.isArray(data?.streams)
+      ? data.streams
+      : [];
+
+  } catch (error) {
+
+    clearTimeout(timeout);
+
+    console.error(
+      `Erro ao obter streams externos de ${normalizedBase}:`,
+      error.message
+    );
+
+    return [];
+
+  }
+
+}
+
+async function getExternalStreams(config, type, id) {
+
+  const sources =
+    Array.isArray(config?.externalStreamSources)
+      ? config.externalStreamSources.filter(Boolean)
+      : [];
+
+  if (!sources.length) {
+    return [];
+  }
+
+  const maxPerQuality =
+    Number.isFinite(config?.externalStreamMaxPerQuality) &&
+    config.externalStreamMaxPerQuality > 0
+      ? config.externalStreamMaxPerQuality
+      : 2;
+
+  const results =
+    await Promise.all(
+      sources.map((source) =>
+        fetchExternalStreamSource(source, type, id)
+      )
+    );
+
+  const allStreams =
+    results.flat();
+
+  const byQuality = new Map();
+
+  for (const stream of allStreams) {
+
+    const quality =
+      detectStreamQuality(stream);
+
+    if (!byQuality.has(quality)) {
+      byQuality.set(quality, []);
+    }
+
+    byQuality.get(quality).push({
+      ...stream,
+      _seeds: detectStreamSeeds(stream)
+    });
+
+  }
+
+  const limited = [];
+
+  const qualityOrder =
+    ["4K", "1080p", "720p", "480p", "Outra"];
+
+  for (const quality of qualityOrder) {
+
+    const group =
+      byQuality.get(quality);
+
+    if (!group) {
+      continue;
+    }
+
+    group.sort((a, b) => b._seeds - a._seeds);
+
+    for (const stream of group.slice(0, maxPerQuality)) {
+      const { _seeds, ...clean } = stream;
+      limited.push(clean);
+    }
+
+  }
+
+  return limited;
+
+}
 
 
 /* =========================================================
