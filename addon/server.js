@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "3.0.2";
+const VERSION = "3.0.4";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -3252,10 +3252,81 @@ return res.status(400).json({
 
 });
 
+
+/* =========================================================
+   PT•HUB 3.0.4 — COMPATIBILIDADE DEEP-LINK
+   =========================================================
+   Alguns clientes podem abrir um catálogo interno com barra
+   final ou com "search" na query string em vez de extraProps.
+   Estas rotas normalizam esses pedidos sem devolver 404.
+   ========================================================= */
+
+app.get(
+  "/:config/catalog/:type/:id/",
+  async (req, res, next) => {
+
+    const type = req.params.type;
+    const id = req.params.id;
+
+    if (
+      !["movie", "series"].includes(type) ||
+      !String(id).startsWith("hub-")
+    ) {
+      return next();
+    }
+
+    try {
+
+      const config =
+        decodeConfig(req.params.config);
+
+      const data =
+        await getHubAliasCatalog(
+          config,
+          type,
+          id
+        );
+
+      if (!data) {
+        return res.json({
+          metas: []
+        });
+      }
+
+      const search =
+        String(req.query.search || "")
+          .trim();
+
+      return res.json({
+        metas:
+          search
+            ? filterMetasBySearch(
+                data.metas || [],
+                search
+              )
+            : (data.metas || [])
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erro deep-link PT•HUB:",
+        error.message
+      );
+
+      return res.json({
+        metas: []
+      });
+
+    }
+
+  }
+);
+
 /* =========================================================
    PT•HUB 3.0 — HOME / HUB NAVIGATION
    =========================================================
-   Home = uma única linha PT•HUB.
+   Home = uma única linha PT•HUB, sem temporadas artificiais.
    Dentro dela aparecem até 6 cartões conforme a configuração:
    Destaques, Streamers, Português, IPTV, Operadores PT, Adultos.
    Os catálogos internos usam search obrigatório, ficando fora
@@ -3263,7 +3334,7 @@ return res.status(400).json({
    ========================================================= */
 
 const PT_HUB_HOME_CATALOG_ID = "pthub-home";
-const PT_HUB_META_PREFIX = "pthub:hub:";
+const PT_HUB_META_PREFIX = "pthub:hub304:";
 
 function getHubEnabledSections(config) {
   const f = config?.features || {};
@@ -3329,7 +3400,7 @@ function getHubHomeCatalog(config) {
           return d
             ? {
                 id: `${PT_HUB_META_PREFIX}${section}`,
-                type: "series",
+                type: "movie",
                 name: d.name,
                 poster: d.poster,
                 posterShape: "poster",
@@ -3355,7 +3426,7 @@ function getHubManifestUrl(req) {
 function makeHubCatalogDeepLink(req, type, catalogId) {
   return (
     `stremio:///discover/${encodeURIComponent(getHubManifestUrl(req))}/` +
-    `${encodeURIComponent(catalogId)}/${encodeURIComponent(type)}?search=all`
+    `${encodeURIComponent(type)}/${encodeURIComponent(catalogId)}?search=all`
   );
 }
 
@@ -3410,6 +3481,8 @@ function getHubStreamerLabel(id) {
 }
 
 function getHubAliasCatalogs(config) {
+  // Estes catálogos são destinos internos do "Ver mais".
+  // O nome é sempre humano; nunca mostramos o ID técnico ao utilizador.
   const hiddenExtra = [{ name: "search", isRequired: true }];
   const result = [];
 
@@ -3605,15 +3678,14 @@ async function getHubSectionMeta(req, config, section) {
   }
 
   const links = [];
-  const videos = [];
-  let seasonNumber = 0;
 
-  const addLink = (
+  const add = (
     category,
     name,
     type,
     catalogId
   ) => {
+
     links.push(
       makeHubLink(
         req,
@@ -3623,298 +3695,142 @@ async function getHubSectionMeta(req, config, section) {
         catalogId
       )
     );
-  };
 
-  const addMetaSeason = (
-    category,
-    metas,
-    originalType
-  ) => {
-    const list =
-      Array.isArray(metas)
-        ? metas.filter(Boolean)
-        : [];
-
-    if (!list.length) {
-      return;
-    }
-
-    seasonNumber += 1;
-
-    list.slice(0, 40).forEach(
-      (meta, index) => {
-
-        const video =
-          hubMetaToVideo(
-            meta,
-            originalType,
-            seasonNumber,
-            index + 1,
-            category
-          );
-
-        if (video) {
-          videos.push(video);
-        }
-
-      }
-    );
-  };
-
-  const addChannelSeason = (
-    category,
-    channels
-  ) => {
-    const list =
-      Array.isArray(channels)
-        ? channels.filter(Boolean)
-        : [];
-
-    if (!list.length) {
-      return;
-    }
-
-    seasonNumber += 1;
-
-    list.slice(0, 150).forEach(
-      (channel, index) => {
-
-        const video =
-          hubChannelToVideo(
-            channel,
-            seasonNumber,
-            index + 1,
-            category
-          );
-
-        if (video) {
-          videos.push(video);
-        }
-
-      }
-    );
   };
 
   if (section === "destaques") {
 
-    const definitions = [
-      {
-        category: "Estreias no Cinema",
-        type: "movie",
-        id: "hub-destaques-cinema-movie"
-      },
-      {
-        category: "TOP 10 Filmes",
-        type: "movie",
-        id: "hub-destaques-top10-movie"
-      },
-      {
-        category: "TOP 10 Séries",
-        type: "series",
-        id: "hub-destaques-top10-series"
-      },
-      {
-        category: "Novos Filmes",
-        type: "movie",
-        id: "hub-destaques-new-movie"
-      },
-      {
-        category: "Novas Séries",
-        type: "series",
-        id: "hub-destaques-new-series"
-      },
-      {
-        category: "Em Alta • Filmes",
-        type: "movie",
-        id: "hub-destaques-featured-movie"
-      },
-      {
-        category: "Em Alta • Séries",
-        type: "series",
-        id: "hub-destaques-featured-series"
-      },
-      {
-        category: "As Minhas Escolhas • Filmes",
-        type: "movie",
-        id: "hub-destaques-choices-movie"
-      },
-      {
-        category: "As Minhas Escolhas • Séries",
-        type: "series",
-        id: "hub-destaques-choices-series"
-      }
-    ];
+    add(
+      "Destaques",
+      "Estreias no Cinema",
+      "movie",
+      "hub-destaques-cinema-movie"
+    );
 
-    const results =
-      await Promise.all(
-        definitions.map(
-          async (item) => {
+    add(
+      "Destaques",
+      "TOP 10 Filmes",
+      "movie",
+      "hub-destaques-top10-movie"
+    );
 
-            try {
+    add(
+      "Destaques",
+      "TOP 10 Séries",
+      "series",
+      "hub-destaques-top10-series"
+    );
 
-              const data =
-                await getHubAliasCatalog(
-                  config,
-                  item.type,
-                  item.id
-                );
+    add(
+      "Destaques",
+      "Novos Filmes",
+      "movie",
+      "hub-destaques-new-movie"
+    );
 
-              return {
-                ...item,
-                metas:
-                  Array.isArray(data?.metas)
-                    ? data.metas
-                    : []
-              };
+    add(
+      "Destaques",
+      "Novas Séries",
+      "series",
+      "hub-destaques-new-series"
+    );
 
-            } catch (error) {
+    add(
+      "Destaques",
+      "Em Alta • Filmes",
+      "movie",
+      "hub-destaques-featured-movie"
+    );
 
-              console.error(
-                `Erro HUB Destaques ${item.id}:`,
-                error.message
-              );
+    add(
+      "Destaques",
+      "Em Alta • Séries",
+      "series",
+      "hub-destaques-featured-series"
+    );
 
-              return {
-                ...item,
-                metas: []
-              };
+    add(
+      "Para ti",
+      "As Minhas Escolhas • Filmes",
+      "movie",
+      "hub-destaques-choices-movie"
+    );
 
-            }
-
-          }
-        )
-      );
-
-    for (const item of results) {
-
-      addLink(
-        "Destaques",
-        item.category,
-        item.type,
-        item.id
-      );
-
-      addMetaSeason(
-        item.category,
-        item.metas,
-        item.type
-      );
-
-    }
+    add(
+      "Para ti",
+      "As Minhas Escolhas • Séries",
+      "series",
+      "hub-destaques-choices-series"
+    );
 
   }
 
   if (section === "streamers") {
 
-    const selected =
-      getHubStreamerSelection(config);
-
-    const jobs = [];
-
-    for (const streamerId of selected) {
+    for (
+      const streamerId
+      of getHubStreamerSelection(config)
+    ) {
 
       const label =
         getHubStreamerLabel(streamerId);
 
-      const definitions = [
-        {
-          category: `${label} • Novidades Filmes`,
-          type: "movie",
-          mode: "new"
-        },
-        {
-          category: `${label} • Novidades Séries`,
-          type: "series",
-          mode: "new"
-        },
-        {
-          category: `${label} • TOP 10 Filmes`,
-          type: "movie",
-          mode: "top10"
-        },
-        {
-          category: `${label} • TOP 10 Séries`,
-          type: "series",
-          mode: "top10"
-        },
-        {
-          category: `${label} • As Minhas Escolhas • Filmes`,
-          type: "movie",
-          mode: "choices"
-        },
-        {
-          category: `${label} • As Minhas Escolhas • Séries`,
-          type: "series",
-          mode: "choices"
-        },
-        {
-          category: `${label} • Filmes`,
-          type: "movie",
-          mode: "all"
-        },
-        {
-          category: `${label} • Séries`,
-          type: "series",
-          mode: "all"
-        }
-      ];
-
-      for (const item of definitions) {
-
-        const catalogId =
-          `hub-streamer-${streamerId}-${item.mode}-${item.type}`;
-
-        addLink(
-          label,
-          item.category,
-          item.type,
-          catalogId
-        );
-
-        jobs.push(
-          getStreamerDiscoveryCatalog(
-            item.type,
-            streamerId,
-            item.mode,
-            config?.catalogCountry
-          )
-            .then((data) => ({
-              ...item,
-              catalogId,
-              metas:
-                Array.isArray(data?.metas)
-                  ? data.metas
-                  : []
-            }))
-            .catch((error) => {
-
-              console.error(
-                `Erro HUB Streamer ${catalogId}:`,
-                error.message
-              );
-
-              return {
-                ...item,
-                catalogId,
-                metas: []
-              };
-
-            })
-        );
-
-      }
-
-    }
-
-    const results =
-      await Promise.all(jobs);
-
-    for (const item of results) {
-      addMetaSeason(
-        item.category,
-        item.metas,
-        item.type
+      add(
+        label,
+        "Novidades • Filmes",
+        "movie",
+        `hub-streamer-${streamerId}-new-movie`
       );
+
+      add(
+        label,
+        "Novidades • Séries",
+        "series",
+        `hub-streamer-${streamerId}-new-series`
+      );
+
+      add(
+        label,
+        "TOP 10 Filmes",
+        "movie",
+        `hub-streamer-${streamerId}-top10-movie`
+      );
+
+      add(
+        label,
+        "TOP 10 Séries",
+        "series",
+        `hub-streamer-${streamerId}-top10-series`
+      );
+
+      add(
+        label,
+        "As Minhas Escolhas • Filmes",
+        "movie",
+        `hub-streamer-${streamerId}-choices-movie`
+      );
+
+      add(
+        label,
+        "As Minhas Escolhas • Séries",
+        "series",
+        `hub-streamer-${streamerId}-choices-series`
+      );
+
+      add(
+        label,
+        "Todos os Filmes",
+        "movie",
+        `hub-streamer-${streamerId}-all-movie`
+      );
+
+      add(
+        label,
+        "Todas as Séries",
+        "series",
+        `hub-streamer-${streamerId}-all-series`
+      );
+
     }
 
   }
@@ -3957,44 +3873,17 @@ async function getHubSectionMeta(req, config, section) {
 
       const category =
         decoded.group === "ptpt"
-          ? catalog.name
+          ? "Filmes em PT-PT"
           : decoded.group === "portuguese"
-          ? catalog.name
-          : `Adultos • ${catalog.name}`;
+          ? "Produções Portuguesas"
+          : "Adultos";
 
-      addLink(
-        decoded.group === "adult"
-          ? "Adultos"
-          : "Português",
+      add(
         category,
+        catalog.name,
         catalog.type,
         catalog.id
       );
-
-      try {
-
-        const data =
-          await getPtExternalCatalog(
-            config,
-            catalog.type,
-            catalog.id,
-            {}
-          );
-
-        addMetaSeason(
-          category,
-          data?.metas || [],
-          catalog.type
-        );
-
-      } catch (error) {
-
-        console.error(
-          `Erro HUB ${section} ${catalog.id}:`,
-          error.message
-        );
-
-      }
 
     }
 
@@ -4005,33 +3894,19 @@ async function getHubSectionMeta(req, config, section) {
     config?.features?.iptv === true
   ) {
 
-    try {
+    const name =
+      config?.mode === "xtream"
+        ? (config?.xtreamCatalogName || "Xtream API")
+        : config?.mode === "iptv-org"
+        ? (config?.iptvOrg?.catalogName || "IPTV-org FREE")
+        : (config?.m3uCatalogName || "Minha IPTV");
 
-      const channels =
-        await getIPTVChannels(
-          config
-        );
-
-      const name =
-        config?.mode === "xtream"
-          ? (config?.xtreamCatalogName || "Xtream API")
-          : config?.mode === "iptv-org"
-          ? (config?.iptvOrg?.catalogName || "IPTV-org FREE")
-          : (config?.m3uCatalogName || "Minha IPTV");
-
-      addChannelSeason(
-        name,
-        channels
-      );
-
-    } catch (error) {
-
-      console.error(
-        "Erro HUB IPTV:",
-        error.message
-      );
-
-    }
+    add(
+      "Televisão",
+      name,
+      "channel",
+      "m3u"
+    );
 
   }
 
@@ -4055,14 +3930,11 @@ async function getHubSectionMeta(req, config, section) {
         continue;
       }
 
-      const channels =
-        getOperatorChannels(
-          operator
-        );
-
-      addChannelSeason(
+      add(
+        "Operadores PT",
         operator.name,
-        channels
+        "channel",
+        operator.id
       );
 
     }
@@ -4074,7 +3946,7 @@ async function getHubSectionMeta(req, config, section) {
       `${PT_HUB_META_PREFIX}${section}`,
 
     type:
-      "series",
+      "movie",
 
     name:
       d.name,
@@ -4092,12 +3964,9 @@ async function getHubSectionMeta(req, config, section) {
       `${PT_HUB_LOGO}?v=${VERSION}`,
 
     description:
-      videos.length
-        ? `${d.description}\n\nOs conteúdos desta área aparecem abaixo e podem ser reproduzidos diretamente.`
-        : `${d.description}\n\nAinda não foi possível carregar conteúdos desta área.`,
+      `${d.description}\n\nSeleciona uma das opções acima para abrir o respetivo catálogo.`,
 
-    links,
-    videos
+    links
   };
 }
 
@@ -4214,7 +4083,7 @@ async function buildManifest(config) {
 
     catalogs: [
       {
-        type: "series",
+        type: "movie",
         id: PT_HUB_HOME_CATALOG_ID,
         name: "PT•HUB",
         extra: []
@@ -4732,7 +4601,7 @@ app.get(
    ========================================================= */
 
 app.get(
-  "/:config/catalog/series/pthub-home.json",
+  "/:config/catalog/movie/pthub-home.json",
   (req, res) => {
 
     const config =
@@ -4746,7 +4615,7 @@ app.get(
 );
 
 app.get(
-  "/:config/catalog/series/pthub-home/:extra.json",
+  "/:config/catalog/movie/pthub-home/:extra.json",
   (req, res) => {
 
     const config =
@@ -5404,7 +5273,7 @@ app.get(
         req.params.id;
 
       if (
-        type === "series" &&
+        type === "movie" &&
         id.startsWith(PT_HUB_META_PREFIX)
       ) {
         const section =
