@@ -29,6 +29,9 @@ const VERSION = "2.1";
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
 
+const PT_HUB_BACKGROUND =
+  "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg";
+
 const CINEMETA_BASE = "https://v3-cinemeta.strem.io";
 
 app.use(express.json({ limit: "2mb" }));
@@ -4920,6 +4923,8 @@ function buildManifest(config) {
       "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
 
     logo: `${PT_HUB_LOGO}?v=${VERSION}`,
+
+    background: `${PT_HUB_BACKGROUND}?v=${VERSION}`,
 
     resources: [
       "catalog",
