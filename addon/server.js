@@ -3209,10 +3209,92 @@ async function buildManifest(config) {
      ? await getPtExternalManifestCatalogs(config)
      : [];
 
+ /*
+  * PT-PT volta a expor a estrutura REAL do provider (Cotonet),
+  * preservando Todos, A-Z, Recentes, etc. Os agregados fixos
+  * ficam apenas como fallback quando o provider não devolve catálogo.
+  *
+  * Produções Portuguesas segue a mesma lógica híbrida: usa os
+  * catálogos reais do provider para não perder Novelas/Telenovelas
+  * e completa apenas as categorias em falta com os agregados PT•HUB.
+  */
+ const ptPtExternalIdentityCatalogs =
+   externalIdentityCatalogs.filter((catalog) =>
+     String(catalog?.id || "").startsWith("pthubpt:ptpt:")
+   );
+
+ const portugueseExternalIdentityCatalogs =
+   externalIdentityCatalogs.filter((catalog) =>
+     String(catalog?.id || "").startsWith("pthubpt:portuguese:")
+   );
+
  const adultIdentityCatalogs =
    externalIdentityCatalogs.filter((catalog) =>
      String(catalog?.id || "").startsWith("pthubpt:adult:")
    );
+
+ const fixedPtPtIdentityCatalogs =
+   ptHubIdentityCatalogs.filter((catalog) =>
+     String(catalog?.id || "").startsWith("pthub-ptpt-")
+   );
+
+ const fixedPortugueseIdentityCatalogs =
+   ptHubIdentityCatalogs.filter((catalog) =>
+     String(catalog?.id || "").startsWith("pthub-portuguese-")
+   );
+
+ const ptPtIdentityCatalogs =
+   ptPtExternalIdentityCatalogs.length
+     ? ptPtExternalIdentityCatalogs
+     : fixedPtPtIdentityCatalogs;
+
+ function isPortugueseNovelaIdentityCatalog(catalog) {
+   return /novela/.test(
+     normalizeSearchText(
+       `${catalog?.id || ""} ${catalog?.name || ""}`
+     )
+   );
+ }
+
+ const portugueseIdentityCatalogs = [
+   ...portugueseExternalIdentityCatalogs
+ ];
+
+ const hasPortugueseMovie =
+   portugueseIdentityCatalogs.some((catalog) => catalog?.type === "movie");
+
+ const hasPortugueseSeries =
+   portugueseIdentityCatalogs.some((catalog) =>
+     catalog?.type === "series" &&
+     !isPortugueseNovelaIdentityCatalog(catalog)
+   );
+
+ const hasPortugueseNovelas =
+   portugueseIdentityCatalogs.some((catalog) =>
+     catalog?.type === "series" &&
+     isPortugueseNovelaIdentityCatalog(catalog)
+   );
+
+ if (!hasPortugueseMovie) {
+   const fallbackMovie = fixedPortugueseIdentityCatalogs.find(
+     (catalog) => catalog.id === "pthub-portuguese-movies"
+   );
+   if (fallbackMovie) portugueseIdentityCatalogs.push(fallbackMovie);
+ }
+
+ if (!hasPortugueseSeries) {
+   const fallbackSeries = fixedPortugueseIdentityCatalogs.find(
+     (catalog) => catalog.id === "pthub-portuguese-series"
+   );
+   if (fallbackSeries) portugueseIdentityCatalogs.push(fallbackSeries);
+ }
+
+ if (!hasPortugueseNovelas) {
+   const fallbackNovelas = fixedPortugueseIdentityCatalogs.find(
+     (catalog) => catalog.id === "pthub-portuguese-novelas"
+   );
+   if (fallbackNovelas) portugueseIdentityCatalogs.push(fallbackNovelas);
+ }
 
  function isSpecialCatalog(id) {
  return (
@@ -3443,7 +3525,9 @@ async function buildManifest(config) {
 
 ...orderedMovieSeriesCatalogs,
 
-...ptHubIdentityCatalogs,
+...ptPtIdentityCatalogs,
+
+...portugueseIdentityCatalogs,
 
 ...adultIdentityCatalogs,
 
