@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.0";
+const VERSION = "2.1";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -368,25 +368,58 @@ async function fetchM3U(url) {
     throw new Error("URL M3U inválido.");
   }
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": `PT-HUB/${VERSION}`
+  const maxAttempts = 2;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    try {
+
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": `PT-HUB/${VERSION}`
+        }
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        throw new Error(
+          `Não foi possível obter a lista M3U. HTTP ${response.status}`
+        );
+      }
+
+      const text = await response.text();
+
+      if (!text.trim()) {
+        throw new Error("A lista M3U está vazia.");
+      }
+
+      return parseM3U(text);
+
+    } catch (error) {
+
+      clearTimeout(timeout);
+      lastError = error;
+
+      console.error(
+        `Erro ao obter M3U (tentativa ${attempt}/${maxAttempts}):`,
+        error.message
+      );
+
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+
     }
-  });
 
-  if (!response.ok) {
-    throw new Error(
-      `Não foi possível obter a lista M3U. HTTP ${response.status}`
-    );
   }
 
-  const text = await response.text();
-
-  if (!text.trim()) {
-    throw new Error("A lista M3U está vazia.");
-  }
-
-  return parseM3U(text);
+  throw lastError;
 }
 
 /* =========================================================
@@ -1462,7 +1495,7 @@ async function fetchJustWatchCatalogUncached(
   const variables = {
     country: countryCode,
 
-    first: 150,
+    first: 100,
 
     sortBy: "POPULAR",
 
@@ -1698,6 +1731,18 @@ function renderConfigurePage(config = {}) {
   const enabledStreamers = features.streamers === true;
   const enabledOperators = features.operators === true;
   const enabledIPTV = features.iptv === true;
+  const enabledSubtitles = features.subtitles === true;
+  const enabledExternalSources = features.externalSources === true;
+
+  const externalStreamSourcesText =
+    Array.isArray(config.externalStreamSources)
+      ? config.externalStreamSources.join("\n")
+      : "";
+
+  const externalStreamMaxPerQuality =
+    Number.isFinite(config.externalStreamMaxPerQuality)
+      ? config.externalStreamMaxPerQuality
+      : 2;
 
   const featuredContent = features.featuredContent || {};
   const featuredMoviesChecked = featuredContent.movies === true;
@@ -1943,7 +1988,8 @@ label.field-label {
 }
 
 input:not([type="checkbox"]),
-select {
+select,
+textarea {
   width: 100%;
   padding: 13px 14px;
   border-radius: 10px;
@@ -1952,10 +1998,13 @@ select {
   color: var(--pt-text);
   font-size: 15px;
   outline: none;
+  font-family: inherit;
+  resize: vertical;
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--pt-gold);
 }
 
@@ -2391,6 +2440,24 @@ button:disabled {
           ${enabledIPTV ? "checked" : ""}
         >
         <span>IPTV</span>
+      </label>
+
+      <label class="feature-item">
+        <input
+          type="checkbox"
+          id="subtitlesEnabled"
+          ${enabledSubtitles ? "checked" : ""}
+        >
+        <span>Legendas</span>
+      </label>
+
+      <label class="feature-item">
+        <input
+          type="checkbox"
+          id="externalSourcesEnabled"
+          ${enabledExternalSources ? "checked" : ""}
+        >
+        <span>Fontes Externas</span>
       </label>
 
     </div>
@@ -2993,6 +3060,68 @@ ${operatorCheckboxes}
     </div>
 
     <!-- =========================================================
+         LEGENDAS
+         ========================================================= -->
+
+    <div class="config-panel" id="subtitlesPanel">
+
+      <h2 class="panel-title">Legendas</h2>
+
+      <p class="panel-description">
+        Adiciona legendas automáticas (OpenSubtitles) a filmes e séries.
+      </p>
+
+    </div>
+
+    <!-- =========================================================
+         FONTES EXTERNAS
+         ========================================================= -->
+
+    <div class="config-panel" id="externalSourcesPanel">
+
+      <h2 class="panel-title">Fontes Externas</h2>
+
+      <p class="panel-description">
+        Agrega streams de outros addons Stremio (ex: Torrentio) diretamente
+        nas fichas de filmes/séries deste addon. Cola abaixo o URL do
+        addon (o mesmo que usarias para o instalar normalmente), um por
+        linha.
+      </p>
+
+      <label class="field-label" for="externalStreamSources">
+        URLs dos addons (um por linha)
+      </label>
+
+      <textarea
+        id="externalStreamSources"
+        rows="4"
+        placeholder="https://torrentio.strem.fun"
+      >${escapeHtml(externalStreamSourcesText)}</textarea>
+
+      <div class="help">
+        Usa o URL base do addon (com ou sem /manifest.json no fim).
+      </div>
+
+      <label class="field-label" for="externalStreamMaxPerQuality">
+        Máximo de resultados por qualidade
+      </label>
+
+      <input
+        id="externalStreamMaxPerQuality"
+        type="number"
+        min="1"
+        max="10"
+        value="${externalStreamMaxPerQuality}"
+      >
+
+      <div class="help">
+        Ex: com o valor 2, mostra no máximo 2 fontes de 4K, 2 de 1080p,
+        2 de 720p, etc — em vez de dezenas de opções.
+      </div>
+
+    </div>
+
+    <!-- =========================================================
          BOTÕES
          ========================================================= -->
 
@@ -3097,6 +3226,18 @@ ${operatorCheckboxes}
 
   const iptvEnabled =
     document.getElementById("iptvEnabled");
+
+  const subtitlesEnabled =
+    document.getElementById("subtitlesEnabled");
+
+  const externalSourcesEnabled =
+    document.getElementById("externalSourcesEnabled");
+
+  const externalStreamSources =
+    document.getElementById("externalStreamSources");
+
+  const externalStreamMaxPerQuality =
+    document.getElementById("externalStreamMaxPerQuality");
 
   const featuredContainer =
     document.getElementById("featuredContainer");
@@ -3623,8 +3764,25 @@ function updateContentVisibility() {
           getCheckedValues(operatorIds),
 
         iptv:
-          iptvEnabled.checked
+          iptvEnabled.checked,
+
+        subtitles:
+          subtitlesEnabled.checked,
+
+        externalSources:
+          externalSourcesEnabled.checked
       },
+
+      externalStreamSources:
+        externalSourcesEnabled.checked
+          ? externalStreamSources.value
+              .split("\\n")
+              .map(function (line) { return line.trim(); })
+              .filter(Boolean)
+          : [],
+
+      externalStreamMaxPerQuality:
+        Number(externalStreamMaxPerQuality.value || 2),
 
       mode:
         currentMode,
@@ -4733,7 +4891,10 @@ function buildManifest(config) {
       "catalog",
       "meta",
       "stream",
-      "addon_catalog"
+      "addon_catalog",
+      ...(features.subtitles === true
+        ? ["subtitles"]
+        : [])
     ],
 
     types: [
@@ -6082,8 +6243,15 @@ app.get(
         type === "series"
       ) {
 
+        const streams =
+          await getExternalStreams(
+            config,
+            type,
+            id
+          );
+
         return res.json({
-          streams: []
+          streams
         });
 
       }
@@ -6103,6 +6271,105 @@ app.get(
       return res.json({
         streams: []
       });
+
+    }
+
+  }
+);
+
+
+/* =========================================================
+   SUBTITLES (OpenSubtitles)
+   ========================================================= */
+
+const OPENSUBTITLES_BASE =
+  "https://opensubtitles.strem.io";
+
+app.get(
+  "/:config/subtitles/:type/:id.json",
+  async (req, res) => {
+
+    try {
+
+      const config =
+        decodeConfig(req.params.config);
+
+      if (!config?.features?.subtitles) {
+        return res.json({ subtitles: [] });
+      }
+
+      const url =
+        `${OPENSUBTITLES_BASE}/subtitles/${encodeURIComponent(req.params.type)}/${encodeURIComponent(req.params.id)}.json`;
+
+      const response =
+        await fetch(url, {
+          headers: { "User-Agent": `PT-HUB/${VERSION}` }
+        });
+
+      if (!response.ok) {
+        return res.json({ subtitles: [] });
+      }
+
+      const data = await response.json();
+
+      return res.json({
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : []
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erro subtitles:",
+        error.message
+      );
+
+      return res.json({ subtitles: [] });
+
+    }
+
+  }
+);
+
+
+app.get(
+  "/:config/subtitles/:type/:id/:extra.json",
+  async (req, res) => {
+
+    try {
+
+      const config =
+        decodeConfig(req.params.config);
+
+      if (!config?.features?.subtitles) {
+        return res.json({ subtitles: [] });
+      }
+
+      const url =
+        `${OPENSUBTITLES_BASE}/subtitles/${encodeURIComponent(req.params.type)}/${encodeURIComponent(req.params.id)}/${req.params.extra}`;
+
+      const response =
+        await fetch(url, {
+          headers: { "User-Agent": `PT-HUB/${VERSION}` }
+        });
+
+      if (!response.ok) {
+        return res.json({ subtitles: [] });
+      }
+
+      const data = await response.json();
+
+      return res.json({
+        subtitles: Array.isArray(data?.subtitles) ? data.subtitles : []
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erro subtitles (extra):",
+        error.message
+      );
+
+      return res.json({ subtitles: [] });
 
     }
 
