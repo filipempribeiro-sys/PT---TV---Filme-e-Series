@@ -24,13 +24,26 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.1.3";
+const VERSION = "3.0.0";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
 
 const PT_HUB_BACKGROUND =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg";
+
+const PT_HUB_ASSETS =
+  "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators";
+
+const PT_HUB_HOME_POSTERS = {
+  destaques: `${PT_HUB_ASSETS}/destaques-poster.png`,
+  streamers: `${PT_HUB_ASSETS}/streamers-logo.png`,
+  portugues: `${PT_HUB_ASSETS}/conteudoportugues-poster.png`,
+  iptv: `${PT_HUB_ASSETS}/iptv-poster.png`,
+  operadores: `${PT_HUB_ASSETS}/operators-logo.png`,
+  adultos: `${PT_HUB_ASSETS}/adultos-poster.png`
+};
+
 
 const CINEMETA_BASE = "https://v3-cinemeta.strem.io";
 
@@ -1722,6 +1735,112 @@ metas
 
 }
 
+
+const streamerDiscoveryCache = new Map();
+
+async function getStreamerDiscoveryCatalog(type, streamerId, mode, country) {
+  const countryCode = normalizeCountryCode(country);
+  const cacheKey = `streamer:${mode}:${type}:${streamerId}:${countryCode}`;
+  const now = Date.now();
+  const cached = streamerDiscoveryCache.get(cacheKey);
+
+  if (cached && (now - cached.time) < JUSTWATCH_CATALOG_CACHE_MS) {
+    return cached.data;
+  }
+
+  if (mode === "all" || mode === "top10" || mode === "choices") {
+    const data = await getJustWatchCatalog(type, streamerId, countryCode);
+    const metas = Array.isArray(data?.metas) ? data.metas : [];
+
+    const result =
+      mode === "top10"
+        ? { metas: metas.slice(0, 10) }
+        : mode === "choices"
+        ? { metas: metas.slice(10, 40) }
+        : { metas };
+
+    streamerDiscoveryCache.set(cacheKey, { data: result, time: Date.now() });
+    return result;
+  }
+
+  const packageInfo = await getStreamerPackage(streamerId, countryCode);
+
+  if (!packageInfo?.shortName) {
+    return { metas: [] };
+  }
+
+  const objectType = type === "movie" ? "MOVIE" : "SHOW";
+
+  const query = `
+    query GetPopularTitles(
+      $country: Country!
+      $filter: TitleFilter
+      $first: Int!
+      $sortBy: PopularTitlesSorting!
+    ) {
+      popularTitles(
+        country: $country
+        filter: $filter
+        first: $first
+        sortBy: $sortBy
+      ) {
+        edges {
+          node {
+            content(country: $country, language: pt) {
+              title
+              originalReleaseYear
+              externalIds { imdbId }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await justWatchRequest(query, {
+    country: countryCode,
+    first: 100,
+    sortBy: "TRENDING",
+    filter: {
+      packages: [packageInfo.shortName],
+      objectTypes: [objectType],
+      monetizationTypes: ["FLATRATE"]
+    }
+  });
+
+  const currentYear = new Date().getUTCFullYear();
+  const ids = new Set();
+  const metas = [];
+
+  for (const edge of data?.popularTitles?.edges || []) {
+    const content = edge?.node?.content;
+    const year = Number(content?.originalReleaseYear || 0);
+
+    if (!content || !year || year < (currentYear - 1)) {
+      continue;
+    }
+
+    const meta = normalizeDiscoveryMeta(type, content);
+
+    if (!meta || ids.has(meta.id)) {
+      continue;
+    }
+
+    ids.add(meta.id);
+    metas.push(meta);
+  }
+
+  metas.sort(
+    (a, b) =>
+      Number(b.releaseInfo || 0) -
+      Number(a.releaseInfo || 0)
+  );
+
+  const result = { metas: metas.slice(0, 100) };
+  streamerDiscoveryCache.set(cacheKey, { data: result, time: Date.now() });
+  return result;
+}
+
 async function getFeaturedCatalog(type, country) {
 
 const streamers = [
@@ -2991,7 +3110,7 @@ function renderConfigurePage(config = {}) {
     .replace(/>/g, "\\u003e")
     .replace(/&/g, "\\u0026");
 
-  return "<!doctype html>\n<html lang=\"pt-PT\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>PT•HUB — Botões Outline</title>\n<style>\n:root{\n  --pt-bg:#01050B;\n  --pt-bg-secondary:#04111A;\n  --pt-bg-card:#071C29;\n  --pt-bg-tech:#062F46;\n  --pt-gold:#DA921C;\n  --pt-gold-light:#F2CA4F;\n  --pt-bronze:#A7610C;\n  --pt-green:#027C1C;\n  --pt-green-light:#13D06C;\n  --pt-red:#E51306;\n  --pt-red-dark:#970200;\n  --pt-text:#EEECCB;\n  --pt-white:#FFFFFF;\n\n  --bg:var(--pt-bg);\n  --bg2:var(--pt-bg-secondary);\n  --card:rgba(7,28,41,.88);\n  --card2:rgba(6,47,70,.72);\n  --line:rgba(218,146,28,.23);\n  --gold:var(--pt-gold);\n  --gold2:var(--pt-gold-light);\n  --text:var(--pt-text);\n  --muted:#91A2B8;\n  --white:var(--pt-white);\n}\n*{box-sizing:border-box}\nbody{\n  margin:0;\n  background:\n    radial-gradient(circle at 50% 0%,rgba(11,53,77,.35),transparent 34%),\n    linear-gradient(180deg,#05090f,#03070c);\n  color:var(--text);\n  font-family:Inter,Segoe UI,Arial,sans-serif;\n}\n.header{padding:34px 20px 22px;display:flex;justify-content:center}\n.logo{\n  display:grid;place-items:center;\n  background:transparent;\n  border:0;\n  box-shadow:none;\n  padding:0;\n}\n.logo span{color:var(--gold2)}\n.logo img{max-width:190px;max-height:92px;width:auto;height:auto;object-fit:contain;display:block;background:transparent}\n.wrap{\n  max-width:1180px;margin:0 auto;padding:0 18px 60px;\n  display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px\n}\n.card{\n  background:linear-gradient(180deg,rgba(11,20,34,.98),rgba(8,16,28,.98));\n  border:1px solid #1e2c40;border-radius:18px;\n  box-shadow:0 18px 55px rgba(0,0,0,.32)\n}\n.main{padding:22px}\n.about{padding:22px;align-self:start;position:sticky;top:22px}\n.kicker{font-size:9px;text-transform:uppercase;letter-spacing:1.4px;color:#6981a2;margin-bottom:16px}\n.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid #1d2a3d;margin-bottom:19px}\n.tab{padding:10px 12px;font-size:12px;color:#7ea1c6;border-radius:5px 5px 0 0;cursor:pointer;user-select:none}\n.tab.active{color:#fff;border:1px solid #fff;border-bottom-color:transparent;background:#0e1725;margin-bottom:-1px}\n.tab.hidden{display:none}\n.panel{display:none}.panel.active{display:block}\n.sectionTitle{\n  font-size:9px;text-transform:uppercase;letter-spacing:1.5px;\n  color:var(--gold2);font-weight:800;margin-bottom:11px\n}\n.help{\n  border:1px solid rgba(216,146,24,.35);\n  background:rgba(216,146,24,.07);\n  color:#e5c875;padding:11px 12px;border-radius:7px;\n  font-size:11px;line-height:1.5;margin-bottom:14px\n}\n.choiceGrid{\n  display:grid;\n  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));\n  gap:10px\n}\n.choice{\n  min-height:64px;\n  display:flex;\n  flex-direction:column;\n  justify-content:center;\n  align-items:flex-start;\n  gap:3px;\n  padding:10px 12px;\n  border-radius:10px;\n  border:2px solid rgba(255,255,255,.85);\n  background:#08111c;\n  color:#fff;\n  cursor:pointer;\n  transition:.15s ease;\n  box-shadow:0 6px 16px rgba(0,0,0,.12)\n}\n.choice:hover{\n  transform:translateY(-1px);\n  border-color:#fff;\n  background:#0a1522\n}\n.choice .title{\n  font-size:12px;\n  font-weight:800;\n  letter-spacing:.1px;\n  color:#fff\n}\n.choice .sub{\n  font-size:10px;\n  color:#6f93bd\n}\n.choice.active{\n  border-color:var(--gold2);\n  background:rgba(216,146,24,.16);\n  box-shadow:0 0 0 1px rgba(216,146,24,.18),0 8px 20px rgba(216,146,24,.10)\n}\n.choice.active .title{color:var(--gold2)}\n.choice.active .sub{color:#d6a84d}\n\nlabel.field{display:block;color:#86a6c7;font-size:11px;margin:13px 0 6px}\nselect,input[type=text],input[type=url],input[type=password],textarea{\n  width:100%;background:#07101a;border:1px solid #1d2a3e;\n  border-radius:7px;color:#d9e4ef;padding:10px 11px;outline:none\n}\nselect:focus,input:focus,textarea:focus{border-color:var(--gold)}\n.iptvTabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}\n.iptvTab{\n  min-width:130px;min-height:52px;\n  border:2px solid rgba(255,255,255,.85);\n  border-radius:10px;background:#08111c;color:#fff;\n  display:flex;flex-direction:column;justify-content:center;\n  align-items:flex-start;padding:8px 10px;cursor:pointer\n}\n.iptvTab .t{font-size:11px;font-weight:800}\n.iptvTab .s{font-size:9px;color:#6f93bd;margin-top:2px}\n.iptvTab.active{\n  border-color:var(--gold2);\n  background:rgba(216,146,24,.16)\n}\n.iptvTab.active .t{color:var(--gold2)}\n.iptvTab.active .s{color:#d6a84d}\n.iptvPane{display:none}.iptvPane.active{display:block}\n.columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}\n.actions{\n  display:flex;gap:9px;flex-wrap:wrap;\n  margin-top:22px;padding-top:18px;border-top:1px solid #182539\n}\n.btn{\n  border-radius:8px;padding:11px 15px;\n  font-size:11px;font-weight:800;cursor:pointer\n}\n.btn.primary{\n  border:1px solid var(--gold2);\n  background:linear-gradient(135deg,var(--gold2),var(--gold));\n  color:#08111a\n}\n.btn.secondary{\n  border:1px solid #fff;\n  background:#08111c;\n  color:#fff\n}\n.btn.hidden{display:none}\n.about h3{\n  margin:0 0 14px;color:#6d85a5;font-size:9px;\n  letter-spacing:1.4px;text-transform:uppercase\n}\n.about p{\n  color:#89a5c4;font-size:11px;line-height:1.55\n}\n.about strong{color:#d9e7f6}\n.about .arrow{color:var(--gold2);font-weight:900}\n.about .box{\n  margin-top:14px;padding:12px;\n  border:1px solid rgba(216,146,24,.28);\n  background:rgba(216,146,24,.06);\n  border-radius:8px\n}\n.brandline{color:var(--gold2);font-weight:800}\n\n.freeBadge{\n  display:inline-block;\n  margin-left:5px;\n  padding:2px 5px;\n  border-radius:999px;\n  background:rgba(216,146,24,.18);\n  color:var(--gold2);\n  border:1px solid var(--gold);\n  font-size:8px;\n  font-weight:900;\n  line-height:1;\n  vertical-align:1px;\n}\n.switchRow{\n  display:flex;\n  align-items:center;\n  gap:9px;\n  margin:12px 0;\n  font-size:12px;\n  color:#dce7f3;\n}\n.switchRow input{\n  accent-color:var(--gold);\n  width:15px;\n  height:15px;\n}\n.conditional{\n  display:none;\n  margin-top:10px;\n  padding-top:10px;\n  border-top:1px solid #182539;\n}\n.conditional.show{display:block}\n.radioRow{\n  display:flex;\n  flex-direction:column;\n  gap:9px;\n  margin-top:9px;\n}\n.radioOpt{\n  display:flex;\n  align-items:center;\n  gap:8px;\n  font-size:11px;\n  color:#d7e2ef;\n}\n.radioOpt input{accent-color:var(--gold)}\n\n\n.choice{\n  position:relative;\n  padding-left:54px;\n}\n.choiceLogo{\n  position:absolute;\n  left:12px;\n  top:50%;\n  transform:translateY(-50%);\n  width:30px;\n  height:30px;\n  display:grid;\n  place-items:center;\n  border-radius:7px;\n  overflow:hidden;\n  flex:0 0 auto;\n}\n.choiceLogo img{\n  max-width:34px;\n  max-height:34px;\n  object-fit:contain;\n  display:block;\n}\n.choiceLogo svg{\n  width:27px;\n  height:27px;\n}\n.choiceLogo.textLogo{\n  font-weight:900;\n  font-size:10px;\n  letter-spacing:.2px;\n  color:var(--text);\n}\n.choice.active .choiceLogo.textLogo{\n  color:var(--gold2);\n}\n.logoPortuguese{\n  background:linear-gradient(135deg,#075229 0 48%,#8a1519 48% 100%);\n  border:1px solid rgba(240,194,76,.35);\n}\n.logoPtpt{\n  background:#0d1827;\n  border:1px solid rgba(240,194,76,.35);\n  color:var(--gold2)!important;\n}\n.logoAdult{\n  border:2px solid #fff;\n  border-radius:50%;\n  width:28px;\n  height:28px;\n}\n.logoAdult:after{\n  content:\"\";\n  width:26px;\n  height:3px;\n  background:#fff;\n  transform:rotate(-45deg);\n  border-radius:2px;\n}\n.choice.active .logoAdult{\n  border-color:var(--gold2);\n}\n.choice.active .logoAdult:after{\n  background:var(--gold2);\n}\n.logoIptv{\n  background:#091823;\n  border:1px solid rgba(240,194,76,.35);\n  color:var(--gold2)!important;\n  font-size:8px!important;\n}\n.logoOperators{\n  display:grid;\n  grid-template-columns:1fr 1fr;\n  gap:2px;\n  background:#fff;\n  padding:2px;\n}\n.logoOperators span{\n  display:grid;\n  place-items:center;\n  font-size:5px;\n  font-weight:900;\n  color:#111;\n  line-height:1;\n}\n\n\n.statusBox{\n  display:none;\n  margin-top:14px;\n  padding:11px 12px;\n  border-radius:8px;\n  font-size:11px;\n  line-height:1.5;\n}\n.statusBox.show{display:block}\n.statusBox.error{\n  border:1px solid rgba(212,76,76,.45);\n  background:rgba(212,76,76,.08);\n  color:#ff9a9a;\n}\n.statusBox.ok{\n  border:1px solid rgba(216,146,24,.45);\n  background:rgba(216,146,24,.08);\n  color:#f0c24c;\n}\n\n\nhtml {\n  min-height:100%;\n  background:#01050B;\n}\n\nbody {\n  min-height:100vh;\n  background:\n    linear-gradient(180deg, rgba(1,5,11,.42) 0%, rgba(1,5,11,.62) 45%, rgba(1,5,11,.78) 100%),\n    radial-gradient(circle at 50% 8%, rgba(218,146,28,.10), transparent 38%),\n    url(\"__PT_HUB_BACKGROUND__\") center top / cover fixed no-repeat;\n  color:var(--pt-text);\n}\n\nbody::before {\n  content:\"\";\n  position:fixed;\n  inset:0;\n  pointer-events:none;\n  z-index:-1;\n  background:\n    linear-gradient(90deg, rgba(1,5,11,.18), rgba(4,17,26,.08), rgba(1,5,11,.18));\n}\n\n.card {\n  background:\n    linear-gradient(180deg, rgba(7,28,41,.92), rgba(4,17,26,.88));\n  border-color:rgba(218,146,28,.34);\n  box-shadow:\n    0 18px 45px rgba(0,0,0,.34),\n    inset 0 1px 0 rgba(242,202,79,.04);\n  backdrop-filter:blur(12px);\n  -webkit-backdrop-filter:blur(12px);\n}\n\n.choice,\n.providerBox,\n.configBox,\n.iptvPane,\n.panel .box {\n  background:rgba(4,17,26,.68);\n  border-color:rgba(218,146,28,.22);\n  backdrop-filter:blur(7px);\n  -webkit-backdrop-filter:blur(7px);\n}\n\n.choice:hover,\n.iptvTab:hover {\n  background:rgba(6,47,70,.72);\n}\n\n.choice.active,\n.iptvTab.active {\n  background:rgba(218,146,28,.17);\n  border-color:var(--pt-gold);\n  box-shadow:inset 0 0 0 1px rgba(242,202,79,.10);\n}\n\ninput,\nselect,\ntextarea {\n  background:rgba(1,5,11,.68)!important;\n  border-color:rgba(145,162,184,.22)!important;\n  color:var(--pt-text)!important;\n}\n\ninput:focus,\nselect:focus,\ntextarea:focus {\n  border-color:var(--pt-gold)!important;\n  box-shadow:0 0 0 2px rgba(218,146,28,.12);\n}\n\n.tabs {\n  background:rgba(4,17,26,.50);\n  backdrop-filter:blur(9px);\n  -webkit-backdrop-filter:blur(9px);\n}\n\n.freeBadge {\n  background:rgba(218,146,28,.18)!important;\n  color:var(--pt-gold-light)!important;\n  border:1px solid var(--pt-gold)!important;\n}\n\n.btn.primary {\n  background:linear-gradient(135deg,var(--pt-gold),var(--pt-bronze));\n  color:#071019;\n  border-color:var(--pt-gold-light);\n}\n\n.btn.secondary {\n  background:rgba(4,17,26,.76);\n  border-color:var(--pt-gold);\n  color:var(--pt-gold-light);\n}\n\n@media(max-width:930px){.wrap{grid-template-columns:1fr}.about{position:static}}\n@media(max-width:640px){.columns{grid-template-columns:1fr}.main,.about{padding:17px}}\n</style>\n</head>\n<body>\n\n<div class=\"header\">\n  <div class=\"logo\"><img src=\"__PT_HUB_LOGO__\" alt=\"PT•HUB\"></div>\n</div>\n\n<div class=\"wrap\">\n  <main class=\"card main\">\n    <div class=\"kicker\">Configuração</div>\n\n    <div class=\"tabs\">\n      <div class=\"tab active\" data-panel=\"conteudo\">Conteúdo</div>\n      <div class=\"tab hidden\" data-panel=\"destaques\" data-feature=\"destaques\">Destaques</div>\n      <div class=\"tab hidden\" data-panel=\"streamers\" data-feature=\"streamers\">Streamers</div>\n      <div class=\"tab hidden\" data-panel=\"portugues\" data-feature=\"portugues\">Português</div>\n      <div class=\"tab hidden\" data-panel=\"iptv\" data-feature=\"iptv\">IPTV</div>\n      <div class=\"tab hidden\" data-panel=\"operadores\" data-feature=\"operadores\">Operadores PT</div>\n      <div class=\"tab hidden\" data-panel=\"externas\" data-feature=\"externas\">Fontes Externas</div>\n    </div>\n\n    <section class=\"panel active\" id=\"conteudo\">\n      <div class=\"sectionTitle\">Conteúdo</div>\n      <div class=\"help\">◉ Deves selecionar pelo menos um conteúdo a instalar. Cada conteúdo selecionado cria uma aba própria para configuração.</div>\n\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-feature-toggle=\"destaques\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/destaques-poster.png\" alt=\"Destaques\"></span>\n          <span class=\"title\">Destaques</span><span class=\"sub\">Estreias • Novidades • Populares</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"streamers\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/streamers-logo.png\" alt=\"Streamers\"></span>\n          <span class=\"title\">Streamers</span><span class=\"sub\">Netflix • HBO Max • Prime • Disney+</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"portugues\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/conteudoportugues-poster.png\" alt=\"Conteúdo Português\"></span>\n          <span class=\"title\">Português</span><span class=\"sub\">Produções nacionais • PT-PT</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"adultos\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/adultos-poster.png\" alt=\"Adultos\"></span>\n          <span class=\"title\">Adultos</span><span class=\"sub\">Conteúdo +18</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"iptv\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/iptv-poster.png\" alt=\"IPTV\"></span>\n          <span class=\"title\">IPTV</span><span class=\"sub\">M3U • Xtream • IPTV-org</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"operadores\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/operators-logo.png\" alt=\"Operadores PT\"></span>\n          <span class=\"title\">Operadores PT</span><span class=\"sub\">MEO • NOS • Vodafone • DIGI</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"externas\">\n          <span class=\"choiceLogo textLogo\">↗</span>\n          <span class=\"title\">Fontes Externas</span><span class=\"sub\">Addons compatíveis</span>\n        </button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"destaques\">\n      <div class=\"sectionTitle\">Destaques</div>\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-config-choice=\"destaques-filmes\"><span class=\"choiceLogo textLogo\">🎬</span><span class=\"title\">Filmes</span><span class=\"sub\">Estreias • Novos • Populares</span></button>\n        <button class=\"choice\" data-config-choice=\"destaques-series\"><span class=\"choiceLogo textLogo\">📺</span><span class=\"title\">Séries</span><span class=\"sub\">Novas • Populares • Destaques</span></button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"streamers\">\n      <div class=\"sectionTitle\">Streamers</div>\n      <div class=\"help\">◉ Seleciona os serviços a incluir. Rebordo branco = não selecionado. Rebordo dourado = selecionado.</div>\n\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-streamer=\"netflix\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/netflix-poster.png\" alt=\"\"></span><span class=\"title\">Netflix</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"hbomax\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/hbomax-poster.png\" alt=\"\"></span><span class=\"title\">HBO Max</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"prime\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/primevideo-poster.png\" alt=\"\"></span><span class=\"title\">Prime Video</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"disney\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/disneyplus-poster.png\" alt=\"\"></span><span class=\"title\">Disney+</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"apple\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/appletv-poster.png\" alt=\"\"></span><span class=\"title\">Apple TV</span><span class=\"sub\">Filmes e Séries</span></button>\n      </div>\n\n      <label class=\"field\">País do catálogo</label>\n      <select id=\"catalogCountryPreview\">\n        <option value=\"\" selected>Selecionar país…</option>\n        <option value=\"PT\">Portugal (PT)</option>\n        <option value=\"ES\">Espanha (ES)</option>\n        <option value=\"FR\">França (FR)</option>\n        <option value=\"GB\">Reino Unido (GB)</option>\n        <option value=\"US\">Estados Unidos (US)</option>\n        <option value=\"BR\">Brasil (BR)</option>\n      </select>\n    </section>\n\n    <section class=\"panel\" id=\"portugues\">\n      <div class=\"sectionTitle\">Português</div>\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-config-choice=\"ptpt\"><span class=\"choiceLogo textLogo logoPtpt\">PT•PT</span><span class=\"title\">PT-PT</span><span class=\"sub\">Conteúdo falado/dobrado em PT-PT</span></button>\n        <button class=\"choice\" data-config-choice=\"producao-portuguesa\"><span class=\"choiceLogo logoPortuguese\">\n<svg viewBox=\"0 0 100 100\" aria-hidden=\"true\"><path d=\"M50 84C29 68 17 51 20 35c3-15 20-20 30-7 10-13 27-8 30 7 3 16-9 33-30 49Z\" fill=\"none\" stroke=\"#f0c24c\" stroke-width=\"6\"/><path d=\"M47 40l19 11-19 11Z\" fill=\"#f0c24c\"/></svg>\n</span><span class=\"title\">Produções Portuguesas</span><span class=\"sub\">Filmes • Séries • Novelas</span></button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"iptv\">\n      <div class=\"sectionTitle\">IPTV</div>\n      <div class=\"help\">\n        ◉ Seleciona a fonte IPTV que queres utilizar. A configuração apresentada muda automaticamente de acordo com a fonte escolhida.\n      </div>\n\n      <div class=\"iptvTabs\">\n        <div class=\"iptvTab active\" data-iptv=\"org\" data-iptv-method=\"org\">\n          <span class=\"t\">IPTV-org <span class=\"freeBadge\">FREE</span></span>\n          <span class=\"s\">Canais públicos</span>\n        </div>\n        <div class=\"iptvTab\" data-iptv=\"xtream\" data-iptv-method=\"xtream\">\n          <span class=\"t\">Xtream API</span>\n          <span class=\"s\">Painel / API</span>\n        </div>\n        <div class=\"iptvTab\" data-iptv=\"m3u\" data-iptv-method=\"m3u\">\n          <span class=\"t\">M3U / M3U+</span>\n          <span class=\"s\">Playlist URL / ficheiro</span>\n        </div>\n      </div>\n\n      <!-- IPTV-ORG -->\n      <div class=\"iptvPane active\" id=\"iptv-org\">\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Filtro de canais</strong>\n            <span>IPTV-org</span>\n          </div>\n\n          <p class=\"hint\" style=\"margin:0 0 12px\">\n            Utiliza a base de dados IPTV-org com milhares de canais gratuitos de todo o mundo. Não são necessárias credenciais.\n          </p>\n\n          <label class=\"field\">País</label>\n          <input id=\"iptvOrgCountryPreview\" type=\"text\" placeholder=\"Ex.: PT\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para incluir todos os países.</div>\n\n          <label class=\"field\">Categoria</label>\n          <input id=\"iptvOrgCategoryPreview\" type=\"text\" placeholder=\"Ex.: news, sports, movies\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para incluir todas as categorias.</div>\n\n          <label class=\"field\">Nome do catálogo</label>\n          <input id=\"iptvOrgCatalogPreview\" type=\"text\" placeholder=\"IPTV-org Free\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para utilizar o nome predefinido.</div>\n        </div>\n      </div>\n\n      <!-- XTREAM -->\n      <div class=\"iptvPane\" id=\"iptv-xtream\">\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Credenciais</strong>\n            <span>Xtream API</span>\n          </div>\n\n          <label class=\"field\">URL base *</label>\n          <input id=\"xtreamServerPreview\" type=\"url\" placeholder=\"https://servidor.com:8080\">\n          <div class=\"hint\" style=\"margin-top:6px\">Não incluir uma barra final.</div>\n\n          <div class=\"columns\">\n            <div>\n              <label class=\"field\">Utilizador *</label>\n              <input id=\"xtreamUserPreview\" type=\"text\" placeholder=\"Utilizador\">\n            </div>\n            <div>\n              <label class=\"field\">Palavra-passe *</label>\n              <input id=\"xtreamPassPreview\" type=\"password\" placeholder=\"Palavra-passe\">\n            </div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Mostrar</strong>\n            <span>Conteúdo Xtream</span>\n          </div>\n          <div class=\"choiceGrid\">\n            <button class=\"choice\" id=\"xtreamLivePreview\">\n              <span class=\"title\">TV em Direto</span>\n              <span class=\"sub\">Canais Live TV</span>\n            </button>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Opções EPG</strong>\n            <span>Guia de programação</span>\n          </div>\n\n          <label class=\"switchRow\">\n            <input type=\"checkbox\" id=\"xtreamEpgEnabledPreview\">\n            <strong>Ativar EPG</strong>\n          </label>\n\n          <div id=\"xtreamEpgOptionsPreview\" class=\"conditional\">\n            <label class=\"field\">Origem do EPG</label>\n\n            <div class=\"radioRow\">\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"xtreamEpgSourcePreview\" value=\"panel\">\n                <span>XMLTV do painel / provider</span>\n              </label>\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"xtreamEpgSourcePreview\" value=\"url\">\n                <span>URL EPG personalizada</span>\n              </label>\n            </div>\n\n            <div id=\"xtreamCustomEpgUrlPreview\" style=\"display:none\">\n              <label class=\"field\">URL do EPG</label>\n              <input id=\"xtreamEpgUrlFieldPreview\" type=\"url\" placeholder=\"https://exemplo.com/epg.xml\">\n            </div>\n\n            <label class=\"switchRow\" style=\"margin-top:14px\">\n              <input type=\"checkbox\">\n              <span><strong>Reformatar logos</strong> <span class=\"hint\">(pode tornar o carregamento mais lento)</span></span>\n            </label>\n\n            <div class=\"hint\" style=\"margin-top:8px\">\n              O desvio horário do EPG será tratado automaticamente pelo PT•HUB através de uma definição genérica.\n            </div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Apresentação</strong>\n            <span>Stremio / Nuvio</span>\n          </div>\n          <label class=\"field\">Nome do catálogo</label>\n          <input id=\"xtreamCatalogPreview\" type=\"text\" placeholder=\"Xtream API\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para utilizar o nome predefinido.</div>\n        </div>\n      </div>\n\n      <!-- M3U / M3U+ -->\n      <div class=\"iptvPane\" id=\"iptv-m3u\">\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Playlist</strong>\n            <span>M3U / M3U+</span>\n          </div>\n\n          <p class=\"hint\" style=\"margin:0 0 12px\">\n            Aceita playlists M3U/M3U+ normais e links Xtream Codes com <code>type=m3u_plus</code>. O URL de cada canal é extraído individualmente.\n          </p>\n\n          <div class=\"choiceGrid\" style=\"grid-template-columns:repeat(2,minmax(160px,1fr))\">\n            <button class=\"choice m3uSourcePreview active\" data-source=\"url\">\n              <span class=\"title\">Playlist por URL</span>\n              <span class=\"sub\">M3U / M3U+</span>\n            </button>\n            <button class=\"choice m3uSourcePreview\" data-source=\"file\">\n              <span class=\"title\">Ficheiro M3U / M3U8</span>\n              <span class=\"sub\">Upload local</span>\n            </button>\n          </div>\n\n          <div id=\"m3uUrlPreview\">\n            <label class=\"field\">URL da playlist *</label>\n            <input id=\"m3uUrlFieldPreview\" type=\"url\" placeholder=\"https://exemplo.com/lista.m3u\">\n          </div>\n\n          <div id=\"m3uFilePreview\" style=\"display:none\">\n            <label class=\"field\">Ficheiro M3U / M3U8 *</label>\n            <input id=\"m3uFileFieldPreview\" type=\"file\" accept=\".m3u,.m3u8,audio/x-mpegurl,application/x-mpegURL\">\n            <div class=\"hint\" style=\"margin-top:6px\">Seleciona um ficheiro M3U ou M3U8 do teu computador.</div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Playlists públicas</strong>\n            <span>Links de terceiros</span>\n          </div>\n          <p class=\"hint\" style=\"margin:0 0 10px\">Links públicos não afiliados nem endossados pelo PT•HUB.</p>\n\n          <div class=\"choiceGrid\" style=\"grid-template-columns:repeat(auto-fit,minmax(135px,1fr))\">\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 1</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 2</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 3</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 4</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 5</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 6</span><span class=\"sub\">Public Link</span></button>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Opções EPG</strong>\n            <span>Guia de programação</span>\n          </div>\n\n          <label class=\"switchRow\">\n            <input type=\"checkbox\" id=\"m3uEpgEnabledPreview\">\n            <strong>Ativar EPG</strong>\n          </label>\n\n          <div id=\"m3uEpgOptionsPreview\" class=\"conditional\">\n            <div class=\"radioRow\">\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"m3uEpgSourcePreview\" value=\"playlist\">\n                <span>EPG da playlist / provider</span>\n              </label>\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"m3uEpgSourcePreview\" value=\"url\">\n                <span>URL EPG personalizada</span>\n              </label>\n            </div>\n\n            <div id=\"m3uCustomEpgUrlPreview\" style=\"display:none\">\n              <label class=\"field\">URL do EPG</label>\n              <input id=\"m3uEpgUrlFieldPreview\" type=\"url\" placeholder=\"https://exemplo.com/epg.xml\">\n            </div>\n\n            <label class=\"switchRow\" style=\"margin-top:14px\">\n              <input type=\"checkbox\">\n              <span><strong>Reformatar logos</strong> <span class=\"hint\">(pode tornar o carregamento mais lento)</span></span>\n            </label>\n\n            <div class=\"hint\" style=\"margin-top:8px\">\n              O desvio horário do EPG será tratado automaticamente pelo PT•HUB através de uma definição genérica.\n            </div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Avançado</strong>\n            <span>User-Agent global</span>\n          </div>\n\n          <label class=\"field\">User-Agent global</label>\n          <input id=\"uaPreview\" type=\"text\" placeholder=\"Deixa em branco salvo se o teu provider exigir um player específico\">\n\n          <div class=\"choiceGrid\" style=\"grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-top:10px\">\n            <button class=\"choice uaChoice\" data-ua=\"\">\n              <span class=\"title\">Sem preset</span><span class=\"sub\">Predefinido</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"TiviMate\">\n              <span class=\"title\">TiviMate</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"IPTV Smarters Pro\">\n              <span class=\"title\">IPTV Smarters Pro</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"GSE Smart IPTV\">\n              <span class=\"title\">GSE Smart IPTV</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"VLC\">\n              <span class=\"title\">VLC</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"Kodi\">\n              <span class=\"title\">Kodi</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"CUSTOM\">\n              <span class=\"title\">Personalizado…</span><span class=\"sub\">Manual</span>\n            </button>\n          </div>\n\n          <div class=\"hint\" style=\"margin-top:8px\">\n            Canais que tenham o seu próprio User-Agent na playlist têm prioridade sobre esta definição.\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Apresentação</strong>\n            <span>Stremio / Nuvio</span>\n          </div>\n\n          <label class=\"field\">Nome do catálogo</label>\n          <input id=\"m3uCatalogPreview\" type=\"text\" placeholder=\"Minha IPTV\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para utilizar o nome predefinido.</div>\n        </div>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"operadores\">\n      <div class=\"sectionTitle\">Operadores PT</div>\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-operator=\"meo\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/meo-poster.png\" alt=\"MEO\"></span><span class=\"title\">MEO</span><span class=\"sub\">Operador PT</span></button>\n        <button class=\"choice\" data-operator=\"nos\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/nos-poster.png\" alt=\"NOS\"></span><span class=\"title\">NOS</span><span class=\"sub\">Operador PT</span></button>\n        <button class=\"choice\" data-operator=\"vodafone\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/vodafone-poster.png\" alt=\"Vodafone\"></span><span class=\"title\">Vodafone</span><span class=\"sub\">Operador PT</span></button>\n        <button class=\"choice\" data-operator=\"digi\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/digi-poster.png\" alt=\"DIGI\"></span><span class=\"title\">DIGI</span><span class=\"sub\">Operador PT</span></button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"externas\">\n      <div class=\"sectionTitle\">Fontes Externas — Extras</div>\n      <div class=\"help\">O PT•HUB já inclui fontes automáticas. Usa esta área apenas para adicionar addons extra.</div>\n      <label class=\"field\">Manifests / Addons adicionais</label>\n      <textarea id=\"externalSourcesPreview\" rows=\"4\" placeholder=\"Um URL de manifest por linha\"></textarea>\n      <label class=\"field\">Máximo de resultados por qualidade</label>\n      <input id=\"externalMaxPreview\" type=\"number\" min=\"1\" max=\"10\" value=\"2\">\n    </section>\n\n    <div class=\"actions\">\n      <button class=\"btn secondary hidden\" id=\"testBtn\">Testar ligação</button>\n      <button class=\"btn primary\" id=\"installBtn\">Instalar PT•HUB →</button>\n    </div>\n    <div id=\"statusBox\" class=\"statusBox\"></div>\n    <div id=\"installResult\" class=\"providerBox\" style=\"display:none;margin-top:14px\">\n      <div class=\"providerHead\"><strong>URL do Add-on</strong><span>PT•HUB</span></div>\n      <input id=\"installUrlPreview\" type=\"text\" readonly>\n      <div class=\"actions\" style=\"margin-top:10px\">\n        <button class=\"btn secondary\" id=\"copyInstallPreview\" type=\"button\">Copiar URL</button>\n        <button class=\"btn primary\" id=\"installStremioPreview\" type=\"button\">Instalar no Stremio →</button>\n        <button class=\"btn secondary\" id=\"installNuvioPreview\" type=\"button\">Instalar no Nuvio →</button>\n      </div>\n    </div>\n  </main>\n\n  <aside class=\"card about\">\n    <h3>Sobre</h3>\n\n    <p>\n      O <span class=\"brandline\">PT•HUB</span> reúne num único addon televisão, IPTV,\n      filmes, séries, conteúdos portugueses, streamers, operadores nacionais,\n      OpenSubtitles, fontes integradas e fontes externas opcionais.\n    </p>\n\n    <div id=\"aboutBase\">\n      <p><span class=\"arrow\">→</span> Seleciona um ou mais conteúdos na aba <strong>Conteúdo</strong>. À medida que ativares cada área, a respetiva informação será apresentada aqui.</p>\n    </div>\n\n    <div id=\"aboutDynamic\"></div>\n\n    <div class=\"box\">\n      <strong>Legendas</strong>\n      <p style=\"margin-bottom:0\">\n        O PT•HUB já incorpora o OpenSubtitles para escolha de legendas.\n      </p>\n    </div>\n\n    <div class=\"box\">\n      <strong>Português de Portugal</strong>\n      <p style=\"margin-bottom:0\">\n        A interface, os nomes dos catálogos e os metadados textuais são apresentados em PT-PT sempre que exista localização disponível.\n      </p>\n    </div>\n\n    <div class=\"badges\">\n      <span class=\"badge\">Stremio</span>\n      <span class=\"badge\">Nuvio</span>\n      <span class=\"badge\">IPTV</span>\n      <span class=\"badge\">PT-PT</span>\n    </div>\n  </aside>\n</div>\n\n<script>\nconst tabs=[...document.querySelectorAll(\".tab\")];\nconst panels=[...document.querySelectorAll(\".panel\")];\n\nfunction activatePanel(name){\n  tabs.forEach(t=>t.classList.toggle(\"active\",t.dataset.panel===name));\n  panels.forEach(p=>p.classList.toggle(\"active\",p.id===name));\n}\ntabs.forEach(tab=>tab.addEventListener(\"click\",()=>{\n  if(!tab.classList.contains(\"hidden\")) activatePanel(tab.dataset.panel);\n}));\n\nconst aboutDescriptions = {\n  destaques: '<p><span class=\"arrow\">→</span> <strong>Destaques</strong> — estreias no cinema, novos filmes, novas séries, populares e conteúdos em destaque.</p>',\n  streamers: '<p><span class=\"arrow\">→</span> <strong>Streamers</strong> — escolhe os serviços pretendidos e o país do catálogo.</p>',\n  portugues: '<p><span class=\"arrow\">→</span> <strong>Português</strong> — conteúdos em PT-PT e produções portuguesas permanecem em áreas distintas.</p>',\n  adultos: '<p><span class=\"arrow\">→</span> <strong>Adultos</strong> — área opcional com fontes predefinidas, ativada apenas quando selecionada.</p>',\n  iptv: '<p><span class=\"arrow\">→</span> <strong>IPTV</strong> — IPTV-org, Xtream API ou M3U/M3U+, configurados apenas depois de escolheres o método.</p>',\n  operadores: '<p><span class=\"arrow\">→</span> <strong>Operadores PT</strong> — seleciona apenas os operadores nacionais que pretendes incluir.</p>',\n  externas: '<p><span class=\"arrow\">→</span> <strong>Fontes Externas</strong> — adiciona addons compatíveis para agregação de streams.</p>'\n};\n\nfunction updateAbout(){\n  const selected = [...document.querySelectorAll(\"[data-feature-toggle].active\")]\n    .map(btn => btn.dataset.featureToggle);\n\n  const base = document.getElementById(\"aboutBase\");\n  const dynamic = document.getElementById(\"aboutDynamic\");\n\n  if(base) base.style.display = selected.length ? \"none\" : \"block\";\n  if(dynamic){\n    dynamic.innerHTML = selected\n      .map(feature => aboutDescriptions[feature] || \"\")\n      .join(\"\");\n  }\n}\n\ndocument.querySelectorAll(\"[data-feature-toggle]\").forEach(btn=>{\n  const feature=btn.dataset.featureToggle;\n\n  const sync=()=>{\n    const on=btn.classList.contains(\"active\");\n    const tab=document.querySelector(`.tab[data-feature=\"${feature}\"]`);\n    if(tab) tab.classList.toggle(\"hidden\",!on);\n\n    if(feature===\"iptv\" && !on){\n      document.getElementById(\"testBtn\")?.classList.add(\"hidden\");\n    }\n\n    const panel=document.getElementById(feature);\n    if(panel && !on && panel.classList.contains(\"active\")){\n      activatePanel(\"conteudo\");\n    }\n\n    updateAbout();\n\ndocument.querySelectorAll(\".tab\").forEach(tab=>{\n  tab.addEventListener(\"click\",()=>{\n    const iptvSelected =\n      document.querySelector('[data-feature-toggle=\"iptv\"]')?.classList.contains(\"active\");\n    document.getElementById(\"testBtn\")?.classList.toggle(\n      \"hidden\",\n      !(tab.dataset.panel === \"iptv\" && iptvSelected)\n    );\n  });\n});\n\n  };\n\n  sync();\n\n  btn.addEventListener(\"click\",()=>{\n    btn.classList.toggle(\"active\");\n    sync();\n  });\n});\n\nupdateAbout();\n\ndocument.querySelectorAll(\".choice:not([data-feature-toggle])\").forEach(btn=>{\n  btn.addEventListener(\"click\",()=>btn.classList.toggle(\"active\"));\n});\n\ndocument.querySelectorAll(\".iptvTab\").forEach(tab=>{\n  tab.addEventListener(\"click\",()=>{\n    document.querySelectorAll(\".iptvTab\").forEach(t=>t.classList.remove(\"active\"));\n    document.querySelectorAll(\".iptvPane\").forEach(p=>p.classList.remove(\"active\"));\n    tab.classList.add(\"active\");\n    document.getElementById(\"iptv-\"+tab.dataset.iptv).classList.add(\"active\");\n\n    if(tab.dataset.iptv===\"m3u\"){\n      const selected=document.querySelector(\".m3uSourcePreview.active\");\n      if(!selected){\n        const urlBtn=document.querySelector('.m3uSourcePreview[data-source=\"url\"]');\n        urlBtn?.classList.add(\"active\");\n        document.getElementById(\"m3uUrlPreview\").style.display=\"block\";\n        document.getElementById(\"m3uFilePreview\").style.display=\"none\";\n      }\n    }\n  });\n});\n\ndocument.querySelectorAll(\".m3uSourcePreview\").forEach(btn=>{\n  btn.addEventListener(\"click\",()=>{\n    document.querySelectorAll(\".m3uSourcePreview\").forEach(b=>b.classList.remove(\"active\"));\n    btn.classList.add(\"active\");\n    const isFile=btn.dataset.source===\"file\";\n    document.getElementById(\"m3uUrlPreview\").style.display=isFile?\"none\":\"block\";\n    document.getElementById(\"m3uFilePreview\").style.display=isFile?\"block\":\"none\";\n  });\n});\n\n\nfunction bindEpgToggle(enabledId, optionsId, radioName, customUrlId){\n  const enabled=document.getElementById(enabledId);\n  const options=document.getElementById(optionsId);\n  const custom=document.getElementById(customUrlId);\n\n  const syncEnabled=()=>{\n    options?.classList.toggle(\"show\", !!enabled?.checked);\n  };\n\n  enabled?.addEventListener(\"change\",syncEnabled);\n  syncEnabled();\n\n  document.querySelectorAll(`input[name=\"${radioName}\"]`).forEach(radio=>{\n    radio.addEventListener(\"change\",()=>{\n      const value=document.querySelector(`input[name=\"${radioName}\"]:checked`)?.value || \"\";\n      if(custom) custom.style.display=value===\"url\"?\"block\":\"none\";\n    });\n  });\n}\n\nbindEpgToggle(\n  \"xtreamEpgEnabledPreview\",\n  \"xtreamEpgOptionsPreview\",\n  \"xtreamEpgSourcePreview\",\n  \"xtreamCustomEpgUrlPreview\"\n);\n\nbindEpgToggle(\n  \"m3uEpgEnabledPreview\",\n  \"m3uEpgOptionsPreview\",\n  \"m3uEpgSourcePreview\",\n  \"m3uCustomEpgUrlPreview\"\n);\n\ndocument.querySelectorAll(\".uaChoice\").forEach(btn=>{\n  btn.addEventListener(\"click\",()=>{\n    document.querySelectorAll(\".uaChoice\").forEach(b=>b.classList.remove(\"active\"));\n    btn.classList.add(\"active\");\n    const ua=document.getElementById(\"uaPreview\");\n    if(btn.dataset.ua===\"CUSTOM\"){\n      ua.value=\"\";\n      ua.focus();\n    }else{\n      ua.value=btn.dataset.ua||\"\";\n    }\n  });\n});\n\n\nconst installBtn=document.getElementById(\"installBtn\");\nconst testBtn=document.getElementById(\"testBtn\");\nconst statusBox=document.getElementById(\"statusBox\");\nconst initialConfig=__INITIAL_CONFIG__;\n\nfunction showStatus(message,type=\"error\"){\n  if(!statusBox)return;\n  statusBox.textContent=message;\n  statusBox.className=\"statusBox show \"+type;\n}\nfunction clearStatus(){\n  if(!statusBox)return;\n  statusBox.textContent=\"\";\n  statusBox.className=\"statusBox\";\n}\nfunction active(selector){return !!document.querySelector(selector+\".active\");}\nfunction activeValues(selector,attr){\n  return [...document.querySelectorAll(selector+\".active\")].map(el=>el.dataset[attr]).filter(Boolean);\n}\nfunction lines(value){\n  return String(value||\"\").split(/\\r?\\n/).map(v=>v.trim()).filter(Boolean);\n}\nfunction b64urlUtf8(text){\n  const bytes=new TextEncoder().encode(text);\n  let binary=\"\";\n  bytes.forEach(b=>binary+=String.fromCharCode(b));\n  return btoa(binary).replace(/\\+/g,\"-\").replace(/\\//g,\"_\").replace(/=+$/,\"\");\n}\nfunction selectedIptvMode(){\n  const mode=document.querySelector(\".iptvTab.active\")?.dataset.iptv;\n  return mode===\"org\"?\"iptv-org\":(mode||\"iptv-org\");\n}\nfunction getRealConfig(){\n  const selectedFeatures=activeValues(\"[data-feature-toggle]\",\"featureToggle\");\n  const streamers=activeValues(\"#streamers [data-streamer]\",\"streamer\");\n  const streamerMap={\n    netflix:\"netflix\",\n    hbomax:\"hbomax\",\n    prime:\"prime-video\",\n    disney:\"disney-plus\",\n    apple:\"apple-tv-plus\"\n  };\n  const streamerIds=streamers.map(v=>streamerMap[v]).filter(Boolean);\n  const ptPt=active('#portugues [data-config-choice=\"ptpt\"]');\n  const portuguese=active('#portugues [data-config-choice=\"producao-portuguesa\"]');\n  const epgXtreamEnabled=document.getElementById(\"xtreamEpgEnabledPreview\")?.checked===true;\n  const epgXtreamSource=document.querySelector('input[name=\"xtreamEpgSourcePreview\"]:checked')?.value||\"\";\n  const epgM3uEnabled=document.getElementById(\"m3uEpgEnabledPreview\")?.checked===true;\n  const epgM3uSource=document.querySelector('input[name=\"m3uEpgSourcePreview\"]:checked')?.value||\"\";\n  const m3uSource=document.querySelector(\".m3uSourcePreview.active\")?.dataset.source||\"\";\n  const mode=selectedIptvMode();\n\n  return {\n    catalogCountry:(document.getElementById(\"catalogCountryPreview\")?.value||\"\").trim().toUpperCase(),\n    features:{\n      featured:selectedFeatures.includes(\"destaques\"),\n      featuredContent:{\n        movies:active('#destaques [data-config-choice=\"destaques-filmes\"]'),\n        series:active('#destaques [data-config-choice=\"destaques-series\"]')\n      },\n      streamers:selectedFeatures.includes(\"streamers\"),\n      selectedStreamerMovies:streamerIds,\n      selectedStreamerSeries:streamerIds,\n      operators:selectedFeatures.includes(\"operadores\"),\n      selectedOperators:activeValues(\"#operadores [data-operator]\",\"operator\"),\n      iptv:selectedFeatures.includes(\"iptv\"),\n      ptContent:selectedFeatures.includes(\"portugues\"),\n      ptContentSources:{\n        ptPt,\n        portugueseProduction:portuguese,\n        rtpPlay:false\n      },\n      adultContent:selectedFeatures.includes(\"adultos\"),\n      subtitles:true,\n      externalSources:selectedFeatures.includes(\"externas\")\n    },\n    ptContentSelectedSources:{\n      ptpt:ptPt?[\"cotonet\"]:[],\n      portuguese:portuguese?[\"portuguese-productions\"]:[]\n    },\n    ptContentExternalSources:{ptpt:[],portuguese:[]},\n    externalStreamSources:selectedFeatures.includes(\"externas\")\n      ?lines(document.getElementById(\"externalSourcesPreview\")?.value):[],\n    externalStreamMaxPerQuality:Number(document.getElementById(\"externalMaxPreview\")?.value||2),\n    mode,\n    iptvOrg:{\n      country:(document.getElementById(\"iptvOrgCountryPreview\")?.value||\"\").trim(),\n      category:(document.getElementById(\"iptvOrgCategoryPreview\")?.value||\"\").trim(),\n      catalogName:(document.getElementById(\"iptvOrgCatalogPreview\")?.value||\"\").trim()\n    },\n    xtreamServer:(document.getElementById(\"xtreamServerPreview\")?.value||\"\").trim(),\n    username:(document.getElementById(\"xtreamUserPreview\")?.value||\"\").trim(),\n    password:document.getElementById(\"xtreamPassPreview\")?.value||\"\",\n    xtreamShow:{live:active(\"#xtreamLivePreview\")},\n    xtreamEpgMode:epgXtreamEnabled?(epgXtreamSource===\"url\"?\"url\":\"auto\"):\"none\",\n    xtreamEpgOffset:0,\n    xtreamEpgUrl:(document.getElementById(\"xtreamEpgUrlFieldPreview\")?.value||\"\").trim(),\n    xtreamCatalogName:(document.getElementById(\"xtreamCatalogPreview\")?.value||\"\").trim(),\n    m3uSource:m3uSource||\"url\",\n    m3uUrl:(document.getElementById(\"m3uUrlFieldPreview\")?.value||\"\").trim(),\n    m3uFileId:window.__pthubM3uFileId||\"\",\n    m3uEpgMode:epgM3uEnabled?(epgM3uSource===\"url\"?\"url\":\"playlist\"):\"none\",\n    m3uEpgOffset:0,\n    epgUrl:(document.getElementById(\"m3uEpgUrlFieldPreview\")?.value||\"\").trim(),\n    globalUserAgent:(document.getElementById(\"uaPreview\")?.value||\"\").trim(),\n    m3uCatalogName:(document.getElementById(\"m3uCatalogPreview\")?.value||\"\").trim()\n  };\n}\nfunction validateRealConfig(config,forTest=false){\n  const f=config.features;\n  if(!(f.featured||f.streamers||f.operators||f.iptv||f.ptContent||f.adultContent||f.externalSources))\n    return \"Deves selecionar e configurar pelo menos um conteúdo a instalar.\";\n  if(f.featured&&!f.featuredContent.movies&&!f.featuredContent.series)\n    return \"Selecionaste Destaques, mas ainda não escolheste Filmes, Séries ou ambos.\";\n  if(f.streamers&&f.selectedStreamerMovies.length===0)\n    return \"Selecionaste Streamers, mas ainda não escolheste nenhum serviço.\";\n  if(f.streamers&&!config.catalogCountry)\n    return \"Selecionaste Streamers, mas ainda não escolheste o país do catálogo.\";\n  if(f.ptContent&&!f.ptContentSources.ptPt&&!f.ptContentSources.portugueseProduction)\n    return \"Selecionaste Português, mas ainda não escolheste PT-PT nem Produções Portuguesas.\";\n  if(document.querySelector('[data-feature-toggle=\"adultos\"]')?.classList.contains(\"active\")&&!f.adultContent)\n    return \"Selecionaste Adultos, mas ainda não ativaste as fontes automáticas.\";\n  if(f.operators&&f.selectedOperators.length===0)\n    return \"Selecionaste Operadores PT, mas ainda não escolheste nenhum operador.\";\n  if(f.externalSources&&config.externalStreamSources.length===0)\n    return \"Selecionaste Fontes Externas, mas ainda não adicionaste nenhum addon.\";\n  if(f.iptv){\n    if(config.mode===\"xtream\"){\n      if(!config.xtreamServer||!config.username||!config.password)\n        return \"Selecionaste Xtream API, mas faltam servidor, utilizador ou palavra-passe.\";\n      if(!config.xtreamShow.live)\n        return \"Selecionaste Xtream API, mas ainda não escolheste TV em Direto.\";\n      if(config.xtreamEpgMode===\"url\"&&!config.xtreamEpgUrl)\n        return \"Selecionaste URL EPG personalizada no Xtream, mas não indicaste o URL.\";\n    }\n    if(config.mode===\"m3u\"){\n      const source=document.querySelector(\".m3uSourcePreview.active\")?.dataset.source;\n      if(!source)return \"Selecionaste M3U / M3U+, mas ainda não escolheste URL ou ficheiro.\";\n      if(source===\"url\"&&!config.m3uUrl)return \"Selecionaste Playlist por URL, mas ainda não indicaste o URL M3U/M3U+.\";\n      if(source===\"file\"&&!config.m3uFileId)return \"Selecionaste Ficheiro M3U/M3U8, mas ainda não escolheste nenhum ficheiro.\";\n      if(config.m3uEpgMode===\"url\"&&!config.epgUrl)\n        return \"Selecionaste URL EPG personalizada no M3U, mas não indicaste o URL.\";\n    }\n  }\n  if(forTest&&!f.iptv)return \"O teste de ligação só está disponível na configuração IPTV.\";\n  return \"\";\n}\nfunction getInstallUrl(config){\n  const encoded=b64urlUtf8(JSON.stringify(config));\n  return location.origin+\"/\"+encoded+\"/manifest.json\";\n}\nasync function uploadM3UIfNeeded(config){\n  if(!config.features.iptv||config.mode!==\"m3u\")return;\n  const source=document.querySelector(\".m3uSourcePreview.active\")?.dataset.source;\n  const input=document.getElementById(\"m3uFileFieldPreview\");\n  if(source!==\"file\"||!input?.files?.length)return;\n  const text=await input.files[0].text();\n  const response=await fetch(\"/upload-m3u\",{method:\"POST\",headers:{\"Content-Type\":\"text/plain;charset=UTF-8\"},body:text});\n  if(!response.ok)throw new Error(\"Não foi possível enviar o ficheiro M3U.\");\n  const data=await response.json();\n  window.__pthubM3uFileId=data.id||data.fileId||data.m3uFileId||\"\";\n  if(!window.__pthubM3uFileId)throw new Error(\"O servidor não devolveu o identificador do ficheiro M3U.\");\n}\ninstallBtn?.addEventListener(\"click\",async event=>{\n  event.preventDefault();\n  clearStatus();\n  try{\n    let config=getRealConfig();\n    let error=validateRealConfig(config,false);\n    if(error){showStatus(error,\"error\");return;}\n    await uploadM3UIfNeeded(config);\n    config=getRealConfig();\n    error=validateRealConfig(config,false);\n    if(error){showStatus(error,\"error\");return;}\n    const url=getInstallUrl(config);\n    document.getElementById(\"installUrlPreview\").value=url;\n    document.getElementById(\"installResult\").style.display=\"block\";\n    showStatus(\"Configuração válida. Escolhe Instalar no Stremio ou Instalar no Nuvio.\",\"ok\");\n  }catch(error){showStatus(\"Erro: \"+error.message,\"error\");}\n});\ntestBtn?.addEventListener(\"click\",async event=>{\n  event.preventDefault();\n  clearStatus();\n  try{\n    let config=getRealConfig();\n    let error=validateRealConfig(config,true);\n    if(error){showStatus(error,\"error\");return;}\n    await uploadM3UIfNeeded(config);\n    config=getRealConfig();\n    const response=await fetch(\"/test-iptv\",{method:\"POST\",headers:{\"Content-Type\":\"application/json\"},body:JSON.stringify(config)});\n    const data=await response.json().catch(()=>({}));\n    if(!response.ok||data.success===false)throw new Error(data.message||data.error||\"Falha no teste de ligação.\");\n    showStatus(data.message||(\"Ligação validada\"+(data.channels?\" — \"+data.channels+\" canais encontrados.\":\".\")),\"ok\");\n  }catch(error){showStatus(\"Erro: \"+error.message,\"error\");}\n});\ndocument.getElementById(\"copyInstallPreview\")?.addEventListener(\"click\",async()=>{\n  const url=document.getElementById(\"installUrlPreview\")?.value;\n  if(url)await navigator.clipboard.writeText(url);\n});\nfunction toStremioInstallUrl(url){\n  return String(url||\"\").replace(/^https?:\\/\\//i,\"stremio://\");\n}\nfunction toNuvioInstallUrl(url){\n  return \"nuvio://install?manifest=\"+encodeURIComponent(String(url||\"\"));\n}\ndocument.getElementById(\"installStremioPreview\")?.addEventListener(\"click\",()=>{\n  const url=document.getElementById(\"installUrlPreview\")?.value;\n  if(url)window.location.href=toStremioInstallUrl(url);\n});\ndocument.getElementById(\"installNuvioPreview\")?.addEventListener(\"click\",()=>{\n  const url=document.getElementById(\"installUrlPreview\")?.value;\n  if(url)window.location.href=toNuvioInstallUrl(url);\n});\n\n/* Restauração simples quando se abre /:config/configure */\n(function restoreConfig(){\n  const c=initialConfig||{};\n  const f=c.features||{};\n  const activateFeature=(name,on)=>{\n    const b=document.querySelector('[data-feature-toggle=\"'+name+'\"]');\n    if(on&&!b?.classList.contains(\"active\"))b?.click();\n  };\n  activateFeature(\"destaques\",f.featured===true);\n  activateFeature(\"streamers\",f.streamers===true);\n  activateFeature(\"portugues\",f.ptContent===true);\n  activateFeature(\"adultos\",f.adultContent===true);\n  activateFeature(\"iptv\",f.iptv===true);\n  activateFeature(\"operadores\",f.operators===true);\n  activateFeature(\"externas\",f.externalSources===true);\n})();\n\n</script>\n\n</body>\n</html>"
+  return "<!doctype html>\n<html lang=\"pt-PT\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>PT•HUB — Botões Outline</title>\n<style>\n:root{\n  --pt-bg:#01050B;\n  --pt-bg-secondary:#04111A;\n  --pt-bg-card:#071C29;\n  --pt-bg-tech:#062F46;\n  --pt-gold:#DA921C;\n  --pt-gold-light:#F2CA4F;\n  --pt-bronze:#A7610C;\n  --pt-green:#027C1C;\n  --pt-green-light:#13D06C;\n  --pt-red:#E51306;\n  --pt-red-dark:#970200;\n  --pt-text:#EEECCB;\n  --pt-white:#FFFFFF;\n\n  --bg:var(--pt-bg);\n  --bg2:var(--pt-bg-secondary);\n  --card:rgba(7,28,41,.88);\n  --card2:rgba(6,47,70,.72);\n  --line:rgba(218,146,28,.23);\n  --gold:var(--pt-gold);\n  --gold2:var(--pt-gold-light);\n  --text:var(--pt-text);\n  --muted:#91A2B8;\n  --white:var(--pt-white);\n}\n*{box-sizing:border-box}\nbody{\n  margin:0;\n  background:\n    radial-gradient(circle at 50% 0%,rgba(11,53,77,.35),transparent 34%),\n    linear-gradient(180deg,#05090f,#03070c);\n  color:var(--text);\n  font-family:Inter,Segoe UI,Arial,sans-serif;\n}\n.header{padding:34px 20px 22px;display:flex;justify-content:center}\n.logo{\n  display:grid;place-items:center;\n  background:transparent;\n  border:0;\n  box-shadow:none;\n  padding:0;\n}\n.logo span{color:var(--gold2)}\n.logo img{max-width:190px;max-height:92px;width:auto;height:auto;object-fit:contain;display:block;background:transparent}\n.wrap{\n  max-width:1180px;margin:0 auto;padding:0 18px 60px;\n  display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px\n}\n.card{\n  background:linear-gradient(180deg,rgba(11,20,34,.98),rgba(8,16,28,.98));\n  border:1px solid #1e2c40;border-radius:18px;\n  box-shadow:0 18px 55px rgba(0,0,0,.32)\n}\n.main{padding:22px}\n.about{padding:22px;align-self:start;position:sticky;top:22px}\n.kicker{font-size:9px;text-transform:uppercase;letter-spacing:1.4px;color:#6981a2;margin-bottom:16px}\n.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid #1d2a3d;margin-bottom:19px}\n.tab{padding:10px 12px;font-size:12px;color:#7ea1c6;border-radius:5px 5px 0 0;cursor:pointer;user-select:none}\n.tab.active{color:#fff;border:1px solid #fff;border-bottom-color:transparent;background:#0e1725;margin-bottom:-1px}\n.tab.hidden{display:none}\n.panel{display:none}.panel.active{display:block}\n.sectionTitle{\n  font-size:9px;text-transform:uppercase;letter-spacing:1.5px;\n  color:var(--gold2);font-weight:800;margin-bottom:11px\n}\n.help{\n  border:1px solid rgba(216,146,24,.35);\n  background:rgba(216,146,24,.07);\n  color:#e5c875;padding:11px 12px;border-radius:7px;\n  font-size:11px;line-height:1.5;margin-bottom:14px\n}\n.choiceGrid{\n  display:grid;\n  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));\n  gap:10px\n}\n.choice{\n  min-height:64px;\n  display:flex;\n  flex-direction:column;\n  justify-content:center;\n  align-items:flex-start;\n  gap:3px;\n  padding:10px 12px;\n  border-radius:10px;\n  border:2px solid rgba(255,255,255,.85);\n  background:#08111c;\n  color:#fff;\n  cursor:pointer;\n  transition:.15s ease;\n  box-shadow:0 6px 16px rgba(0,0,0,.12)\n}\n.choice:hover{\n  transform:translateY(-1px);\n  border-color:#fff;\n  background:#0a1522\n}\n.choice .title{\n  font-size:12px;\n  font-weight:800;\n  letter-spacing:.1px;\n  color:#fff\n}\n.choice .sub{\n  font-size:10px;\n  color:#6f93bd\n}\n.choice.active{\n  border-color:var(--gold2);\n  background:rgba(216,146,24,.16);\n  box-shadow:0 0 0 1px rgba(216,146,24,.18),0 8px 20px rgba(216,146,24,.10)\n}\n.choice.active .title{color:var(--gold2)}\n.choice.active .sub{color:#d6a84d}\n\nlabel.field{display:block;color:#86a6c7;font-size:11px;margin:13px 0 6px}\nselect,input[type=text],input[type=url],input[type=password],textarea{\n  width:100%;background:#07101a;border:1px solid #1d2a3e;\n  border-radius:7px;color:#d9e4ef;padding:10px 11px;outline:none\n}\nselect:focus,input:focus,textarea:focus{border-color:var(--gold)}\n.iptvTabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}\n.iptvTab{\n  min-width:130px;min-height:52px;\n  border:2px solid rgba(255,255,255,.85);\n  border-radius:10px;background:#08111c;color:#fff;\n  display:flex;flex-direction:column;justify-content:center;\n  align-items:flex-start;padding:8px 10px;cursor:pointer\n}\n.iptvTab .t{font-size:11px;font-weight:800}\n.iptvTab .s{font-size:9px;color:#6f93bd;margin-top:2px}\n.iptvTab.active{\n  border-color:var(--gold2);\n  background:rgba(216,146,24,.16)\n}\n.iptvTab.active .t{color:var(--gold2)}\n.iptvTab.active .s{color:#d6a84d}\n.iptvPane{display:none}.iptvPane.active{display:block}\n.columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}\n.actions{\n  display:flex;gap:9px;flex-wrap:wrap;\n  margin-top:22px;padding-top:18px;border-top:1px solid #182539\n}\n.btn{\n  border-radius:8px;padding:11px 15px;\n  font-size:11px;font-weight:800;cursor:pointer\n}\n.btn.primary{\n  border:1px solid var(--gold2);\n  background:linear-gradient(135deg,var(--gold2),var(--gold));\n  color:#08111a\n}\n.btn.secondary{\n  border:1px solid #fff;\n  background:#08111c;\n  color:#fff\n}\n.btn.hidden{display:none}\n.about h3{\n  margin:0 0 14px;color:#6d85a5;font-size:9px;\n  letter-spacing:1.4px;text-transform:uppercase\n}\n.about p{\n  color:#89a5c4;font-size:11px;line-height:1.55\n}\n.about strong{color:#d9e7f6}\n.about .arrow{color:var(--gold2);font-weight:900}\n.about .box{\n  margin-top:14px;padding:12px;\n  border:1px solid rgba(216,146,24,.28);\n  background:rgba(216,146,24,.06);\n  border-radius:8px\n}\n.brandline{color:var(--gold2);font-weight:800}\n\n.freeBadge{\n  display:inline-block;\n  margin-left:5px;\n  padding:2px 5px;\n  border-radius:999px;\n  background:rgba(216,146,24,.18);\n  color:var(--gold2);\n  border:1px solid var(--gold);\n  font-size:8px;\n  font-weight:900;\n  line-height:1;\n  vertical-align:1px;\n}\n.switchRow{\n  display:flex;\n  align-items:center;\n  gap:9px;\n  margin:12px 0;\n  font-size:12px;\n  color:#dce7f3;\n}\n.switchRow input{\n  accent-color:var(--gold);\n  width:15px;\n  height:15px;\n}\n.conditional{\n  display:none;\n  margin-top:10px;\n  padding-top:10px;\n  border-top:1px solid #182539;\n}\n.conditional.show{display:block}\n.radioRow{\n  display:flex;\n  flex-direction:column;\n  gap:9px;\n  margin-top:9px;\n}\n.radioOpt{\n  display:flex;\n  align-items:center;\n  gap:8px;\n  font-size:11px;\n  color:#d7e2ef;\n}\n.radioOpt input{accent-color:var(--gold)}\n\n\n.choice{\n  position:relative;\n  padding-left:54px;\n}\n.choiceLogo{\n  position:absolute;\n  left:12px;\n  top:50%;\n  transform:translateY(-50%);\n  width:30px;\n  height:30px;\n  display:grid;\n  place-items:center;\n  border-radius:7px;\n  overflow:hidden;\n  flex:0 0 auto;\n}\n.choiceLogo img{\n  max-width:34px;\n  max-height:34px;\n  object-fit:contain;\n  display:block;\n}\n.choiceLogo svg{\n  width:27px;\n  height:27px;\n}\n.choiceLogo.textLogo{\n  font-weight:900;\n  font-size:10px;\n  letter-spacing:.2px;\n  color:var(--text);\n}\n.choice.active .choiceLogo.textLogo{\n  color:var(--gold2);\n}\n.logoPortuguese{\n  background:linear-gradient(135deg,#075229 0 48%,#8a1519 48% 100%);\n  border:1px solid rgba(240,194,76,.35);\n}\n.logoPtpt{\n  background:#0d1827;\n  border:1px solid rgba(240,194,76,.35);\n  color:var(--gold2)!important;\n}\n.logoAdult{\n  border:2px solid #fff;\n  border-radius:50%;\n  width:28px;\n  height:28px;\n}\n.logoAdult:after{\n  content:\"\";\n  width:26px;\n  height:3px;\n  background:#fff;\n  transform:rotate(-45deg);\n  border-radius:2px;\n}\n.choice.active .logoAdult{\n  border-color:var(--gold2);\n}\n.choice.active .logoAdult:after{\n  background:var(--gold2);\n}\n.logoIptv{\n  background:#091823;\n  border:1px solid rgba(240,194,76,.35);\n  color:var(--gold2)!important;\n  font-size:8px!important;\n}\n.logoOperators{\n  display:grid;\n  grid-template-columns:1fr 1fr;\n  gap:2px;\n  background:#fff;\n  padding:2px;\n}\n.logoOperators span{\n  display:grid;\n  place-items:center;\n  font-size:5px;\n  font-weight:900;\n  color:#111;\n  line-height:1;\n}\n\n\n\n.aboutActions{\n  display:grid;\n  grid-template-columns:repeat(2,minmax(0,1fr));\n  gap:10px;\n  margin-top:18px;\n}\n.aboutAction{\n  min-height:44px;\n  border:1px solid rgba(218,146,28,.58);\n  border-radius:11px;\n  background:rgba(218,146,28,.08);\n  color:var(--pt-text);\n  text-decoration:none;\n  display:flex;\n  align-items:center;\n  justify-content:center;\n  gap:8px;\n  padding:10px 12px;\n  font:inherit;\n  font-size:11px;\n  font-weight:800;\n  text-transform:uppercase;\n  letter-spacing:.6px;\n  cursor:pointer;\n  transition:.18s ease;\n}\n.aboutAction:hover{\n  transform:translateY(-1px);\n  border-color:var(--pt-gold-light);\n  background:rgba(218,146,28,.15);\n  box-shadow:0 8px 24px rgba(0,0,0,.22);\n}\n.aboutActionIcon{\n  font-size:16px;\n  color:var(--pt-gold-light);\n  line-height:1;\n}\n\n.suggestionModal{\n  position:fixed;\n  inset:0;\n  display:none;\n  align-items:center;\n  justify-content:center;\n  z-index:9999;\n  padding:18px;\n}\n.suggestionModal.open{display:flex}\n.suggestionBackdrop{\n  position:absolute;\n  inset:0;\n  background:rgba(0,0,0,.76);\n  backdrop-filter:blur(7px);\n}\n.suggestionDialog{\n  position:relative;\n  width:min(620px,100%);\n  max-height:calc(100vh - 36px);\n  overflow:auto;\n  background:\n    linear-gradient(180deg,rgba(7,28,41,.99),rgba(4,17,26,.99));\n  border:1px solid rgba(218,146,28,.55);\n  border-radius:18px;\n  box-shadow:0 28px 90px rgba(0,0,0,.62);\n  padding:22px;\n}\n.suggestionHead{\n  display:flex;\n  align-items:flex-start;\n  justify-content:space-between;\n  gap:18px;\n  margin-bottom:10px;\n}\n.suggestionHead h3{\n  margin:3px 0 0;\n  font-size:20px;\n}\n.suggestionClose{\n  width:34px;\n  height:34px;\n  border:1px solid rgba(218,146,28,.35);\n  border-radius:9px;\n  background:rgba(255,255,255,.04);\n  color:var(--pt-text);\n  font-size:23px;\n  line-height:1;\n  cursor:pointer;\n}\n.suggestionActions{\n  display:flex;\n  justify-content:flex-end;\n  gap:10px;\n  margin-top:16px;\n}\n.suggestionCounter{\n  margin-top:5px;\n  text-align:right;\n  font-size:9px;\n  color:#7589A4;\n}\n@media(max-width:620px){\n  .aboutActions{grid-template-columns:1fr}\n  .suggestionActions{flex-direction:column-reverse}\n  .suggestionActions .btn{width:100%}\n}\n.statusBox{\n  display:none;\n  margin-top:14px;\n  padding:11px 12px;\n  border-radius:8px;\n  font-size:11px;\n  line-height:1.5;\n}\n.statusBox.show{display:block}\n.statusBox.error{\n  border:1px solid rgba(212,76,76,.45);\n  background:rgba(212,76,76,.08);\n  color:#ff9a9a;\n}\n.statusBox.ok{\n  border:1px solid rgba(216,146,24,.45);\n  background:rgba(216,146,24,.08);\n  color:#f0c24c;\n}\n\n\nhtml {\n  min-height:100%;\n  background:#01050B;\n}\n\nbody {\n  min-height:100vh;\n  background:\n    linear-gradient(180deg, rgba(1,5,11,.42) 0%, rgba(1,5,11,.62) 45%, rgba(1,5,11,.78) 100%),\n    radial-gradient(circle at 50% 8%, rgba(218,146,28,.10), transparent 38%),\n    url(\"__PT_HUB_BACKGROUND__\") center top / cover fixed no-repeat;\n  color:var(--pt-text);\n}\n\nbody::before {\n  content:\"\";\n  position:fixed;\n  inset:0;\n  pointer-events:none;\n  z-index:-1;\n  background:\n    linear-gradient(90deg, rgba(1,5,11,.18), rgba(4,17,26,.08), rgba(1,5,11,.18));\n}\n\n.card {\n  background:\n    linear-gradient(180deg, rgba(7,28,41,.92), rgba(4,17,26,.88));\n  border-color:rgba(218,146,28,.34);\n  box-shadow:\n    0 18px 45px rgba(0,0,0,.34),\n    inset 0 1px 0 rgba(242,202,79,.04);\n  backdrop-filter:blur(12px);\n  -webkit-backdrop-filter:blur(12px);\n}\n\n.choice,\n.providerBox,\n.configBox,\n.iptvPane,\n.panel .box {\n  background:rgba(4,17,26,.68);\n  border-color:rgba(218,146,28,.22);\n  backdrop-filter:blur(7px);\n  -webkit-backdrop-filter:blur(7px);\n}\n\n.choice:hover,\n.iptvTab:hover {\n  background:rgba(6,47,70,.72);\n}\n\n.choice.active,\n.iptvTab.active {\n  background:rgba(218,146,28,.17);\n  border-color:var(--pt-gold);\n  box-shadow:inset 0 0 0 1px rgba(242,202,79,.10);\n}\n\ninput,\nselect,\ntextarea {\n  background:rgba(1,5,11,.68)!important;\n  border-color:rgba(145,162,184,.22)!important;\n  color:var(--pt-text)!important;\n}\n\ninput:focus,\nselect:focus,\ntextarea:focus {\n  border-color:var(--pt-gold)!important;\n  box-shadow:0 0 0 2px rgba(218,146,28,.12);\n}\n\n.tabs {\n  background:rgba(4,17,26,.50);\n  backdrop-filter:blur(9px);\n  -webkit-backdrop-filter:blur(9px);\n}\n\n.freeBadge {\n  background:rgba(218,146,28,.18)!important;\n  color:var(--pt-gold-light)!important;\n  border:1px solid var(--pt-gold)!important;\n}\n\n.btn.primary {\n  background:linear-gradient(135deg,var(--pt-gold),var(--pt-bronze));\n  color:#071019;\n  border-color:var(--pt-gold-light);\n}\n\n.btn.secondary {\n  background:rgba(4,17,26,.76);\n  border-color:var(--pt-gold);\n  color:var(--pt-gold-light);\n}\n\n@media(max-width:930px){.wrap{grid-template-columns:1fr}.about{position:static}}\n@media(max-width:640px){.columns{grid-template-columns:1fr}.main,.about{padding:17px}}\n</style>\n</head>\n<body>\n\n<div class=\"header\">\n  <div class=\"logo\"><img src=\"__PT_HUB_LOGO__\" alt=\"PT•HUB\"></div>\n</div>\n\n<div class=\"wrap\">\n  <main class=\"card main\">\n    <div class=\"kicker\">Configuração</div>\n\n    <div class=\"tabs\">\n      <div class=\"tab active\" data-panel=\"conteudo\">Conteúdo</div>\n      <div class=\"tab hidden\" data-panel=\"destaques\" data-feature=\"destaques\">Destaques</div>\n      <div class=\"tab hidden\" data-panel=\"streamers\" data-feature=\"streamers\">Streamers</div>\n      <div class=\"tab hidden\" data-panel=\"portugues\" data-feature=\"portugues\">Português</div>\n      <div class=\"tab hidden\" data-panel=\"iptv\" data-feature=\"iptv\">IPTV</div>\n      <div class=\"tab hidden\" data-panel=\"operadores\" data-feature=\"operadores\">Operadores PT</div>\n      <div class=\"tab hidden\" data-panel=\"externas\" data-feature=\"externas\">Fontes Externas</div>\n    </div>\n\n    <section class=\"panel active\" id=\"conteudo\">\n      <div class=\"sectionTitle\">Conteúdo</div>\n      <div class=\"help\">◉ Deves selecionar pelo menos um conteúdo a instalar. Cada conteúdo selecionado cria uma aba própria para configuração.</div>\n\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-feature-toggle=\"destaques\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/destaques-poster.png\" alt=\"Destaques\"></span>\n          <span class=\"title\">Destaques</span><span class=\"sub\">Estreias • Novidades • Populares</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"streamers\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/streamers-logo.png\" alt=\"Streamers\"></span>\n          <span class=\"title\">Streamers</span><span class=\"sub\">Netflix • HBO Max • Prime • Disney+</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"portugues\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/conteudoportugues-poster.png\" alt=\"Conteúdo Português\"></span>\n          <span class=\"title\">Português</span><span class=\"sub\">Produções nacionais • PT-PT</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"adultos\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/adultos-poster.png\" alt=\"Adultos\"></span>\n          <span class=\"title\">Adultos</span><span class=\"sub\">Conteúdo +18</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"iptv\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/iptv-poster.png\" alt=\"IPTV\"></span>\n          <span class=\"title\">IPTV</span><span class=\"sub\">M3U • Xtream • IPTV-org</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"operadores\">\n          <span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/operators-logo.png\" alt=\"Operadores PT\"></span>\n          <span class=\"title\">Operadores PT</span><span class=\"sub\">MEO • NOS • Vodafone • DIGI</span>\n        </button>\n        <button class=\"choice\" data-feature-toggle=\"externas\">\n          <span class=\"choiceLogo textLogo\">↗</span>\n          <span class=\"title\">Fontes Externas</span><span class=\"sub\">Addons compatíveis</span>\n        </button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"destaques\">\n      <div class=\"sectionTitle\">Destaques</div>\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-config-choice=\"destaques-filmes\"><span class=\"choiceLogo textLogo\">🎬</span><span class=\"title\">Filmes</span><span class=\"sub\">Estreias • Novos • Populares</span></button>\n        <button class=\"choice\" data-config-choice=\"destaques-series\"><span class=\"choiceLogo textLogo\">📺</span><span class=\"title\">Séries</span><span class=\"sub\">Novas • Populares • Destaques</span></button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"streamers\">\n      <div class=\"sectionTitle\">Streamers</div>\n      <div class=\"help\">◉ Seleciona os serviços a incluir. Rebordo branco = não selecionado. Rebordo dourado = selecionado.</div>\n\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-streamer=\"netflix\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/netflix-poster.png\" alt=\"\"></span><span class=\"title\">Netflix</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"hbomax\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/hbomax-poster.png\" alt=\"\"></span><span class=\"title\">HBO Max</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"prime\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/primevideo-poster.png\" alt=\"\"></span><span class=\"title\">Prime Video</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"disney\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/disneyplus-poster.png\" alt=\"\"></span><span class=\"title\">Disney+</span><span class=\"sub\">Filmes e Séries</span></button>\n        <button class=\"choice\" data-streamer=\"apple\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/appletv-poster.png\" alt=\"\"></span><span class=\"title\">Apple TV</span><span class=\"sub\">Filmes e Séries</span></button>\n      </div>\n\n      <label class=\"field\">País do catálogo</label>\n      <select id=\"catalogCountryPreview\">\n        <option value=\"\" selected>Selecionar país…</option>\n        <option value=\"PT\">Portugal (PT)</option>\n        <option value=\"ES\">Espanha (ES)</option>\n        <option value=\"FR\">França (FR)</option>\n        <option value=\"GB\">Reino Unido (GB)</option>\n        <option value=\"US\">Estados Unidos (US)</option>\n        <option value=\"BR\">Brasil (BR)</option>\n      </select>\n    </section>\n\n    <section class=\"panel\" id=\"portugues\">\n      <div class=\"sectionTitle\">Português</div>\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-config-choice=\"ptpt\"><span class=\"choiceLogo textLogo logoPtpt\">PT•PT</span><span class=\"title\">PT-PT</span><span class=\"sub\">Conteúdo falado/dobrado em PT-PT</span></button>\n        <button class=\"choice\" data-config-choice=\"producao-portuguesa\"><span class=\"choiceLogo logoPortuguese\">\n<svg viewBox=\"0 0 100 100\" aria-hidden=\"true\"><path d=\"M50 84C29 68 17 51 20 35c3-15 20-20 30-7 10-13 27-8 30 7 3 16-9 33-30 49Z\" fill=\"none\" stroke=\"#f0c24c\" stroke-width=\"6\"/><path d=\"M47 40l19 11-19 11Z\" fill=\"#f0c24c\"/></svg>\n</span><span class=\"title\">Produções Portuguesas</span><span class=\"sub\">Filmes • Séries • Novelas</span></button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"iptv\">\n      <div class=\"sectionTitle\">IPTV</div>\n      <div class=\"help\">\n        ◉ Seleciona a fonte IPTV que queres utilizar. A configuração apresentada muda automaticamente de acordo com a fonte escolhida.\n      </div>\n\n      <div class=\"iptvTabs\">\n        <div class=\"iptvTab active\" data-iptv=\"org\" data-iptv-method=\"org\">\n          <span class=\"t\">IPTV-org <span class=\"freeBadge\">FREE</span></span>\n          <span class=\"s\">Canais públicos</span>\n        </div>\n        <div class=\"iptvTab\" data-iptv=\"xtream\" data-iptv-method=\"xtream\">\n          <span class=\"t\">Xtream API</span>\n          <span class=\"s\">Painel / API</span>\n        </div>\n        <div class=\"iptvTab\" data-iptv=\"m3u\" data-iptv-method=\"m3u\">\n          <span class=\"t\">M3U / M3U+</span>\n          <span class=\"s\">Playlist URL / ficheiro</span>\n        </div>\n      </div>\n\n      <!-- IPTV-ORG -->\n      <div class=\"iptvPane active\" id=\"iptv-org\">\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Filtro de canais</strong>\n            <span>IPTV-org</span>\n          </div>\n\n          <p class=\"hint\" style=\"margin:0 0 12px\">\n            Utiliza a base de dados IPTV-org com milhares de canais gratuitos de todo o mundo. Não são necessárias credenciais.\n          </p>\n\n          <label class=\"field\">País</label>\n          <input id=\"iptvOrgCountryPreview\" type=\"text\" placeholder=\"Ex.: PT\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para incluir todos os países.</div>\n\n          <label class=\"field\">Categoria</label>\n          <input id=\"iptvOrgCategoryPreview\" type=\"text\" placeholder=\"Ex.: news, sports, movies\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para incluir todas as categorias.</div>\n\n          <label class=\"field\">Nome do catálogo</label>\n          <input id=\"iptvOrgCatalogPreview\" type=\"text\" placeholder=\"IPTV-org Free\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para utilizar o nome predefinido.</div>\n        </div>\n      </div>\n\n      <!-- XTREAM -->\n      <div class=\"iptvPane\" id=\"iptv-xtream\">\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Credenciais</strong>\n            <span>Xtream API</span>\n          </div>\n\n          <label class=\"field\">URL base *</label>\n          <input id=\"xtreamServerPreview\" type=\"url\" placeholder=\"https://servidor.com:8080\">\n          <div class=\"hint\" style=\"margin-top:6px\">Não incluir uma barra final.</div>\n\n          <div class=\"columns\">\n            <div>\n              <label class=\"field\">Utilizador *</label>\n              <input id=\"xtreamUserPreview\" type=\"text\" placeholder=\"Utilizador\">\n            </div>\n            <div>\n              <label class=\"field\">Palavra-passe *</label>\n              <input id=\"xtreamPassPreview\" type=\"password\" placeholder=\"Palavra-passe\">\n            </div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Mostrar</strong>\n            <span>Conteúdo Xtream</span>\n          </div>\n          <div class=\"choiceGrid\">\n            <button class=\"choice\" id=\"xtreamLivePreview\">\n              <span class=\"title\">TV em Direto</span>\n              <span class=\"sub\">Canais Live TV</span>\n            </button>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Opções EPG</strong>\n            <span>Guia de programação</span>\n          </div>\n\n          <label class=\"switchRow\">\n            <input type=\"checkbox\" id=\"xtreamEpgEnabledPreview\">\n            <strong>Ativar EPG</strong>\n          </label>\n\n          <div id=\"xtreamEpgOptionsPreview\" class=\"conditional\">\n            <label class=\"field\">Origem do EPG</label>\n\n            <div class=\"radioRow\">\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"xtreamEpgSourcePreview\" value=\"panel\">\n                <span>XMLTV do painel / provider</span>\n              </label>\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"xtreamEpgSourcePreview\" value=\"url\">\n                <span>URL EPG personalizada</span>\n              </label>\n            </div>\n\n            <div id=\"xtreamCustomEpgUrlPreview\" style=\"display:none\">\n              <label class=\"field\">URL do EPG</label>\n              <input id=\"xtreamEpgUrlFieldPreview\" type=\"url\" placeholder=\"https://exemplo.com/epg.xml\">\n            </div>\n\n            <label class=\"switchRow\" style=\"margin-top:14px\">\n              <input type=\"checkbox\">\n              <span><strong>Reformatar logos</strong> <span class=\"hint\">(pode tornar o carregamento mais lento)</span></span>\n            </label>\n\n            <div class=\"hint\" style=\"margin-top:8px\">\n              O desvio horário do EPG será tratado automaticamente pelo PT•HUB através de uma definição genérica.\n            </div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Apresentação</strong>\n            <span>Stremio / Nuvio</span>\n          </div>\n          <label class=\"field\">Nome do catálogo</label>\n          <input id=\"xtreamCatalogPreview\" type=\"text\" placeholder=\"Xtream API\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para utilizar o nome predefinido.</div>\n        </div>\n      </div>\n\n      <!-- M3U / M3U+ -->\n      <div class=\"iptvPane\" id=\"iptv-m3u\">\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Playlist</strong>\n            <span>M3U / M3U+</span>\n          </div>\n\n          <p class=\"hint\" style=\"margin:0 0 12px\">\n            Aceita playlists M3U/M3U+ normais e links Xtream Codes com <code>type=m3u_plus</code>. O URL de cada canal é extraído individualmente.\n          </p>\n\n          <div class=\"choiceGrid\" style=\"grid-template-columns:repeat(2,minmax(160px,1fr))\">\n            <button class=\"choice m3uSourcePreview active\" data-source=\"url\">\n              <span class=\"title\">Playlist por URL</span>\n              <span class=\"sub\">M3U / M3U+</span>\n            </button>\n            <button class=\"choice m3uSourcePreview\" data-source=\"file\">\n              <span class=\"title\">Ficheiro M3U / M3U8</span>\n              <span class=\"sub\">Upload local</span>\n            </button>\n          </div>\n\n          <div id=\"m3uUrlPreview\">\n            <label class=\"field\">URL da playlist *</label>\n            <input id=\"m3uUrlFieldPreview\" type=\"url\" placeholder=\"https://exemplo.com/lista.m3u\">\n          </div>\n\n          <div id=\"m3uFilePreview\" style=\"display:none\">\n            <label class=\"field\">Ficheiro M3U / M3U8 *</label>\n            <input id=\"m3uFileFieldPreview\" type=\"file\" accept=\".m3u,.m3u8,audio/x-mpegurl,application/x-mpegURL\">\n            <div class=\"hint\" style=\"margin-top:6px\">Seleciona um ficheiro M3U ou M3U8 do teu computador.</div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Playlists públicas</strong>\n            <span>Links de terceiros</span>\n          </div>\n          <p class=\"hint\" style=\"margin:0 0 10px\">Links públicos não afiliados nem endossados pelo PT•HUB.</p>\n\n          <div class=\"choiceGrid\" style=\"grid-template-columns:repeat(auto-fit,minmax(135px,1fr))\">\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 1</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 2</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 3</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 4</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 5</span><span class=\"sub\">Public Link</span></button>\n            <button class=\"choice\"><span class=\"title\">CANAIS BR 6</span><span class=\"sub\">Public Link</span></button>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Opções EPG</strong>\n            <span>Guia de programação</span>\n          </div>\n\n          <label class=\"switchRow\">\n            <input type=\"checkbox\" id=\"m3uEpgEnabledPreview\">\n            <strong>Ativar EPG</strong>\n          </label>\n\n          <div id=\"m3uEpgOptionsPreview\" class=\"conditional\">\n            <div class=\"radioRow\">\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"m3uEpgSourcePreview\" value=\"playlist\">\n                <span>EPG da playlist / provider</span>\n              </label>\n              <label class=\"radioOpt\">\n                <input type=\"radio\" name=\"m3uEpgSourcePreview\" value=\"url\">\n                <span>URL EPG personalizada</span>\n              </label>\n            </div>\n\n            <div id=\"m3uCustomEpgUrlPreview\" style=\"display:none\">\n              <label class=\"field\">URL do EPG</label>\n              <input id=\"m3uEpgUrlFieldPreview\" type=\"url\" placeholder=\"https://exemplo.com/epg.xml\">\n            </div>\n\n            <label class=\"switchRow\" style=\"margin-top:14px\">\n              <input type=\"checkbox\">\n              <span><strong>Reformatar logos</strong> <span class=\"hint\">(pode tornar o carregamento mais lento)</span></span>\n            </label>\n\n            <div class=\"hint\" style=\"margin-top:8px\">\n              O desvio horário do EPG será tratado automaticamente pelo PT•HUB através de uma definição genérica.\n            </div>\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Avançado</strong>\n            <span>User-Agent global</span>\n          </div>\n\n          <label class=\"field\">User-Agent global</label>\n          <input id=\"uaPreview\" type=\"text\" placeholder=\"Deixa em branco salvo se o teu provider exigir um player específico\">\n\n          <div class=\"choiceGrid\" style=\"grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-top:10px\">\n            <button class=\"choice uaChoice\" data-ua=\"\">\n              <span class=\"title\">Sem preset</span><span class=\"sub\">Predefinido</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"TiviMate\">\n              <span class=\"title\">TiviMate</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"IPTV Smarters Pro\">\n              <span class=\"title\">IPTV Smarters Pro</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"GSE Smart IPTV\">\n              <span class=\"title\">GSE Smart IPTV</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"VLC\">\n              <span class=\"title\">VLC</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"Kodi\">\n              <span class=\"title\">Kodi</span><span class=\"sub\">User-Agent</span>\n            </button>\n            <button class=\"choice uaChoice\" data-ua=\"CUSTOM\">\n              <span class=\"title\">Personalizado…</span><span class=\"sub\">Manual</span>\n            </button>\n          </div>\n\n          <div class=\"hint\" style=\"margin-top:8px\">\n            Canais que tenham o seu próprio User-Agent na playlist têm prioridade sobre esta definição.\n          </div>\n        </div>\n\n        <div class=\"providerBox\">\n          <div class=\"providerHead\">\n            <strong>Apresentação</strong>\n            <span>Stremio / Nuvio</span>\n          </div>\n\n          <label class=\"field\">Nome do catálogo</label>\n          <input id=\"m3uCatalogPreview\" type=\"text\" placeholder=\"Minha IPTV\">\n          <div class=\"hint\" style=\"margin-top:6px\">Deixa em branco para utilizar o nome predefinido.</div>\n        </div>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"operadores\">\n      <div class=\"sectionTitle\">Operadores PT</div>\n      <div class=\"choiceGrid\">\n        <button class=\"choice\" data-operator=\"meo\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/meo-poster.png\" alt=\"MEO\"></span><span class=\"title\">MEO</span><span class=\"sub\">Operador PT</span></button>\n        <button class=\"choice\" data-operator=\"nos\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/nos-poster.png\" alt=\"NOS\"></span><span class=\"title\">NOS</span><span class=\"sub\">Operador PT</span></button>\n        <button class=\"choice\" data-operator=\"vodafone\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/vodafone-poster.png\" alt=\"Vodafone\"></span><span class=\"title\">Vodafone</span><span class=\"sub\">Operador PT</span></button>\n        <button class=\"choice\" data-operator=\"digi\"><span class=\"choiceLogo\"><img src=\"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/digi-poster.png\" alt=\"DIGI\"></span><span class=\"title\">DIGI</span><span class=\"sub\">Operador PT</span></button>\n      </div>\n    </section>\n\n    <section class=\"panel\" id=\"externas\">\n      <div class=\"sectionTitle\">Fontes Externas — Extras</div>\n      <div class=\"help\">O PT•HUB já inclui fontes automáticas. Usa esta área apenas para adicionar addons extra.</div>\n      <label class=\"field\">Manifests / Addons adicionais</label>\n      <textarea id=\"externalSourcesPreview\" rows=\"4\" placeholder=\"Um URL de manifest por linha\"></textarea>\n      <label class=\"field\">Máximo de resultados por qualidade</label>\n      <input id=\"externalMaxPreview\" type=\"number\" min=\"1\" max=\"10\" value=\"2\">\n    </section>\n\n    <div class=\"actions\">\n      <button class=\"btn secondary hidden\" id=\"testBtn\">Testar ligação</button>\n      <button class=\"btn primary\" id=\"installBtn\">Instalar PT•HUB →</button>\n    </div>\n    <div id=\"statusBox\" class=\"statusBox\"></div>\n    <div id=\"installResult\" class=\"providerBox\" style=\"display:none;margin-top:14px\">\n      <div class=\"providerHead\"><strong>URL do Add-on</strong><span>PT•HUB</span></div>\n      <input id=\"installUrlPreview\" type=\"text\" readonly>\n      <div class=\"actions\" style=\"margin-top:10px\">\n        <button class=\"btn secondary\" id=\"copyInstallPreview\" type=\"button\">Copiar URL</button>\n        <button class=\"btn primary\" id=\"installStremioPreview\" type=\"button\">Instalar no Stremio →</button>\n        <button class=\"btn secondary\" id=\"installNuvioPreview\" type=\"button\">Instalar no Nuvio →</button>\n      </div>\n    </div>\n  </main>\n\n  <aside class=\"card about\">\n    <h3>Sobre</h3>\n\n    <p>\n      O <span class=\"brandline\">PT•HUB</span> reúne num único addon televisão, IPTV,\n      filmes, séries, conteúdos portugueses, streamers, operadores nacionais,\n      OpenSubtitles, fontes integradas e fontes externas opcionais.\n    </p>\n\n    <div id=\"aboutBase\">\n      <p><span class=\"arrow\">→</span> Seleciona um ou mais conteúdos na aba <strong>Conteúdo</strong>. À medida que ativares cada área, a respetiva informação será apresentada aqui.</p>\n    </div>\n\n    <div id=\"aboutDynamic\"></div>\n\n    <div class=\"box\">\n      <strong>Legendas</strong>\n      <p style=\"margin-bottom:0\">\n        O PT•HUB já incorpora o OpenSubtitles para escolha de legendas.\n      </p>\n    </div>\n\n    <div class=\"box\">\n      <strong>Português de Portugal</strong>\n      <p style=\"margin-bottom:0\">\n        A interface, os nomes dos catálogos e os metadados textuais são apresentados em PT-PT sempre que exista localização disponível.\n      </p>\n    </div>\n\n    <div class=\"aboutActions\">\n      <a class=\"aboutAction donate\" href=\"https://revolut.me/filipem1pw?currency=EUR&amount=100&note=Thanks%20friend\" target=\"_blank\" rel=\"noopener noreferrer\">\n        <span class=\"aboutActionIcon\">♡</span>\n        <span>Doar</span>\n      </a>\n\n      <button class=\"aboutAction suggest\" id=\"openSuggestionPreview\" type=\"button\">\n        <span class=\"aboutActionIcon\">✦</span>\n        <span>Sugestões</span>\n      </button>\n    </div>\n  </aside>\n</div>\n\n<script>\nconst PT_HUB_SUGGESTIONS_URL=\"https://github.com/filipempribeiro-sys/PT---TV---Filme-e-Series/issues/new\";\n\nfunction openSuggestionModal(){\n  const modal=document.getElementById(\"suggestionModalPreview\");\n  if(!modal)return;\n  modal.classList.add(\"open\");\n  modal.setAttribute(\"aria-hidden\",\"false\");\n  setTimeout(()=>document.getElementById(\"suggestionTextPreview\")?.focus(),30);\n}\n\nfunction closeSuggestionModal(){\n  const modal=document.getElementById(\"suggestionModalPreview\");\n  if(!modal)return;\n  modal.classList.remove(\"open\");\n  modal.setAttribute(\"aria-hidden\",\"true\");\n}\n\ndocument.getElementById(\"openSuggestionPreview\")?.addEventListener(\"click\",openSuggestionModal);\ndocument.querySelectorAll(\"[data-close-suggestion]\").forEach(el=>el.addEventListener(\"click\",closeSuggestionModal));\ndocument.addEventListener(\"keydown\",event=>{if(event.key===\"Escape\")closeSuggestionModal();});\n\nconst suggestionTextPreview=document.getElementById(\"suggestionTextPreview\");\nsuggestionTextPreview?.addEventListener(\"input\",()=>{\n  const counter=document.getElementById(\"suggestionCounterPreview\");\n  if(counter)counter.textContent=`${suggestionTextPreview.value.length} / 3000`;\n});\n\ndocument.getElementById(\"submitSuggestionPreview\")?.addEventListener(\"click\",()=>{\n  const type=document.getElementById(\"suggestionTypePreview\")?.value||\"Melhoria\";\n  const name=(document.getElementById(\"suggestionNamePreview\")?.value||\"\").trim();\n  const suggestion=(document.getElementById(\"suggestionTextPreview\")?.value||\"\").trim();\n  const status=document.getElementById(\"suggestionStatusPreview\");\n\n  if(!suggestion){\n    if(status){\n      status.textContent=\"Escreve a tua sugestão antes de enviar.\";\n      status.className=\"statusBox show error\";\n    }\n    return;\n  }\n\n  const title=`[PT•HUB] ${type}`;\n  const body=[\n    \"## Sugestão\",\n    suggestion,\n    \"\",\n    `**Tipo:** ${type}`,\n    `**Nome:** ${name||\"Anónimo\"}`,\n    `**Versão:** PT•HUB 3.0.0`,\n    \"\",\n    \"_Enviado através da página de configuração do PT•HUB._\"\n  ].join(\"\\n\");\n\n  const url=PT_HUB_SUGGESTIONS_URL+\"?title=\"+encodeURIComponent(title)+\"&body=\"+encodeURIComponent(body);\n\n  if(status){\n    status.textContent=\"A abrir o GitHub com a sugestão preenchida…\";\n    status.className=\"statusBox show ok\";\n  }\n\n  window.open(url,\"_blank\",\"noopener,noreferrer\");\n});\n\nconst tabs=[...document.querySelectorAll(\".tab\")];\nconst panels=[...document.querySelectorAll(\".panel\")];\n\nfunction activatePanel(name){\n  tabs.forEach(t=>t.classList.toggle(\"active\",t.dataset.panel===name));\n  panels.forEach(p=>p.classList.toggle(\"active\",p.id===name));\n}\ntabs.forEach(tab=>tab.addEventListener(\"click\",()=>{\n  if(!tab.classList.contains(\"hidden\")) activatePanel(tab.dataset.panel);\n}));\n\nconst aboutDescriptions = {\n  destaques: '<p><span class=\"arrow\">→</span> <strong>Destaques</strong> — estreias no cinema, novos filmes, novas séries, populares e conteúdos em destaque.</p>',\n  streamers: '<p><span class=\"arrow\">→</span> <strong>Streamers</strong> — escolhe os serviços pretendidos e o país do catálogo.</p>',\n  portugues: '<p><span class=\"arrow\">→</span> <strong>Português</strong> — conteúdos em PT-PT e produções portuguesas permanecem em áreas distintas.</p>',\n  adultos: '<p><span class=\"arrow\">→</span> <strong>Adultos</strong> — área opcional com fontes predefinidas, ativada apenas quando selecionada.</p>',\n  iptv: '<p><span class=\"arrow\">→</span> <strong>IPTV</strong> — IPTV-org, Xtream API ou M3U/M3U+, configurados apenas depois de escolheres o método.</p>',\n  operadores: '<p><span class=\"arrow\">→</span> <strong>Operadores PT</strong> — seleciona apenas os operadores nacionais que pretendes incluir.</p>',\n  externas: '<p><span class=\"arrow\">→</span> <strong>Fontes Externas</strong> — adiciona addons compatíveis para agregação de streams.</p>'\n};\n\nfunction updateAbout(){\n  const selected = [...document.querySelectorAll(\"[data-feature-toggle].active\")]\n    .map(btn => btn.dataset.featureToggle);\n\n  const base = document.getElementById(\"aboutBase\");\n  const dynamic = document.getElementById(\"aboutDynamic\");\n\n  if(base) base.style.display = selected.length ? \"none\" : \"block\";\n  if(dynamic){\n    dynamic.innerHTML = selected\n      .map(feature => aboutDescriptions[feature] || \"\")\n      .join(\"\");\n  }\n}\n\ndocument.querySelectorAll(\"[data-feature-toggle]\").forEach(btn=>{\n  const feature=btn.dataset.featureToggle;\n\n  const sync=()=>{\n    const on=btn.classList.contains(\"active\");\n    const tab=document.querySelector(`.tab[data-feature=\"${feature}\"]`);\n    if(tab) tab.classList.toggle(\"hidden\",!on);\n\n    if(feature===\"iptv\" && !on){\n      document.getElementById(\"testBtn\")?.classList.add(\"hidden\");\n    }\n\n    const panel=document.getElementById(feature);\n    if(panel && !on && panel.classList.contains(\"active\")){\n      activatePanel(\"conteudo\");\n    }\n\n    updateAbout();\n\ndocument.querySelectorAll(\".tab\").forEach(tab=>{\n  tab.addEventListener(\"click\",()=>{\n    const iptvSelected =\n      document.querySelector('[data-feature-toggle=\"iptv\"]')?.classList.contains(\"active\");\n    document.getElementById(\"testBtn\")?.classList.toggle(\n      \"hidden\",\n      !(tab.dataset.panel === \"iptv\" && iptvSelected)\n    );\n  });\n});\n\n  };\n\n  sync();\n\n  btn.addEventListener(\"click\",()=>{\n    btn.classList.toggle(\"active\");\n    sync();\n  });\n});\n\nupdateAbout();\n\ndocument.querySelectorAll(\".choice:not([data-feature-toggle])\").forEach(btn=>{\n  btn.addEventListener(\"click\",()=>btn.classList.toggle(\"active\"));\n});\n\ndocument.querySelectorAll(\".iptvTab\").forEach(tab=>{\n  tab.addEventListener(\"click\",()=>{\n    document.querySelectorAll(\".iptvTab\").forEach(t=>t.classList.remove(\"active\"));\n    document.querySelectorAll(\".iptvPane\").forEach(p=>p.classList.remove(\"active\"));\n    tab.classList.add(\"active\");\n    document.getElementById(\"iptv-\"+tab.dataset.iptv).classList.add(\"active\");\n\n    if(tab.dataset.iptv===\"m3u\"){\n      const selected=document.querySelector(\".m3uSourcePreview.active\");\n      if(!selected){\n        const urlBtn=document.querySelector('.m3uSourcePreview[data-source=\"url\"]');\n        urlBtn?.classList.add(\"active\");\n        document.getElementById(\"m3uUrlPreview\").style.display=\"block\";\n        document.getElementById(\"m3uFilePreview\").style.display=\"none\";\n      }\n    }\n  });\n});\n\ndocument.querySelectorAll(\".m3uSourcePreview\").forEach(btn=>{\n  btn.addEventListener(\"click\",()=>{\n    document.querySelectorAll(\".m3uSourcePreview\").forEach(b=>b.classList.remove(\"active\"));\n    btn.classList.add(\"active\");\n    const isFile=btn.dataset.source===\"file\";\n    document.getElementById(\"m3uUrlPreview\").style.display=isFile?\"none\":\"block\";\n    document.getElementById(\"m3uFilePreview\").style.display=isFile?\"block\":\"none\";\n  });\n});\n\n\nfunction bindEpgToggle(enabledId, optionsId, radioName, customUrlId){\n  const enabled=document.getElementById(enabledId);\n  const options=document.getElementById(optionsId);\n  const custom=document.getElementById(customUrlId);\n\n  const syncEnabled=()=>{\n    options?.classList.toggle(\"show\", !!enabled?.checked);\n  };\n\n  enabled?.addEventListener(\"change\",syncEnabled);\n  syncEnabled();\n\n  document.querySelectorAll(`input[name=\"${radioName}\"]`).forEach(radio=>{\n    radio.addEventListener(\"change\",()=>{\n      const value=document.querySelector(`input[name=\"${radioName}\"]:checked`)?.value || \"\";\n      if(custom) custom.style.display=value===\"url\"?\"block\":\"none\";\n    });\n  });\n}\n\nbindEpgToggle(\n  \"xtreamEpgEnabledPreview\",\n  \"xtreamEpgOptionsPreview\",\n  \"xtreamEpgSourcePreview\",\n  \"xtreamCustomEpgUrlPreview\"\n);\n\nbindEpgToggle(\n  \"m3uEpgEnabledPreview\",\n  \"m3uEpgOptionsPreview\",\n  \"m3uEpgSourcePreview\",\n  \"m3uCustomEpgUrlPreview\"\n);\n\ndocument.querySelectorAll(\".uaChoice\").forEach(btn=>{\n  btn.addEventListener(\"click\",()=>{\n    document.querySelectorAll(\".uaChoice\").forEach(b=>b.classList.remove(\"active\"));\n    btn.classList.add(\"active\");\n    const ua=document.getElementById(\"uaPreview\");\n    if(btn.dataset.ua===\"CUSTOM\"){\n      ua.value=\"\";\n      ua.focus();\n    }else{\n      ua.value=btn.dataset.ua||\"\";\n    }\n  });\n});\n\n\nconst installBtn=document.getElementById(\"installBtn\");\nconst testBtn=document.getElementById(\"testBtn\");\nconst statusBox=document.getElementById(\"statusBox\");\nconst initialConfig=__INITIAL_CONFIG__;\n\nfunction showStatus(message,type=\"error\"){\n  if(!statusBox)return;\n  statusBox.textContent=message;\n  statusBox.className=\"statusBox show \"+type;\n}\nfunction clearStatus(){\n  if(!statusBox)return;\n  statusBox.textContent=\"\";\n  statusBox.className=\"statusBox\";\n}\nfunction active(selector){return !!document.querySelector(selector+\".active\");}\nfunction activeValues(selector,attr){\n  return [...document.querySelectorAll(selector+\".active\")].map(el=>el.dataset[attr]).filter(Boolean);\n}\nfunction lines(value){\n  return String(value||\"\").split(/\\r?\\n/).map(v=>v.trim()).filter(Boolean);\n}\nfunction b64urlUtf8(text){\n  const bytes=new TextEncoder().encode(text);\n  let binary=\"\";\n  bytes.forEach(b=>binary+=String.fromCharCode(b));\n  return btoa(binary).replace(/\\+/g,\"-\").replace(/\\//g,\"_\").replace(/=+$/,\"\");\n}\nfunction selectedIptvMode(){\n  const mode=document.querySelector(\".iptvTab.active\")?.dataset.iptv;\n  return mode===\"org\"?\"iptv-org\":(mode||\"iptv-org\");\n}\nfunction getRealConfig(){\n  const selectedFeatures=activeValues(\"[data-feature-toggle]\",\"featureToggle\");\n  const streamers=activeValues(\"#streamers [data-streamer]\",\"streamer\");\n  const streamerMap={\n    netflix:\"netflix\",\n    hbomax:\"hbomax\",\n    prime:\"prime-video\",\n    disney:\"disney-plus\",\n    apple:\"apple-tv-plus\"\n  };\n  const streamerIds=streamers.map(v=>streamerMap[v]).filter(Boolean);\n  const ptPt=active('#portugues [data-config-choice=\"ptpt\"]');\n  const portuguese=active('#portugues [data-config-choice=\"producao-portuguesa\"]');\n  const epgXtreamEnabled=document.getElementById(\"xtreamEpgEnabledPreview\")?.checked===true;\n  const epgXtreamSource=document.querySelector('input[name=\"xtreamEpgSourcePreview\"]:checked')?.value||\"\";\n  const epgM3uEnabled=document.getElementById(\"m3uEpgEnabledPreview\")?.checked===true;\n  const epgM3uSource=document.querySelector('input[name=\"m3uEpgSourcePreview\"]:checked')?.value||\"\";\n  const m3uSource=document.querySelector(\".m3uSourcePreview.active\")?.dataset.source||\"\";\n  const mode=selectedIptvMode();\n\n  return {\n    catalogCountry:(document.getElementById(\"catalogCountryPreview\")?.value||\"\").trim().toUpperCase(),\n    features:{\n      featured:selectedFeatures.includes(\"destaques\"),\n      featuredContent:{\n        movies:active('#destaques [data-config-choice=\"destaques-filmes\"]'),\n        series:active('#destaques [data-config-choice=\"destaques-series\"]')\n      },\n      streamers:selectedFeatures.includes(\"streamers\"),\n      selectedStreamerMovies:streamerIds,\n      selectedStreamerSeries:streamerIds,\n      operators:selectedFeatures.includes(\"operadores\"),\n      selectedOperators:activeValues(\"#operadores [data-operator]\",\"operator\"),\n      iptv:selectedFeatures.includes(\"iptv\"),\n      ptContent:selectedFeatures.includes(\"portugues\"),\n      ptContentSources:{\n        ptPt,\n        portugueseProduction:portuguese,\n        rtpPlay:false\n      },\n      adultContent:selectedFeatures.includes(\"adultos\"),\n      subtitles:true,\n      externalSources:selectedFeatures.includes(\"externas\")\n    },\n    ptContentSelectedSources:{\n      ptpt:ptPt?[\"cotonet\"]:[],\n      portuguese:portuguese?[\"portuguese-productions\"]:[]\n    },\n    ptContentExternalSources:{ptpt:[],portuguese:[]},\n    externalStreamSources:selectedFeatures.includes(\"externas\")\n      ?lines(document.getElementById(\"externalSourcesPreview\")?.value):[],\n    externalStreamMaxPerQuality:Number(document.getElementById(\"externalMaxPreview\")?.value||2),\n    mode,\n    iptvOrg:{\n      country:(document.getElementById(\"iptvOrgCountryPreview\")?.value||\"\").trim(),\n      category:(document.getElementById(\"iptvOrgCategoryPreview\")?.value||\"\").trim(),\n      catalogName:(document.getElementById(\"iptvOrgCatalogPreview\")?.value||\"\").trim()\n    },\n    xtreamServer:(document.getElementById(\"xtreamServerPreview\")?.value||\"\").trim(),\n    username:(document.getElementById(\"xtreamUserPreview\")?.value||\"\").trim(),\n    password:document.getElementById(\"xtreamPassPreview\")?.value||\"\",\n    xtreamShow:{live:active(\"#xtreamLivePreview\")},\n    xtreamEpgMode:epgXtreamEnabled?(epgXtreamSource===\"url\"?\"url\":\"auto\"):\"none\",\n    xtreamEpgOffset:0,\n    xtreamEpgUrl:(document.getElementById(\"xtreamEpgUrlFieldPreview\")?.value||\"\").trim(),\n    xtreamCatalogName:(document.getElementById(\"xtreamCatalogPreview\")?.value||\"\").trim(),\n    m3uSource:m3uSource||\"url\",\n    m3uUrl:(document.getElementById(\"m3uUrlFieldPreview\")?.value||\"\").trim(),\n    m3uFileId:window.__pthubM3uFileId||\"\",\n    m3uEpgMode:epgM3uEnabled?(epgM3uSource===\"url\"?\"url\":\"playlist\"):\"none\",\n    m3uEpgOffset:0,\n    epgUrl:(document.getElementById(\"m3uEpgUrlFieldPreview\")?.value||\"\").trim(),\n    globalUserAgent:(document.getElementById(\"uaPreview\")?.value||\"\").trim(),\n    m3uCatalogName:(document.getElementById(\"m3uCatalogPreview\")?.value||\"\").trim()\n  };\n}\nfunction validateRealConfig(config,forTest=false){\n  const f=config.features;\n  if(!(f.featured||f.streamers||f.operators||f.iptv||f.ptContent||f.adultContent||f.externalSources))\n    return \"Deves selecionar e configurar pelo menos um conteúdo a instalar.\";\n  if(f.featured&&!f.featuredContent.movies&&!f.featuredContent.series)\n    return \"Selecionaste Destaques, mas ainda não escolheste Filmes, Séries ou ambos.\";\n  if(f.streamers&&f.selectedStreamerMovies.length===0)\n    return \"Selecionaste Streamers, mas ainda não escolheste nenhum serviço.\";\n  if(f.streamers&&!config.catalogCountry)\n    return \"Selecionaste Streamers, mas ainda não escolheste o país do catálogo.\";\n  if(f.ptContent&&!f.ptContentSources.ptPt&&!f.ptContentSources.portugueseProduction)\n    return \"Selecionaste Português, mas ainda não escolheste PT-PT nem Produções Portuguesas.\";\n  if(f.operators&&f.selectedOperators.length===0)\n    return \"Selecionaste Operadores PT, mas ainda não escolheste nenhum operador.\";\n  if(f.externalSources&&config.externalStreamSources.length===0)\n    return \"Selecionaste Fontes Externas, mas ainda não adicionaste nenhum addon.\";\n  if(f.iptv){\n    if(config.mode===\"xtream\"){\n      if(!config.xtreamServer||!config.username||!config.password)\n        return \"Selecionaste Xtream API, mas faltam servidor, utilizador ou palavra-passe.\";\n      if(!config.xtreamShow.live)\n        return \"Selecionaste Xtream API, mas ainda não escolheste TV em Direto.\";\n      if(config.xtreamEpgMode===\"url\"&&!config.xtreamEpgUrl)\n        return \"Selecionaste URL EPG personalizada no Xtream, mas não indicaste o URL.\";\n    }\n    if(config.mode===\"m3u\"){\n      const source=document.querySelector(\".m3uSourcePreview.active\")?.dataset.source;\n      if(!source)return \"Selecionaste M3U / M3U+, mas ainda não escolheste URL ou ficheiro.\";\n      if(source===\"url\"&&!config.m3uUrl)return \"Selecionaste Playlist por URL, mas ainda não indicaste o URL M3U/M3U+.\";\n      if(source===\"file\"&&!config.m3uFileId)return \"Selecionaste Ficheiro M3U/M3U8, mas ainda não escolheste nenhum ficheiro.\";\n      if(config.m3uEpgMode===\"url\"&&!config.epgUrl)\n        return \"Selecionaste URL EPG personalizada no M3U, mas não indicaste o URL.\";\n    }\n  }\n  if(forTest&&!f.iptv)return \"O teste de ligação só está disponível na configuração IPTV.\";\n  return \"\";\n}\nfunction getInstallUrl(config){\n  const encoded=b64urlUtf8(JSON.stringify(config));\n  return location.origin+\"/\"+encoded+\"/manifest.json\";\n}\nasync function uploadM3UIfNeeded(config){\n  if(!config.features.iptv||config.mode!==\"m3u\")return;\n  const source=document.querySelector(\".m3uSourcePreview.active\")?.dataset.source;\n  const input=document.getElementById(\"m3uFileFieldPreview\");\n  if(source!==\"file\"||!input?.files?.length)return;\n  const text=await input.files[0].text();\n  const response=await fetch(\"/upload-m3u\",{method:\"POST\",headers:{\"Content-Type\":\"text/plain;charset=UTF-8\"},body:text});\n  if(!response.ok)throw new Error(\"Não foi possível enviar o ficheiro M3U.\");\n  const data=await response.json();\n  window.__pthubM3uFileId=data.id||data.fileId||data.m3uFileId||\"\";\n  if(!window.__pthubM3uFileId)throw new Error(\"O servidor não devolveu o identificador do ficheiro M3U.\");\n}\ninstallBtn?.addEventListener(\"click\",async event=>{\n  event.preventDefault();\n  clearStatus();\n  try{\n    let config=getRealConfig();\n    let error=validateRealConfig(config,false);\n    if(error){showStatus(error,\"error\");return;}\n    await uploadM3UIfNeeded(config);\n    config=getRealConfig();\n    error=validateRealConfig(config,false);\n    if(error){showStatus(error,\"error\");return;}\n    const url=getInstallUrl(config);\n    document.getElementById(\"installUrlPreview\").value=url;\n    document.getElementById(\"installResult\").style.display=\"block\";\n    showStatus(\"Configuração válida. Escolhe Instalar no Stremio ou Instalar no Nuvio.\",\"ok\");\n  }catch(error){showStatus(\"Erro: \"+error.message,\"error\");}\n});\ntestBtn?.addEventListener(\"click\",async event=>{\n  event.preventDefault();\n  clearStatus();\n  try{\n    let config=getRealConfig();\n    let error=validateRealConfig(config,true);\n    if(error){showStatus(error,\"error\");return;}\n    await uploadM3UIfNeeded(config);\n    config=getRealConfig();\n    const response=await fetch(\"/test-iptv\",{method:\"POST\",headers:{\"Content-Type\":\"application/json\"},body:JSON.stringify(config)});\n    const data=await response.json().catch(()=>({}));\n    if(!response.ok||data.success===false)throw new Error(data.message||data.error||\"Falha no teste de ligação.\");\n    showStatus(data.message||(\"Ligação validada\"+(data.channels?\" — \"+data.channels+\" canais encontrados.\":\".\")),\"ok\");\n  }catch(error){showStatus(\"Erro: \"+error.message,\"error\");}\n});\ndocument.getElementById(\"copyInstallPreview\")?.addEventListener(\"click\",async()=>{\n  const url=document.getElementById(\"installUrlPreview\")?.value;\n  if(url)await navigator.clipboard.writeText(url);\n});\nfunction toStremioInstallUrl(url){\n  return String(url||\"\").replace(/^https?:\\/\\//i,\"stremio://\");\n}\nfunction toNuvioInstallUrl(url){\n  return \"nuvio://install?manifest=\"+encodeURIComponent(String(url||\"\"));\n}\ndocument.getElementById(\"installStremioPreview\")?.addEventListener(\"click\",()=>{\n  const url=document.getElementById(\"installUrlPreview\")?.value;\n  if(url)window.location.href=toStremioInstallUrl(url);\n});\ndocument.getElementById(\"installNuvioPreview\")?.addEventListener(\"click\",()=>{\n  const url=document.getElementById(\"installUrlPreview\")?.value;\n  if(url)window.location.href=toNuvioInstallUrl(url);\n});\n\n/* Restauração simples quando se abre /:config/configure */\n(function restoreConfig(){\n  const c=initialConfig||{};\n  const f=c.features||{};\n  const activateFeature=(name,on)=>{\n    const b=document.querySelector('[data-feature-toggle=\"'+name+'\"]');\n    if(on&&!b?.classList.contains(\"active\"))b?.click();\n  };\n  activateFeature(\"destaques\",f.featured===true);\n  activateFeature(\"streamers\",f.streamers===true);\n  activateFeature(\"portugues\",f.ptContent===true);\n  activateFeature(\"adultos\",f.adultContent===true);\n  activateFeature(\"iptv\",f.iptv===true);\n  activateFeature(\"operadores\",f.operators===true);\n  activateFeature(\"externas\",f.externalSources===true);\n})();\n\n</script>\n\n<div class=\"suggestionModal\" id=\"suggestionModalPreview\" aria-hidden=\"true\">\n  <div class=\"suggestionBackdrop\" data-close-suggestion></div>\n\n  <div class=\"suggestionDialog\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"suggestionTitlePreview\">\n    <div class=\"suggestionHead\">\n      <div>\n        <div class=\"kicker\">PT•HUB</div>\n        <h3 id=\"suggestionTitlePreview\">Enviar sugestão</h3>\n      </div>\n\n      <button class=\"suggestionClose\" type=\"button\" data-close-suggestion aria-label=\"Fechar\">×</button>\n    </div>\n\n    <p class=\"hint\" style=\"margin-top:0\">\n      Partilha uma melhoria, nova funcionalidade ou problema. Ao submeter, será aberto um pedido no GitHub do PT•HUB já preenchido para confirmação.\n    </p>\n\n    <label class=\"field\">Tipo de sugestão</label>\n    <select id=\"suggestionTypePreview\">\n      <option value=\"Melhoria\">Melhoria</option>\n      <option value=\"Nova funcionalidade\">Nova funcionalidade</option>\n      <option value=\"Problema / Bug\">Problema / Bug</option>\n      <option value=\"Outro\">Outro</option>\n    </select>\n\n    <label class=\"field\">Nome <span class=\"hint\">(opcional)</span></label>\n    <input id=\"suggestionNamePreview\" type=\"text\" maxlength=\"80\" placeholder=\"O teu nome\">\n\n    <label class=\"field\">Sugestão *</label>\n    <textarea id=\"suggestionTextPreview\" rows=\"7\" maxlength=\"3000\" placeholder=\"Descreve a tua sugestão ou melhoria...\"></textarea>\n\n    <div class=\"suggestionCounter\" id=\"suggestionCounterPreview\">0 / 3000</div>\n\n    <div class=\"suggestionActions\">\n      <button class=\"btn secondary\" type=\"button\" data-close-suggestion>Cancelar</button>\n      <button class=\"btn primary\" id=\"submitSuggestionPreview\" type=\"button\">Enviar sugestão →</button>\n    </div>\n\n    <div class=\"statusBox\" id=\"suggestionStatusPreview\"></div>\n  </div>\n</div>\n\n</body>\n</html>"
     .replace("__PT_HUB_BACKGROUND__", `${PT_HUB_BACKGROUND}?v=${VERSION}`)
     .replace("__PT_HUB_LOGO__", `${PT_HUB_LOGO}?v=${VERSION}`)
     .replace("__INITIAL_CONFIG__", initialConfigJson);
@@ -3132,274 +3251,525 @@ return res.status(400).json({
 }
 
 });
+
+/* =========================================================
+   PT•HUB 3.0 — HOME / HUB NAVIGATION
+   =========================================================
+   Home = uma única linha PT•HUB.
+   Dentro dela aparecem até 6 cartões conforme a configuração:
+   Destaques, Streamers, Português, IPTV, Operadores PT, Adultos.
+   Os catálogos internos usam search obrigatório, ficando fora
+   da Home/Board e servindo apenas a navegação "Ver mais".
+   ========================================================= */
+
+const PT_HUB_HOME_CATALOG_ID = "pthub-home";
+const PT_HUB_META_PREFIX = "pthub:hub:";
+
+function getHubEnabledSections(config) {
+  const f = config?.features || {};
+
+  if (!config) {
+    return ["destaques", "streamers", "portugues", "iptv", "operadores", "adultos"];
+  }
+
+  const result = [];
+
+  if (f.featured === true) result.push("destaques");
+  if (f.streamers === true) result.push("streamers");
+  if (f.ptContent === true) result.push("portugues");
+  if (f.iptv === true) result.push("iptv");
+  if (f.operators === true) result.push("operadores");
+  if (f.adultContent === true) result.push("adultos");
+
+  return result;
+}
+
+function getHubSectionDefinition(section) {
+  return ({
+    destaques: {
+      name: "Destaques",
+      description: "Estreias no cinema, TOP 10, novos filmes, novas séries e conteúdos em alta.",
+      poster: PT_HUB_HOME_POSTERS.destaques
+    },
+    streamers: {
+      name: "Streamers",
+      description: "Netflix, HBO Max, Prime Video, Disney+ e Apple TV organizados por serviço.",
+      poster: PT_HUB_HOME_POSTERS.streamers
+    },
+    portugues: {
+      name: "Português",
+      description: "Filmes em PT-PT e produções portuguesas em áreas distintas.",
+      poster: PT_HUB_HOME_POSTERS.portugues
+    },
+    iptv: {
+      name: "IPTV",
+      description: "IPTV-org FREE, Xtream API ou M3U/M3U+.",
+      poster: PT_HUB_HOME_POSTERS.iptv
+    },
+    operadores: {
+      name: "Operadores PT",
+      description: "Operadores portugueses selecionados na configuração.",
+      poster: PT_HUB_HOME_POSTERS.operadores
+    },
+    adultos: {
+      name: "Adultos",
+      description: "Área adulta opcional com fontes predefinidas.",
+      poster: PT_HUB_HOME_POSTERS.adultos
+    }
+  })[section] || null;
+}
+
+function getHubHomeCatalog(config) {
+  return {
+    metas:
+      getHubEnabledSections(config)
+        .map((section) => {
+          const d = getHubSectionDefinition(section);
+
+          return d
+            ? {
+                id: `${PT_HUB_META_PREFIX}${section}`,
+                type: "series",
+                name: d.name,
+                poster: d.poster,
+                posterShape: "landscape",
+                background: `${PT_HUB_BACKGROUND}?v=${VERSION}`,
+                logo: `${PT_HUB_LOGO}?v=${VERSION}`,
+                description: d.description
+              }
+            : null;
+        })
+        .filter(Boolean)
+  };
+}
+
+function getHubManifestUrl(req) {
+  const protocol =
+    String(req.headers["x-forwarded-proto"] || req.protocol || "https")
+      .split(",")[0]
+      .trim();
+
+  return `${protocol}://${req.get("host")}/${req.params.config}/manifest.json`;
+}
+
+function makeHubCatalogDeepLink(req, type, catalogId) {
+  return (
+    `stremio:///discover/${encodeURIComponent(getHubManifestUrl(req))}/` +
+    `${encodeURIComponent(catalogId)}/${encodeURIComponent(type)}?search=all`
+  );
+}
+
+function makeHubLink(req, category, name, type, catalogId) {
+  return {
+    category,
+    name,
+    url: makeHubCatalogDeepLink(req, type, catalogId)
+  };
+}
+
+function makeHubVideo(section, key, title, index, category) {
+  return {
+    id: `pthubnav:${section}:${key}`,
+    title,
+    released: new Date().toISOString(),
+    season: 1,
+    episode: index + 1,
+    overview: category || "PT•HUB",
+    thumbnail: `${PT_HUB_BACKGROUND}?v=${VERSION}`
+  };
+}
+
+function getHubStreamerSelection(config) {
+  const source =
+    Array.isArray(config?.features?.selectedStreamerMovies)
+      ? config.features.selectedStreamerMovies
+      : Array.isArray(config?.features?.selectedStreamers)
+      ? config.features.selectedStreamers
+      : [];
+
+  const allowed =
+    new Set([
+      "netflix",
+      "hbomax",
+      "prime-video",
+      "disney-plus",
+      "apple-tv-plus"
+    ]);
+
+  return source.filter((id) => allowed.has(id));
+}
+
+function getHubStreamerLabel(id) {
+  return ({
+    netflix: "Netflix",
+    hbomax: "HBO Max",
+    "prime-video": "Prime Video",
+    "disney-plus": "Disney+",
+    "apple-tv-plus": "Apple TV"
+  })[id] || id;
+}
+
+function getHubAliasCatalogs(config) {
+  const hiddenExtra = [{ name: "search", isRequired: true }];
+  const result = [];
+
+  const add = (type, id, name) =>
+    result.push({
+      type,
+      id,
+      name,
+      extra: hiddenExtra
+    });
+
+  if (!config || config?.features?.featured === true) {
+    add("movie", "hub-destaques-cinema-movie", "Estreias no Cinema");
+    add("movie", "hub-destaques-top10-movie", "TOP 10 Filmes");
+    add("series", "hub-destaques-top10-series", "TOP 10 Séries");
+    add("movie", "hub-destaques-new-movie", "Novos Filmes");
+    add("series", "hub-destaques-new-series", "Novas Séries");
+    add("movie", "hub-destaques-featured-movie", "Em Alta • Filmes");
+    add("series", "hub-destaques-featured-series", "Em Alta • Séries");
+    add("movie", "hub-destaques-choices-movie", "As Minhas Escolhas • Filmes");
+    add("series", "hub-destaques-choices-series", "As Minhas Escolhas • Séries");
+  }
+
+  if (!config || config?.features?.streamers === true) {
+    const selected =
+      config
+        ? getHubStreamerSelection(config)
+        : ["netflix", "hbomax", "prime-video", "disney-plus", "apple-tv-plus"];
+
+    for (const streamerId of selected) {
+      const label = getHubStreamerLabel(streamerId);
+
+      add("movie", `hub-streamer-${streamerId}-new-movie`, `${label} • Novidades Filmes`);
+      add("series", `hub-streamer-${streamerId}-new-series`, `${label} • Novidades Séries`);
+      add("movie", `hub-streamer-${streamerId}-top10-movie`, `${label} • TOP 10 Filmes`);
+      add("series", `hub-streamer-${streamerId}-top10-series`, `${label} • TOP 10 Séries`);
+      add("movie", `hub-streamer-${streamerId}-choices-movie`, `${label} • As Minhas Escolhas`);
+      add("series", `hub-streamer-${streamerId}-choices-series`, `${label} • As Minhas Escolhas`);
+      add("movie", `hub-streamer-${streamerId}-all-movie`, `${label} • Filmes`);
+      add("series", `hub-streamer-${streamerId}-all-series`, `${label} • Séries`);
+    }
+  }
+
+  return result;
+}
+
+async function getHubAliasCatalog(config, type, id) {
+  const country = config?.catalogCountry;
+
+  if (id === "hub-destaques-cinema-movie" && type === "movie") {
+    return getDiscoveryCatalog("movie", "cinema", country);
+  }
+
+  if (id === "hub-destaques-top10-movie" && type === "movie") {
+    const data = await getDiscoveryCatalog("movie", "popular", country);
+    return { metas: (data.metas || []).slice(0, 10) };
+  }
+
+  if (id === "hub-destaques-top10-series" && type === "series") {
+    const data = await getDiscoveryCatalog("series", "popular", country);
+    return { metas: (data.metas || []).slice(0, 10) };
+  }
+
+  if (id === "hub-destaques-new-movie" && type === "movie") {
+    return getDiscoveryCatalog("movie", "new", country);
+  }
+
+  if (id === "hub-destaques-new-series" && type === "series") {
+    return getDiscoveryCatalog("series", "new", country);
+  }
+
+  if (id === "hub-destaques-featured-movie" && type === "movie") {
+    return getFeaturedCatalog("movie", country);
+  }
+
+  if (id === "hub-destaques-featured-series" && type === "series") {
+    return getFeaturedCatalog("series", country);
+  }
+
+  if (id === "hub-destaques-choices-movie" && type === "movie") {
+    const data = await getFeaturedCatalog("movie", country);
+    return { metas: (data.metas || []).slice(10, 50) };
+  }
+
+  if (id === "hub-destaques-choices-series" && type === "series") {
+    const data = await getFeaturedCatalog("series", country);
+    return { metas: (data.metas || []).slice(10, 50) };
+  }
+
+  const match =
+    id.match(
+      /^hub-streamer-(netflix|hbomax|prime-video|disney-plus|apple-tv-plus)-(new|top10|choices|all)-(movie|series)$/
+    );
+
+  if (!match) {
+    return null;
+  }
+
+  const [, streamerId, mode, itemType] = match;
+
+  if (itemType !== type) {
+    return { metas: [] };
+  }
+
+  return getStreamerDiscoveryCatalog(
+    type,
+    streamerId,
+    mode,
+    country
+  );
+}
+
+async function getHubSectionMeta(req, config, section) {
+  const d = getHubSectionDefinition(section);
+
+  if (!d) {
+    return null;
+  }
+
+  const links = [];
+  const videos = [];
+
+  const add = (category, name, type, catalogId, key) => {
+    links.push(
+      makeHubLink(req, category, name, type, catalogId)
+    );
+
+    videos.push(
+      makeHubVideo(
+        section,
+        key,
+        name,
+        videos.length,
+        category
+      )
+    );
+  };
+
+  if (section === "destaques") {
+    add("Destaques", "Estreias no Cinema", "movie", "hub-destaques-cinema-movie", "cinema");
+    add("Destaques", "TOP 10 Filmes", "movie", "hub-destaques-top10-movie", "top10-movie");
+    add("Destaques", "TOP 10 Séries", "series", "hub-destaques-top10-series", "top10-series");
+    add("Destaques", "Novos Filmes", "movie", "hub-destaques-new-movie", "new-movie");
+    add("Destaques", "Novas Séries", "series", "hub-destaques-new-series", "new-series");
+    add("Destaques", "Em Alta • Filmes", "movie", "hub-destaques-featured-movie", "featured-movie");
+    add("Destaques", "Em Alta • Séries", "series", "hub-destaques-featured-series", "featured-series");
+    add("Para ti", "As Minhas Escolhas • Filmes", "movie", "hub-destaques-choices-movie", "choices-movie");
+    add("Para ti", "As Minhas Escolhas • Séries", "series", "hub-destaques-choices-series", "choices-series");
+  }
+
+  if (section === "streamers") {
+    for (const streamerId of getHubStreamerSelection(config)) {
+      const label = getHubStreamerLabel(streamerId);
+
+      add(label, "Novidades • Filmes", "movie", `hub-streamer-${streamerId}-new-movie`, `${streamerId}-new-movie`);
+      add(label, "Novidades • Séries", "series", `hub-streamer-${streamerId}-new-series`, `${streamerId}-new-series`);
+      add(label, "TOP 10 Filmes", "movie", `hub-streamer-${streamerId}-top10-movie`, `${streamerId}-top10-movie`);
+      add(label, "TOP 10 Séries", "series", `hub-streamer-${streamerId}-top10-series`, `${streamerId}-top10-series`);
+      add(label, "As Minhas Escolhas • Filmes", "movie", `hub-streamer-${streamerId}-choices-movie`, `${streamerId}-choices-movie`);
+      add(label, "As Minhas Escolhas • Séries", "series", `hub-streamer-${streamerId}-choices-series`, `${streamerId}-choices-series`);
+      add(label, "Todos os Filmes", "movie", `hub-streamer-${streamerId}-all-movie`, `${streamerId}-all-movie`);
+      add(label, "Todas as Séries", "series", `hub-streamer-${streamerId}-all-series`, `${streamerId}-all-series`);
+    }
+  }
+
+  if (section === "portugues" || section === "adultos") {
+    const catalogs =
+      await getPtExternalManifestCatalogs(config);
+
+    for (const catalog of catalogs) {
+      const decoded =
+        parsePtCatalogId(catalog.id);
+
+      if (!decoded) {
+        continue;
+      }
+
+      if (
+        section === "adultos" &&
+        decoded.group !== "adult"
+      ) {
+        continue;
+      }
+
+      if (
+        section === "portugues" &&
+        !["ptpt", "portuguese"].includes(decoded.group)
+      ) {
+        continue;
+      }
+
+      const category =
+        decoded.group === "ptpt"
+          ? "Filmes em PT-PT"
+          : decoded.group === "portuguese"
+          ? "Produções Portuguesas"
+          : "Adultos";
+
+      add(
+        category,
+        catalog.name,
+        catalog.type,
+        catalog.id,
+        `${decoded.group}-${videos.length}`
+      );
+    }
+  }
+
+  if (
+    section === "iptv" &&
+    config?.features?.iptv === true
+  ) {
+    const name =
+      config?.mode === "xtream"
+        ? (config?.xtreamCatalogName || "Xtream API")
+        : config?.mode === "iptv-org"
+        ? (config?.iptvOrg?.catalogName || "IPTV-org FREE")
+        : (config?.m3uCatalogName || "Minha IPTV");
+
+    add("Televisão", name, "channel", "m3u", "iptv");
+  }
+
+  if (section === "operadores") {
+    const selected =
+      Array.isArray(config?.features?.selectedOperators)
+        ? config.features.selectedOperators
+        : [];
+
+    for (const operatorId of selected) {
+      const operator =
+        getOperatorById(operatorId);
+
+      if (!operator) {
+        continue;
+      }
+
+      add(
+        "Operadores PT",
+        operator.name,
+        "channel",
+        operator.id,
+        `operator-${operator.id}`
+      );
+    }
+  }
+
+  return {
+    id: `${PT_HUB_META_PREFIX}${section}`,
+    type: "series",
+    name: d.name,
+    poster: d.poster,
+    posterShape: "landscape",
+    background: `${PT_HUB_BACKGROUND}?v=${VERSION}`,
+    logo: `${PT_HUB_LOGO}?v=${VERSION}`,
+    description:
+      `${d.description}\n\nSeleciona uma opção para abrir o respetivo catálogo.`,
+    links,
+    videos
+  };
+}
+
+function getHubNavigationTarget(section, key) {
+  if (section === "destaques") {
+    return ({
+      cinema: ["movie", "hub-destaques-cinema-movie"],
+      "top10-movie": ["movie", "hub-destaques-top10-movie"],
+      "top10-series": ["series", "hub-destaques-top10-series"],
+      "new-movie": ["movie", "hub-destaques-new-movie"],
+      "new-series": ["series", "hub-destaques-new-series"],
+      "featured-movie": ["movie", "hub-destaques-featured-movie"],
+      "featured-series": ["series", "hub-destaques-featured-series"],
+      "choices-movie": ["movie", "hub-destaques-choices-movie"],
+      "choices-series": ["series", "hub-destaques-choices-series"]
+    })[key] || null;
+  }
+
+  if (section === "streamers") {
+    const match =
+      key.match(
+        /^(netflix|hbomax|prime-video|disney-plus|apple-tv-plus)-(new|top10|choices|all)-(movie|series)$/
+      );
+
+    if (!match) {
+      return null;
+    }
+
+    const [, streamerId, mode, type] = match;
+
+    return [
+      type,
+      `hub-streamer-${streamerId}-${mode}-${type}`
+    ];
+  }
+
+  return null;
+}
+
 /* =========================================================
    MANIFEST
    ========================================================= */
 
 
 async function buildManifest(config) {
+  const features = config?.features || {};
+  const hiddenExtra = [{ name: "search", isRequired: true }];
 
- const features =
- config?.features || {};
+  const externalIdentityCatalogs =
+    (features.ptContent === true || features.adultContent === true)
+      ? await getPtExternalManifestCatalogs(config)
+      : [];
 
- const hasConfig =
- !!config;
+  const hiddenPtCatalogs =
+    externalIdentityCatalogs.map((catalog) => ({
+      ...catalog,
+      extra: hiddenExtra
+    }));
 
- const showFeatured =
- features.featured === true;
+  const hiddenTvCatalogs = [];
 
- const featuredContent =
- features.featuredContent || {
- movies: true,
- series: true
- };
+  if (features.iptv === true) {
+    const iptvCatalogName =
+      config?.mode === "xtream"
+        ? (config?.xtreamCatalogName || "Xtream API")
+        : config?.mode === "iptv-org"
+        ? (config?.iptvOrg?.catalogName || "IPTV-org FREE")
+        : (config?.m3uCatalogName || "Minha IPTV");
 
- const showStreamers =
- features.streamers === true;
+    hiddenTvCatalogs.push({
+      type: "channel",
+      id: "m3u",
+      name: iptvCatalogName,
+      extra: hiddenExtra
+    });
+  }
 
- const selectedStreamerMovies =
- Array.isArray(features.selectedStreamerMovies)
- ? features.selectedStreamerMovies
- : (Array.isArray(features.selectedStreamers)
- ? features.selectedStreamers
- : null);
+  if (features.operators === true) {
+    const selected =
+      Array.isArray(features.selectedOperators)
+        ? features.selectedOperators
+        : [];
 
- const selectedStreamerSeries =
- Array.isArray(features.selectedStreamerSeries)
- ? features.selectedStreamerSeries
- : (Array.isArray(features.selectedStreamers)
- ? features.selectedStreamers
- : null);
+    for (const catalog of getOperatorCatalogs()) {
+      if (selected.includes(catalog.id)) {
+        hiddenTvCatalogs.push({
+          ...catalog,
+          extra: hiddenExtra
+        });
+      }
+    }
+  }
 
- const showOperators =
- features.operators === true;
-
- const selectedOperators =
- Array.isArray(features.selectedOperators)
- ? features.selectedOperators
- : null;
-
- const showIPTV =
- features.iptv === true;
-
- const showPtContent =
- features.ptContent === true;
-
- const showRtpPlay =
- showPtContent &&
- features.ptContentSources?.rtpPlay === true;
-
- const externalIdentityCatalogs =
-   (showPtContent || features.adultContent === true)
-     ? await getPtExternalManifestCatalogs(config)
-     : [];
-
- function isSpecialCatalog(id) {
- return (
- id === "featured" ||
- id === "movie-top" ||
- id === "series-top" ||
- id === "cinema-new" ||
- id === "movie-new" ||
- id === "series-new"
- );
- }
-
- /*
-  * "Destaques" e "TOP" (movie-top/series-top) são
-  * ambos catálogos globais (não pertencem a nenhum streamer
-  * específico) e ficam sob controlo do toggle "Destaques".
-  */
- function filterSpecialCatalogs(list, type) {
-
- return list.filter((catalog) => {
-
- if (!isSpecialCatalog(catalog.id)) {
- return true;
- }
-
- if (!hasConfig) {
- return true;
- }
-
- if (!showFeatured) {
- return false;
- }
-
- if (type === "movie") {
- return featuredContent.movies === true;
- }
-
- if (type === "series") {
- return featuredContent.series === true;
- }
-
- return true;
-
- });
-
- }
-
- function filterStreamerCatalogs(list, selected) {
-
- if (!hasConfig) {
- return list;
- }
-
- if (!showStreamers) {
-
- return list.filter(
- (catalog) => isSpecialCatalog(catalog.id)
- );
-
- }
-
- if (!selected || !selected.length) {
-
- return list.filter(
- (catalog) => isSpecialCatalog(catalog.id)
- );
-
- }
-
- return list.filter((catalog) =>
- isSpecialCatalog(catalog.id) ||
- selected.includes(catalog.id)
- );
-
- }
-
- const filteredMovieCatalogs =
- filterStreamerCatalogs(
- filterSpecialCatalogs(movieCatalogs, "movie"),
- selectedStreamerMovies
- );
-
- const filteredSeriesCatalogs =
- filterStreamerCatalogs(
- filterSpecialCatalogs(seriesCatalogs, "series"),
- selectedStreamerSeries
- );
-
- const filteredOperatorCatalogs =
- (() => {
-
- const all = getOperatorCatalogs();
-
- if (!hasConfig) {
- return all;
- }
-
- if (!selectedOperators || !selectedOperators.length) {
- return [];
- }
-
- return all.filter((catalog) =>
- selectedOperators.includes(catalog.id)
- );
-
- })();
-
- const iptvCatalogName =
- config?.mode === "xtream"
- ? (config?.xtreamCatalogName || "📡 Xtream API")
- : config?.mode === "iptv-org"
- ? (config?.iptvOrg?.catalogName || "📡 IPTV-org Free")
- : (config?.m3uCatalogName || "📡 Minha IPTV");
-
- /*
-  * Ordena os catálogos de filmes/séries por STREAMER em vez
-  * de por tipo — isto controla a ordem das linhas no ecrã
-  * "Board" do Stremio. Fica: Populares, Destaques, e depois
-  * cada streamer com Filmes+Séries lado a lado.
-  */
- function findCatalog(list, id) {
- return list.find((catalog) => catalog.id === id);
- }
-
- const searchExtra = [{ name: "search", isRequired: false }];
-
- const orderedMovieSeriesCatalogs = [];
-
- // Ordem PT•HUB 2.1.3:
- // Estreias no Cinema -> TOP Filmes -> TOP Séries -> Novos Filmes -> Novas Séries.
- const cinemaNew = findCatalog(filteredMovieCatalogs, "cinema-new");
- const movieNew = findCatalog(filteredMovieCatalogs, "movie-new");
- const seriesNew = findCatalog(filteredSeriesCatalogs, "series-new");
- const popularMovie = findCatalog(filteredMovieCatalogs, "movie-top");
- const popularSeries = findCatalog(filteredSeriesCatalogs, "series-top");
-
- if (cinemaNew) {
-   orderedMovieSeriesCatalogs.push({
-     type: "movie", id: cinemaNew.id, name: cinemaNew.name, extra: searchExtra
-   });
- }
- if (popularMovie) {
-   orderedMovieSeriesCatalogs.push({
-     type: "movie", id: popularMovie.id, name: popularMovie.name, extra: searchExtra
-   });
- }
- if (popularSeries) {
-   orderedMovieSeriesCatalogs.push({
-     type: "series", id: popularSeries.id, name: popularSeries.name, extra: searchExtra
-   });
- }
- if (movieNew) {
-   orderedMovieSeriesCatalogs.push({
-     type: "movie", id: movieNew.id, name: movieNew.name, extra: searchExtra
-   });
- }
- if (seriesNew) {
-   orderedMovieSeriesCatalogs.push({
-     type: "series", id: seriesNew.id, name: seriesNew.name, extra: searchExtra
-   });
- }
-
- const featuredMovie = findCatalog(filteredMovieCatalogs, "featured");
- const featuredSeriesCat = findCatalog(filteredSeriesCatalogs, "featured");
-
- if (featuredMovie) {
- orderedMovieSeriesCatalogs.push({
- type: "movie", id: featuredMovie.id, name: featuredMovie.name, extra: searchExtra
- });
- }
- if (featuredSeriesCat) {
- orderedMovieSeriesCatalogs.push({
- type: "series", id: featuredSeriesCat.id, name: featuredSeriesCat.name, extra: searchExtra
- });
- }
-
- for (const streamer of streamers) {
-
- const movieCat = findCatalog(filteredMovieCatalogs, streamer.id);
- const seriesCat = findCatalog(filteredSeriesCatalogs, streamer.id);
-
- if (movieCat) {
- orderedMovieSeriesCatalogs.push({
- type: "movie", id: movieCat.id, name: movieCat.name, extra: searchExtra
- });
- }
-
- if (seriesCat) {
- orderedMovieSeriesCatalogs.push({
- type: "series", id: seriesCat.id, name: seriesCat.name, extra: searchExtra
- });
- }
-
- }
-
- const manifest = {
+  return {
     ...manifestTemplate,
 
     version: VERSION,
-
     name: "PT•HUB",
-
     description:
-      "Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",
+      "PT•HUB 3.0 — uma Home, seis áreas e navegação organizada por experiências.",
 
     logo: `${PT_HUB_LOGO}?v=${VERSION}`,
-
     background: `${PT_HUB_BACKGROUND}?v=${VERSION}`,
 
     resources: [
@@ -3407,54 +3777,23 @@ async function buildManifest(config) {
       "meta",
       "stream",
       "addon_catalog",
-      ...(features.subtitles === true
-        ? ["subtitles"]
-        : [])
+      ...(features.subtitles === true ? ["subtitles"] : [])
     ],
 
-    types: [
-      "channel",
-      "tv",
-      "movie",
-      "series"
+    types: ["channel", "tv", "movie", "series"],
+
+    catalogs: [
+      {
+        type: "series",
+        id: PT_HUB_HOME_CATALOG_ID,
+        name: "PT•HUB",
+        extra: []
+      },
+
+      ...getHubAliasCatalogs(config),
+      ...hiddenPtCatalogs,
+      ...hiddenTvCatalogs
     ],
-
- catalogs: [
-
-...orderedMovieSeriesCatalogs,
-
-...externalIdentityCatalogs,
-
-...(showIPTV
- ? [
- {
- type: "channel",
- id: "m3u",
- name: iptvCatalogName,
- extra: [{ name: "search", isRequired: false }]
- }
- ]
- : []),
-
-...(showOperators
- ? filteredOperatorCatalogs.map((catalog) => ({
- ...catalog,
- extra: [{ name: "search", isRequired: false }]
- }))
- : []),
-
-...(showRtpPlay
- ? [
- {
- type: "channel",
- id: "rtp-play",
- name: "🇵🇹 RTP Play",
- extra: [{ name: "search", isRequired: false }]
- }
- ]
- : [])
-
-],
 
     addonCatalogs: [
       {
@@ -3468,6 +3807,9 @@ async function buildManifest(config) {
       "pttv:",
       "m3u:",
       "xtream:",
+      "iptvorg:",
+      "operator:",
+      "pthub:",
       "pthubptmeta:",
       "tt",
       "tmdb:"
@@ -3480,11 +3822,7 @@ async function buildManifest(config) {
       adult: features.adultContent === true
     }
   };
-
-
-  return manifest;
 }
-
 
 /* =========================================================
    MANIFEST ROUTES
@@ -3958,6 +4296,49 @@ app.get(
   }
 );
 
+
+/* =========================================================
+   PT•HUB 3.0 — HOME
+   ========================================================= */
+
+app.get(
+  "/:config/catalog/series/pthub-home.json",
+  (req, res) => {
+
+    const config =
+      decodeConfig(req.params.config);
+
+    return res.json(
+      getHubHomeCatalog(config)
+    );
+
+  }
+);
+
+app.get(
+  "/:config/catalog/series/pthub-home/:extra.json",
+  (req, res) => {
+
+    const config =
+      decodeConfig(req.params.config);
+
+    const extra =
+      parseExtra(req.params.extra);
+
+    const data =
+      getHubHomeCatalog(config);
+
+    return res.json({
+      metas:
+        filterMetasBySearch(
+          data.metas || [],
+          extra.search
+        )
+    });
+
+  }
+);
+
 /*=========================================================
    CATALOG - PLATAFORMAS
    ========================================================= */
@@ -4000,6 +4381,17 @@ app.get(
 
       if (ptExternalCatalog) {
         return res.json(ptExternalCatalog);
+      }
+
+      const hubAlias =
+        await getHubAliasCatalog(
+          config,
+          "movie",
+          id
+        );
+
+      if (hubAlias) {
+        return res.json(hubAlias);
       }
 
       const validCatalog =
@@ -4130,6 +4522,23 @@ app.get(
         return res.json(ptExternalCatalog);
       }
 
+      const hubAlias =
+        await getHubAliasCatalog(
+          config,
+          "movie",
+          id
+        );
+
+      if (hubAlias) {
+        return res.json({
+          metas:
+            filterMetasBySearch(
+              hubAlias.metas || [],
+              search
+            )
+        });
+      }
+
       const validCatalog =
         movieCatalogs.some(
           (catalog) => catalog.id === id
@@ -4214,6 +4623,17 @@ app.get(
 
       if (ptExternalCatalog) {
         return res.json(ptExternalCatalog);
+      }
+
+      const hubAlias =
+        await getHubAliasCatalog(
+          config,
+          "series",
+          id
+        );
+
+      if (hubAlias) {
+        return res.json(hubAlias);
       }
 
       const validCatalog =
@@ -4329,6 +4749,23 @@ app.get(
 
       if (ptExternalCatalog) {
         return res.json(ptExternalCatalog);
+      }
+
+      const hubAlias =
+        await getHubAliasCatalog(
+          config,
+          "series",
+          id
+        );
+
+      if (hubAlias) {
+        return res.json({
+          metas:
+            filterMetasBySearch(
+              hubAlias.metas || [],
+              search
+            )
+        });
       }
 
       const validCatalog =
@@ -4535,6 +4972,25 @@ app.get(
 
       const id =
         req.params.id;
+
+      if (
+        type === "series" &&
+        id.startsWith(PT_HUB_META_PREFIX)
+      ) {
+        const section =
+          id.slice(PT_HUB_META_PREFIX.length);
+
+        const meta =
+          await getHubSectionMeta(
+            req,
+            config,
+            section
+          );
+
+        return res.json({
+          meta
+        });
+      }
 
 
       /* -----------------------------------------------------
@@ -5095,6 +5551,50 @@ app.get(
 
       const id =
         req.params.id;
+
+      if (
+        type === "series" &&
+        id.startsWith("pthubnav:")
+      ) {
+        const parts =
+          id.split(":");
+
+        const section =
+          parts[1] || "";
+
+        const key =
+          parts.slice(2).join(":");
+
+        const target =
+          getHubNavigationTarget(
+            section,
+            key
+          );
+
+        if (!target) {
+          return res.json({
+            streams: []
+          });
+        }
+
+        const [targetType, catalogId] =
+          target;
+
+        return res.json({
+          streams: [
+            {
+              name: "PT•HUB",
+              title: "Ver catálogo",
+              externalUrl:
+                makeHubCatalogDeepLink(
+                  req,
+                  targetType,
+                  catalogId
+                )
+            }
+          ]
+        });
+      }
 
 
       /* -----------------------------------------------------
