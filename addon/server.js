@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.1";
+const VERSION = "2.1.0";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -1992,6 +1992,344 @@ function getPtCatalogDisplayName(group, sourceName, catalogName) {
   return `${groupInfo.prefix} ${source} — ${catalog}`;
 }
 
+
+/* =========================================================
+   CATÁLOGOS PORTUGUÊS — ESTRUTURA FIXA PT•HUB
+   =========================================================
+   Os addons de origem funcionam apenas como providers. O manifesto do
+   PT•HUB não replica os nomes/organização declarados por esses addons.
+   Assim, a interface no Stremio/Nuvio mantém sempre a mesma estrutura,
+   mesmo que um provider altere os seus nomes de catálogo.
+   ========================================================= */
+
+const PT_HUB_AGGREGATE_CATALOGS = {
+  ptptMovies: {
+    type: "movie",
+    id: "pthub-ptpt-movies",
+    name: "🇵🇹 Filmes em PT-PT",
+    group: "ptpt",
+    kind: "movies"
+  },
+  ptptSeries: {
+    type: "series",
+    id: "pthub-ptpt-series",
+    name: "🇵🇹 Séries em PT-PT",
+    group: "ptpt",
+    kind: "series"
+  },
+  portugueseMovies: {
+    type: "movie",
+    id: "pthub-portuguese-movies",
+    name: "🇵🇹 Filmes Portugueses",
+    group: "portuguese",
+    kind: "movies"
+  },
+  portugueseSeries: {
+    type: "series",
+    id: "pthub-portuguese-series",
+    name: "🇵🇹 Séries Portuguesas",
+    group: "portuguese",
+    kind: "series"
+  },
+  portugueseNovelas: {
+    type: "series",
+    id: "pthub-portuguese-novelas",
+    name: "🇵🇹 Novelas Portuguesas",
+    group: "portuguese",
+    kind: "novelas"
+  }
+};
+
+function getPtHubAggregateCatalogById(id, type) {
+  return (
+    Object.values(PT_HUB_AGGREGATE_CATALOGS).find(
+      (catalog) => catalog.id === id && (!type || catalog.type === type)
+    ) || null
+  );
+}
+
+function getPtHubManifestCatalogs(config) {
+  if (!config?.features?.ptContent) {
+    return [];
+  }
+
+  const ptSources = config.features.ptContentSources || {};
+  const result = [];
+  const searchExtra = [{ name: "search", isRequired: false }];
+
+  if (ptSources.ptPt === true && getPtSourceUrls(config, "ptpt").length) {
+    result.push(
+      {
+        type: PT_HUB_AGGREGATE_CATALOGS.ptptMovies.type,
+        id: PT_HUB_AGGREGATE_CATALOGS.ptptMovies.id,
+        name: PT_HUB_AGGREGATE_CATALOGS.ptptMovies.name,
+        extra: searchExtra
+      },
+      {
+        type: PT_HUB_AGGREGATE_CATALOGS.ptptSeries.type,
+        id: PT_HUB_AGGREGATE_CATALOGS.ptptSeries.id,
+        name: PT_HUB_AGGREGATE_CATALOGS.ptptSeries.name,
+        extra: searchExtra
+      }
+    );
+  }
+
+  if (
+    ptSources.portugueseProduction === true &&
+    getPtSourceUrls(config, "portuguese").length
+  ) {
+    result.push(
+      {
+        type: PT_HUB_AGGREGATE_CATALOGS.portugueseMovies.type,
+        id: PT_HUB_AGGREGATE_CATALOGS.portugueseMovies.id,
+        name: PT_HUB_AGGREGATE_CATALOGS.portugueseMovies.name,
+        extra: searchExtra
+      },
+      {
+        type: PT_HUB_AGGREGATE_CATALOGS.portugueseSeries.type,
+        id: PT_HUB_AGGREGATE_CATALOGS.portugueseSeries.id,
+        name: PT_HUB_AGGREGATE_CATALOGS.portugueseSeries.name,
+        extra: searchExtra
+      },
+      {
+        type: PT_HUB_AGGREGATE_CATALOGS.portugueseNovelas.type,
+        id: PT_HUB_AGGREGATE_CATALOGS.portugueseNovelas.id,
+        name: PT_HUB_AGGREGATE_CATALOGS.portugueseNovelas.name,
+        extra: searchExtra
+      }
+    );
+  }
+
+  return result;
+}
+
+function isPtNovelaCatalog(catalog) {
+  const text = normalizeSearchText(
+    `${catalog?.id || ""} ${catalog?.name || ""}`
+  );
+
+  return /novela/.test(text);
+}
+
+function scorePtPrimaryCatalog(catalog) {
+  const text = normalizeSearchText(
+    `${catalog?.id || ""} ${catalog?.name || ""}`
+  );
+
+  let score = 0;
+
+  if (/\b(todos?|all|principal|main|default|catalogo)\b/.test(text)) {
+    score += 100;
+  }
+
+  if (/\b(recentes?|new|rating|avaliacao|antigos?|old|a-z|az)\b/.test(text)) {
+    score -= 30;
+  }
+
+  return score;
+}
+
+function selectPtSourceCatalog(manifest, aggregateCatalog) {
+  if (!manifest || !aggregateCatalog) {
+    return null;
+  }
+
+  let candidates = (manifest.catalogs || []).filter(
+    (catalog) =>
+      catalog?.id &&
+      catalog?.type === aggregateCatalog.type
+  );
+
+  if (aggregateCatalog.group === "portuguese" && aggregateCatalog.type === "series") {
+    if (aggregateCatalog.kind === "novelas") {
+      candidates = candidates.filter(isPtNovelaCatalog);
+    } else {
+      candidates = candidates.filter((catalog) => !isPtNovelaCatalog(catalog));
+    }
+  }
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  return candidates
+    .map((catalog, index) => ({
+      catalog,
+      index,
+      score: scorePtPrimaryCatalog(catalog)
+    }))
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))[0]
+    .catalog;
+}
+
+function ptCatalogSupportsExtra(catalog, extraName) {
+  return normalizeCatalogExtra(catalog).some(
+    (extra) => extra?.name === extraName
+  );
+}
+
+function getPtAggregateDedupKey(meta) {
+  const parsed = parsePtMetaId(meta?.id);
+  const originalId = parsed?.originalId || "";
+
+  if (/^tt\d+$/i.test(originalId)) {
+    return `imdb:${originalId.toLowerCase()}`;
+  }
+
+  const imdbId =
+    meta?.imdb_id ||
+    meta?.imdbId ||
+    meta?.externalIds?.imdbId;
+
+  if (imdbId) {
+    return `imdb:${String(imdbId).toLowerCase()}`;
+  }
+
+  const title = normalizeSearchText(meta?.name || meta?.title || "")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+
+  const year = String(
+    meta?.year ||
+    meta?.releaseInfo ||
+    meta?.released ||
+    ""
+  ).match(/\b(19|20)\d{2}\b/)?.[0] || "";
+
+  return title
+    ? `title:${title}:${year}`
+    : `id:${String(meta?.id || "")}`;
+}
+
+async function fetchPtAggregateSourceCatalog(
+  baseUrl,
+  aggregateCatalog,
+  extra
+) {
+  const manifest = await getPtSourceManifest(baseUrl);
+
+  if (!manifest || !sourceSupportsResource(manifest, "catalog")) {
+    return [];
+  }
+
+  const sourceCatalog =
+    selectPtSourceCatalog(manifest, aggregateCatalog);
+
+  if (!sourceCatalog) {
+    return [];
+  }
+
+  const sourceExtra = {};
+  const requestedSearch = String(extra?.search || "").trim();
+
+  if (requestedSearch && ptCatalogSupportsExtra(sourceCatalog, "search")) {
+    sourceExtra.search = requestedSearch;
+  }
+
+  const extraPath = buildExternalCatalogExtraPath(sourceExtra);
+  const url =
+    `${baseUrl}/catalog/${encodeURIComponent(aggregateCatalog.type)}/` +
+    `${encodeURIComponent(sourceCatalog.id)}${extraPath}.json`;
+
+  try {
+    const data = await fetchJsonWithTimeout(
+      url,
+      PT_SOURCE_CATALOG_TIMEOUT_MS
+    );
+
+    let metas = Array.isArray(data?.metas) ? data.metas : [];
+
+    if (requestedSearch && !ptCatalogSupportsExtra(sourceCatalog, "search")) {
+      metas = filterMetasBySearch(metas, requestedSearch);
+    }
+
+    return metas
+      .map((meta) =>
+        normalizeExternalMeta(
+          meta,
+          aggregateCatalog.group,
+          baseUrl,
+          aggregateCatalog.type
+        )
+      )
+      .filter(Boolean);
+  } catch (error) {
+    console.error(
+      `Erro no catálogo agregado PT•HUB ${aggregateCatalog.id} via ${baseUrl}:`,
+      error.message
+    );
+
+    return [];
+  }
+}
+
+async function getPtHubAggregateCatalog(config, type, catalogId, extra = {}) {
+  const aggregateCatalog =
+    getPtHubAggregateCatalogById(catalogId, type);
+
+  if (!aggregateCatalog) {
+    return null;
+  }
+
+  if (!config?.features?.ptContent) {
+    return { metas: [] };
+  }
+
+  const ptSources = config.features.ptContentSources || {};
+
+  if (
+    aggregateCatalog.group === "ptpt" &&
+    ptSources.ptPt !== true
+  ) {
+    return { metas: [] };
+  }
+
+  if (
+    aggregateCatalog.group === "portuguese" &&
+    ptSources.portugueseProduction !== true
+  ) {
+    return { metas: [] };
+  }
+
+  const sourceUrls =
+    getPtSourceUrls(config, aggregateCatalog.group);
+
+  if (!sourceUrls.length) {
+    return { metas: [] };
+  }
+
+  const results = await Promise.all(
+    sourceUrls.map((baseUrl) =>
+      fetchPtAggregateSourceCatalog(
+        baseUrl,
+        aggregateCatalog,
+        extra
+      )
+    )
+  );
+
+  const metas = [];
+  const seen = new Set();
+
+  for (const sourceMetas of results) {
+    for (const meta of sourceMetas) {
+      const dedupKey = getPtAggregateDedupKey(meta);
+
+      if (seen.has(dedupKey)) {
+        continue;
+      }
+
+      seen.add(dedupKey);
+      metas.push(meta);
+    }
+  }
+
+  const skip = Math.max(0, Number.parseInt(extra?.skip, 10) || 0);
+  return {
+    metas: metas.slice(skip, skip + 100)
+  };
+}
+
 async function getPtExternalManifestCatalogs(config) {
   if (!config?.features?.ptContent) {
     return [];
@@ -2307,11 +2645,18 @@ async function getPtExternalStreams(config, type, wrappedId) {
         ? data.streams
         : [];
 
+    const groupLabel =
+      parsed.group === "ptpt"
+        ? "PT-PT"
+        : "Produção Portuguesa";
+
     return streams.map((stream) => ({
       ...stream,
       name:
-        `${PT_SOURCE_GROUPS[parsed.group].prefix} ${sourceName}` +
-        (stream.name ? `\n${stream.name}` : "")
+        `PT•HUB • ${groupLabel}` +
+        (stream.name ? `\n${stream.name}` : ""),
+      title:
+        stream.title || `Fonte: ${sourceName}`
     }));
   } catch (error) {
     console.error(
@@ -3128,10 +3473,10 @@ button:disabled {
       <label class="feature-item">
         <input
           type="checkbox"
-          id="operatorsEnabled"
-          ${enabledOperators ? "checked" : ""}
+          id="ptContentEnabled"
+          ${enabledPtContent ? "checked" : ""}
         >
-        <span>Operadores PT</span>
+        <span>Português</span>
       </label>
 
       <label class="feature-item">
@@ -3146,10 +3491,10 @@ button:disabled {
       <label class="feature-item">
         <input
           type="checkbox"
-          id="ptContentEnabled"
-          ${enabledPtContent ? "checked" : ""}
+          id="operatorsEnabled"
+          ${enabledOperators ? "checked" : ""}
         >
-        <span>Conteúdo Português</span>
+        <span>Operadores PT</span>
       </label>
 
       <label class="feature-item">
@@ -3246,20 +3591,148 @@ ${streamerCheckboxes}
     </div>
 
     <!-- =========================================================
-         OPERADORES
+         PORTUGUÊS
          ========================================================= -->
 
-    <div id="operatorsContainer" class="config-panel">
+    <div id="ptContentContainer" class="config-panel">
 
-      <h2 class="panel-title">Operadores PT</h2>
+      <h2 class="panel-title">🇵🇹 Português</h2>
 
       <p class="panel-description">
-        Seleciona os operadores que queres disponibilizar no addon.
-        Podes escolher um ou vários.
+        Mantém separadas duas famílias diferentes: conteúdos internacionais
+        disponíveis em Português de Portugal (PT-PT) e obras de produção
+        portuguesa. Cada família tem as suas próprias fontes externas.
       </p>
 
-      <div class="option-grid">
-${operatorCheckboxes}
+      <div class="subsection" style="margin-top:0;padding-top:0;border-top:0;">
+
+        <h3 class="subsection-title">🗣️ Filmes e Séries em PT-PT</h3>
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="ptPtEnabled"
+            ${ptPtEnabledChecked ? "checked" : ""}
+          >
+          <span>Ativar Filmes e Séries em PT-PT</span>
+        </label>
+
+        <div class="subsection" style="margin-top:12px;">
+          <h4 class="subsection-title">Fontes disponíveis</h4>
+
+          <label class="option-item">
+            <input
+              type="checkbox"
+              id="ptSourceCotonet"
+              value="cotonet"
+              ${cotonetChecked}
+            >
+            <span>Cotonet</span>
+          </label>
+
+          <div class="help">
+            Filmes em Português de Portugal. O endereço do addon já está
+            integrado no PT•HUB; basta selecionar esta fonte.
+          </div>
+        </div>
+
+        <details class="subsection">
+          <summary class="subsection-title" style="cursor:pointer;">
+            Fonte personalizada (opcional)
+          </summary>
+
+          <label class="field-label" for="ptPtAddonSources">
+            URLs adicionais de addons PT-PT
+          </label>
+
+          <textarea
+            id="ptPtAddonSources"
+            rows="3"
+            placeholder="https://exemplo-addon.pt/manifest.json"
+          >${escapeHtml(ptPtSourcesText)}</textarea>
+
+          <div class="help">
+            Opcional. Um URL por linha para acrescentar outras fontes
+            Stremio compatíveis sem alterar o código do PT•HUB.
+          </div>
+        </details>
+
+      </div>
+
+      <div class="subsection">
+
+        <h3 class="subsection-title">🇵🇹 Filmes, Séries e Novelas Portuguesas</h3>
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="portugueseProductionEnabled"
+            ${portugueseProductionEnabledChecked ? "checked" : ""}
+          >
+          <span>Ativar Produção Portuguesa</span>
+        </label>
+
+        <div class="subsection" style="margin-top:12px;">
+          <h4 class="subsection-title">Fontes disponíveis</h4>
+
+          <label class="option-item">
+            <input
+              type="checkbox"
+              id="ptSourcePortugueseProductions"
+              value="filmes-series-novelas-portuguesas"
+              ${portugueseAddonChecked}
+            >
+            <span>Filmes, Séries e Novelas Portuguesas</span>
+          </label>
+
+          <div class="help">
+            Filmes, séries e novelas de produção portuguesa. O endereço
+            do addon já está integrado no PT•HUB.
+          </div>
+        </div>
+
+        <details class="subsection">
+          <summary class="subsection-title" style="cursor:pointer;">
+            Fonte personalizada (opcional)
+          </summary>
+
+          <label class="field-label" for="portugueseAddonSources">
+            URLs adicionais de addons de produção portuguesa
+          </label>
+
+          <textarea
+            id="portugueseAddonSources"
+            rows="3"
+            placeholder="https://exemplo-addon-portugues.pt/manifest.json"
+          >${escapeHtml(portugueseSourcesText)}</textarea>
+
+          <div class="help">
+            Opcional. Esta lista continua independente da família PT-PT.
+          </div>
+        </details>
+
+      </div>
+
+      <div class="subsection">
+
+        <h3 class="subsection-title">📡 RTP Play</h3>
+
+        <label class="option-item">
+          <input
+            type="checkbox"
+            id="rtpPlayEnabled"
+            value="rtpPlay"
+            ${rtpPlayChecked ? "checked" : ""}
+          >
+          <span>Ativar RTP Play</span>
+        </label>
+
+        <div class="help">
+          Mantém-se preparado para integração através de interfaces
+          públicas/oficiais da RTP, sem contornar autenticação, DRM ou
+          proteções técnicas.
+        </div>
+
       </div>
 
     </div>
@@ -3770,148 +4243,20 @@ ${operatorCheckboxes}
     </div>
 
     <!-- =========================================================
-         CONTEÚDO PORTUGUÊS
+         OPERADORES
          ========================================================= -->
 
-    <div id="ptContentContainer" class="config-panel">
+    <div id="operatorsContainer" class="config-panel">
 
-      <h2 class="panel-title">🇵🇹 Conteúdo Português</h2>
+      <h2 class="panel-title">Operadores PT</h2>
 
       <p class="panel-description">
-        Mantém separadas duas famílias diferentes: conteúdos internacionais
-        disponíveis em Português de Portugal (PT-PT) e obras de produção
-        portuguesa. Cada família tem as suas próprias fontes externas.
+        Seleciona os operadores que queres disponibilizar no addon.
+        Podes escolher um ou vários.
       </p>
 
-      <div class="subsection" style="margin-top:0;padding-top:0;border-top:0;">
-
-        <h3 class="subsection-title">🗣️ Filmes e Séries em PT-PT</h3>
-
-        <label class="option-item">
-          <input
-            type="checkbox"
-            id="ptPtEnabled"
-            ${ptPtEnabledChecked ? "checked" : ""}
-          >
-          <span>Ativar Filmes e Séries em PT-PT</span>
-        </label>
-
-        <div class="subsection" style="margin-top:12px;">
-          <h4 class="subsection-title">Fontes disponíveis</h4>
-
-          <label class="option-item">
-            <input
-              type="checkbox"
-              id="ptSourceCotonet"
-              value="cotonet"
-              ${cotonetChecked}
-            >
-            <span>Cotonet</span>
-          </label>
-
-          <div class="help">
-            Filmes em Português de Portugal. O endereço do addon já está
-            integrado no PT•HUB; basta selecionar esta fonte.
-          </div>
-        </div>
-
-        <details class="subsection">
-          <summary class="subsection-title" style="cursor:pointer;">
-            Fonte personalizada (opcional)
-          </summary>
-
-          <label class="field-label" for="ptPtAddonSources">
-            URLs adicionais de addons PT-PT
-          </label>
-
-          <textarea
-            id="ptPtAddonSources"
-            rows="3"
-            placeholder="https://exemplo-addon.pt/manifest.json"
-          >${escapeHtml(ptPtSourcesText)}</textarea>
-
-          <div class="help">
-            Opcional. Um URL por linha para acrescentar outras fontes
-            Stremio compatíveis sem alterar o código do PT•HUB.
-          </div>
-        </details>
-
-      </div>
-
-      <div class="subsection">
-
-        <h3 class="subsection-title">🇵🇹 Filmes, Séries e Novelas Portuguesas</h3>
-
-        <label class="option-item">
-          <input
-            type="checkbox"
-            id="portugueseProductionEnabled"
-            ${portugueseProductionEnabledChecked ? "checked" : ""}
-          >
-          <span>Ativar Produção Portuguesa</span>
-        </label>
-
-        <div class="subsection" style="margin-top:12px;">
-          <h4 class="subsection-title">Fontes disponíveis</h4>
-
-          <label class="option-item">
-            <input
-              type="checkbox"
-              id="ptSourcePortugueseProductions"
-              value="filmes-series-novelas-portuguesas"
-              ${portugueseAddonChecked}
-            >
-            <span>Filmes, Séries e Novelas Portuguesas</span>
-          </label>
-
-          <div class="help">
-            Filmes, séries e novelas de produção portuguesa. O endereço
-            do addon já está integrado no PT•HUB.
-          </div>
-        </div>
-
-        <details class="subsection">
-          <summary class="subsection-title" style="cursor:pointer;">
-            Fonte personalizada (opcional)
-          </summary>
-
-          <label class="field-label" for="portugueseAddonSources">
-            URLs adicionais de addons de produção portuguesa
-          </label>
-
-          <textarea
-            id="portugueseAddonSources"
-            rows="3"
-            placeholder="https://exemplo-addon-portugues.pt/manifest.json"
-          >${escapeHtml(portugueseSourcesText)}</textarea>
-
-          <div class="help">
-            Opcional. Esta lista continua independente da família PT-PT.
-          </div>
-        </details>
-
-      </div>
-
-      <div class="subsection">
-
-        <h3 class="subsection-title">📡 RTP Play</h3>
-
-        <label class="option-item">
-          <input
-            type="checkbox"
-            id="rtpPlayEnabled"
-            value="rtpPlay"
-            ${rtpPlayChecked ? "checked" : ""}
-          >
-          <span>Ativar RTP Play</span>
-        </label>
-
-        <div class="help">
-          Mantém-se preparado para integração através de interfaces
-          públicas/oficiais da RTP, sem contornar autenticação, DRM ou
-          proteções técnicas.
-        </div>
-
+      <div class="option-grid">
+${operatorCheckboxes}
       </div>
 
     </div>
@@ -5364,7 +5709,7 @@ installButton.addEventListener(
  ) {
 
  showStatus(
- "Em Conteúdo Português ativa PT-PT, Produção Portuguesa, RTP Play ou uma combinação destas opções."
+ "Em Português ativa PT-PT, Produção Portuguesa, RTP Play ou uma combinação destas opções."
  );
 
  return;
@@ -5750,9 +6095,9 @@ async function buildManifest(config) {
  showPtContent &&
  features.ptContentSources?.rtpPlay === true;
 
- const externalPtCatalogs =
+ const ptHubCatalogs =
  showPtContent
-   ? await getPtExternalManifestCatalogs(config)
+   ? getPtHubManifestCatalogs(config)
    : [];
 
  function isSpecialCatalog(id) {
@@ -5961,7 +6306,7 @@ async function buildManifest(config) {
 
 ...orderedMovieSeriesCatalogs,
 
-...externalPtCatalogs,
+...ptHubCatalogs,
 
 ...(showIPTV
  ? [
@@ -6514,6 +6859,19 @@ app.get(
       const country =
         config?.catalogCountry;
 
+      const ptHubCatalog =
+        await getPtHubAggregateCatalog(
+          config,
+          "movie",
+          id,
+          {}
+        );
+
+      if (ptHubCatalog) {
+        return res.json(ptHubCatalog);
+      }
+
+      // Compatibilidade com links antigos que ainda usem IDs dinâmicos.
       const ptExternalCatalog =
         await getPtExternalCatalog(
           config,
@@ -6603,6 +6961,19 @@ app.get(
 
       const { search } = extra;
 
+      const ptHubCatalog =
+        await getPtHubAggregateCatalog(
+          config,
+          "movie",
+          id,
+          extra
+        );
+
+      if (ptHubCatalog) {
+        return res.json(ptHubCatalog);
+      }
+
+      // Compatibilidade com links antigos que ainda usem IDs dinâmicos.
       const ptExternalCatalog =
         await getPtExternalCatalog(
           config,
@@ -6673,6 +7044,19 @@ app.get(
       const country =
         config?.catalogCountry;
 
+      const ptHubCatalog =
+        await getPtHubAggregateCatalog(
+          config,
+          "series",
+          id,
+          {}
+        );
+
+      if (ptHubCatalog) {
+        return res.json(ptHubCatalog);
+      }
+
+      // Compatibilidade com links antigos que ainda usem IDs dinâmicos.
       const ptExternalCatalog =
         await getPtExternalCatalog(
           config,
@@ -6761,6 +7145,19 @@ app.get(
 
       const { search } = extra;
 
+      const ptHubCatalog =
+        await getPtHubAggregateCatalog(
+          config,
+          "series",
+          id,
+          extra
+        );
+
+      if (ptHubCatalog) {
+        return res.json(ptHubCatalog);
+      }
+
+      // Compatibilidade com links antigos que ainda usem IDs dinâmicos.
       const ptExternalCatalog =
         await getPtExternalCatalog(
           config,
