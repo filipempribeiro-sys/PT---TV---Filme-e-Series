@@ -1087,7 +1087,17 @@ async function cinemetaFetch(endpoint) {
   return await response.json();
 }
 
-async function getCinemetaCatalog(type) {
+async function getCinemetaCatalog(type, search) {
+
+  if (search) {
+
+    const endpoint =
+      `/catalog/${type}/top/search=${encodeURIComponent(search)}.json`;
+
+    return await cinemetaFetch(endpoint);
+
+  }
+
   if (type === "movie") {
     return await cinemetaFetch(
       "/catalog/movie/top.json"
@@ -5546,17 +5556,22 @@ app.get(
       }
 
       let data;
+      let alreadyFiltered = false;
 
       if (id === "featured") {
         data = await getFeaturedCatalog("movie", country);
       } else if (id === "movie-top") {
-        data = await getCinemetaCatalog("movie");
+        data = await getCinemetaCatalog("movie", search);
+        alreadyFiltered = Boolean(search);
       } else {
         data = await getJustWatchCatalog("movie", id, country);
       }
 
       return res.json({
-        metas: filterMetasBySearch(data.metas || [], search)
+        metas:
+          alreadyFiltered
+            ? (data.metas || [])
+            : filterMetasBySearch(data.metas || [], search)
       });
 
     } catch (error) {
@@ -5673,17 +5688,22 @@ app.get(
       }
 
       let data;
+      let alreadyFiltered = false;
 
       if (id === "featured") {
         data = await getFeaturedCatalog("series", country);
       } else if (id === "series-top") {
-        data = await getCinemetaCatalog("series");
+        data = await getCinemetaCatalog("series", search);
+        alreadyFiltered = Boolean(search);
       } else {
         data = await getJustWatchCatalog("series", id, country);
       }
 
       return res.json({
-        metas: filterMetasBySearch(data.metas || [], search)
+        metas:
+          alreadyFiltered
+            ? (data.metas || [])
+            : filterMetasBySearch(data.metas || [], search)
       });
 
     } catch (error) {
@@ -6055,7 +6075,7 @@ async function fetchExternalStreamSource(baseUrl, type, id) {
   }
 
   const url =
-    `${normalizedBase}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`;
+    `${normalizedBase}/stream/${encodeURIComponent(type)}/${id}.json`;
 
   const controller =
     new AbortController();
