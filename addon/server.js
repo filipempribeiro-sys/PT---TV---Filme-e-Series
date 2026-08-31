@@ -57,7 +57,7 @@ app.get("/version", (req, res) => {
   return res.json({
     name: "PT•HUB",
     version: VERSION,
-    build: "3.0.0-RC-LEGENDAS-UNLIMITED-20260831"
+    build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831"
   });
 });
 
@@ -5858,30 +5858,90 @@ async function handleSubtitleRequest(req, res, extra = "") {
   }
 }
 
-app.get("/debug/subtitles/:type/:id", async (req, res) => {
+async function handleSubtitleDebug(req, res) {
   try {
+    const type = String(
+      req.params.type ||
+      req.query.type ||
+      ""
+    ).trim();
+
+    const id = String(
+      req.params.id ||
+      req.query.id ||
+      ""
+    ).trim();
+
+    const extra = String(
+      req.params.extra ||
+      req.query.extra ||
+      ""
+    ).trim();
+
+    if (!["movie", "series"].includes(type)) {
+      return res.status(400).json({
+        success: false,
+        build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
+        error: "type deve ser movie ou series"
+      });
+    }
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
+        error: "Falta o parâmetro id (IMDb, ex.: tt0111161)"
+      });
+    }
+
+    const providerResults = await Promise.all(
+      SUBTITLE_PROVIDERS.map(async (provider) => {
+        const subtitles = await fetchSubtitleProvider(
+          provider,
+          type,
+          id,
+          extra
+        );
+
+        return {
+          provider: provider.name,
+          count: subtitles.length
+        };
+      })
+    );
+
     const subtitles = await getAggregatedSubtitles(
-      req.params.type,
-      req.params.id,
-      String(req.query.extra || "")
+      type,
+      id,
+      extra
     );
 
     return res.json({
       success: true,
-      build: "3.0.0-RC-LEGENDAS-UNLIMITED-20260831",
-      type: req.params.type,
-      id: req.params.id,
+      build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
+      type,
+      id,
+      extra: extra || null,
       count: subtitles.length,
+      providers: providerResults,
       languages: [...new Set(subtitles.map((item) => item.lang))],
       sample: subtitles.slice(0, 5)
     });
+
   } catch (error) {
     return res.status(500).json({
       success: false,
+      build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
       error: error.message
     });
   }
-});
+}
+
+app.get("/debug/subtitles", handleSubtitleDebug);
+app.get("/debug/subtitles/:type/:id", handleSubtitleDebug);
+app.get("/debug/subtitles/:type/:id.json", handleSubtitleDebug);
+app.get("/debug/subtitles/:type/:id/:extra.json", handleSubtitleDebug);
+
 
 app.get(
   "/:config/subtitles/:type/:id.json",
