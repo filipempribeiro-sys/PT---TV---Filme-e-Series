@@ -304,9 +304,14 @@ function getHlsProxyHeaders(profile, targetUrl) {
     "User-Agent": "Mozilla/5.0 (PT-HUB HLS Engine)"
   };
 
-  if (profile === "rtp") {
+  if (profile === "rtp" || profile === "rtp1") {
+    headers["User-Agent"] =
+      "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0";
     headers.Origin = "https://www.rtp.pt";
-    headers.Referer = "https://www.rtp.pt/play/";
+    headers.Referer =
+      profile === "rtp1"
+        ? "https://www.rtp.pt/play/direto/rtp1"
+        : "https://www.rtp.pt/play/";
   }
 
   return headers;
@@ -3171,6 +3176,142 @@ const RTP_PLAY_CHANNELS = Object.freeze([
   { id:"rtpplay:rtpafrica", slug:"rtpafrica", name:"RTP África", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/27-363219141305.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpafrica.smil/playlist.m3u8" }
 ]);
 
+const RTP_DYNAMIC_SOURCE_URL =
+  "https://gist.githubusercontent.com/antunesales-dev/8bbdfa5498c180bcd8639b5e29631319/raw/canais.json";
+
+const RTP_DYNAMIC_CACHE_MS = 2 * 60 * 1000;
+let rtpDynamicCache = {
+  fetchedAt: 0,
+  data: null
+};
+
+function isAllowedRtpDynamicStreamUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "streaming-live.rtp.pt" &&
+      /\.m3u8$/i.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function fetchRtpDynamicSource() {
+  const now = Date.now();
+
+  if (
+    rtpDynamicCache.data &&
+    now - rtpDynamicCache.fetchedAt < RTP_DYNAMIC_CACHE_MS
+  ) {
+    return rtpDynamicCache.data;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(RTP_DYNAMIC_SOURCE_URL, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent": `PT-HUB/${VERSION}`,
+        "Accept": "application/json,text/plain;q=0.9,*/*;q=0.8"
+      }
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`Fonte RTP dinâmica HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (!data || !Array.isArray(data.channels)) {
+      throw new Error("Resposta RTP dinâmica inválida.");
+    }
+
+    rtpDynamicCache = {
+      fetchedAt: now,
+      data
+    };
+
+    return data;
+
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
+  }
+}
+
+async function resolveRtpPlayLiveStream(channel) {
+  if (!channel) return null;
+
+  /*
+   * FASE DE TESTE:
+   * apenas RTP1 usa resolução dinâmica.
+   * Os restantes canais continuam exatamente com a origem anterior
+   * até RTP1 ficar comprovadamente estável no Stremio/Nuvio.
+   */
+  if (channel.id !== "rtpplay:rtp1") {
+    return {
+      url: channel.streamUrl || "",
+      headers: null,
+      source: "static"
+    };
+  }
+
+  try {
+    const data = await fetchRtpDynamicSource();
+
+    const dynamicChannel =
+      data.channels.find((item) =>
+        String(item?.id || "").toLowerCase() === "rtp1"
+      );
+
+    const dynamicUrl =
+      String(dynamicChannel?.stream_url || "").trim();
+
+    if (!isAllowedRtpDynamicStreamUrl(dynamicUrl)) {
+      throw new Error("URL RTP1 dinâmica ausente ou não autorizada.");
+    }
+
+    const headers =
+      dynamicChannel?.headers &&
+      typeof dynamicChannel.headers === "object"
+        ? dynamicChannel.headers
+        : {};
+
+    return {
+      url: dynamicUrl,
+      headers: {
+        "User-Agent":
+          String(headers["User-Agent"] || "Mozilla/5.0"),
+        "Origin":
+          String(headers.Origin || "https://www.rtp.pt"),
+        "Referer":
+          String(headers.Referer || "https://www.rtp.pt/play/direto/rtp1")
+      },
+      source: "dynamic"
+    };
+
+  } catch (error) {
+    console.error(
+      "RTP1 resolver dinâmico falhou:",
+      error.message
+    );
+
+    /*
+     * Não usamos silenciosamente o URL estático no RTP1:
+     * esse foi precisamente o caminho que ficou em loading/crash.
+     * É preferível devolver indisponível e diagnosticar corretamente.
+     */
+    return null;
+  }
+}
+
 function getRtpPlayChannelById(id) {
   return RTP_PLAY_CHANNELS.find((channel) => channel.id === id) || null;
 }
@@ -5482,15 +5623,30 @@ app.get(
           const channel = getRtpPlayChannelById(id);
           if (!channel) return res.json({ streams: [] });
 
-          if (!channel.streamUrl) {
+          const resolved =
+            await resolveRtpPlayLiveStream(channel);
+
+          if (!resolved?.url) {
             return res.json({ streams: [] });
           }
 
+          const proxyProfile =
+            channel.id === "rtpplay:rtp1"
+              ? "rtp1"
+              : "rtp";
+
           return res.json({
             streams: [{
-              name: "PT•HUB • RTP Play",
+              name:
+                channel.id === "rtpplay:rtp1"
+                  ? "PT•HUB • RTP Play • Resolver"
+                  : "PT•HUB • RTP Play",
               title: `${channel.name} • Em direto`,
-              url: buildHlsProxyUrl(req, channel.streamUrl, "rtp"),
+              url: buildHlsProxyUrl(
+                req,
+                resolved.url,
+                proxyProfile
+              ),
               behaviorHints: {
                 notWebReady: true
               }
