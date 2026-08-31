@@ -1928,7 +1928,7 @@ const PT_PREDEFINED_SOURCES = {
    ========================================================= */
 
 const PORTUGUESE_SERVICES = Object.freeze([
-  { id: "rtp-play", name: "RTP Play", mode: "public-web", status: "active", capabilities: ["catalog", "meta", "live", "externalPlayback"] },
+  { id: "rtp-play", name: "RTP Play", mode: "public-hls", status: "active", capabilities: ["catalog", "meta", "live", "directPlayback"] },
   { id: "opto", name: "OPTO", mode: "official-auth", status: "prepared" },
   { id: "tvi-player", name: "TVI Player", mode: "official-auth", status: "prepared" },
   { id: "panda-plus", name: "Panda+", mode: "official-auth", status: "prepared" },
@@ -3007,14 +3007,14 @@ async function getPtExternalStreams(config, type, wrappedId) {
    ========================================================= */
 
 const RTP_PLAY_CHANNELS = Object.freeze([
-  { id:"rtpplay:rtp1", slug:"rtp1", name:"RTP1", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/5-563718101410.png", group:"RTP Play • TV em direto" },
-  { id:"rtpplay:rtp2", slug:"rtp2", name:"RTP2", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/3-363718101410.png", group:"RTP Play • TV em direto" },
-  { id:"rtpplay:rtp3", slug:"rtp3", name:"RTP Notícias", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/64-393818101410.png", group:"RTP Play • TV em direto" },
-  { id:"rtpplay:rtpmemoria", slug:"rtpmemoria", name:"RTP Memória", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/80-584819141705.png", group:"RTP Play • TV em direto" },
-  { id:"rtpplay:rtpinternacional", slug:"rtpinternacional", name:"RTP Internacional", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/120-344318101410.png", group:"RTP Play • TV em direto" },
-  { id:"rtpplay:rtpmadeira", slug:"rtpmadeira", name:"RTP Madeira", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/107-443519141305.png", group:"RTP Play • TV em direto" },
-  { id:"rtpplay:rtpacores", slug:"rtpacores", name:"RTP Açores", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/106-563419141305.png", group:"RTP Play • TV em direto" },
-  { id:"rtpplay:rtpafrica", slug:"rtpafrica", name:"RTP África", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/27-363219141305.png", group:"RTP Play • TV em direto" }
+  { id:"rtpplay:rtp1", slug:"rtp1", name:"RTP1", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/5-563718101410.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/smil:rtp1HD.smil/playlist.m3u8" },
+  { id:"rtpplay:rtp2", slug:"rtp2", name:"RTP2", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/3-363718101410.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtp2HD.smil/playlist.m3u8" },
+  { id:"rtpplay:rtp3", slug:"rtp3", name:"RTP Notícias", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/64-393818101410.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/livetvhlsDVR/rtpnHDdvr.smil/playlist.m3u8" },
+  { id:"rtpplay:rtpmemoria", slug:"rtpmemoria", name:"RTP Memória", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/80-584819141705.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpmem.smil/playlist.m3u8" },
+  { id:"rtpplay:rtpinternacional", slug:"rtpinternacional", name:"RTP Internacional", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/120-344318101410.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpi.smil/playlist.m3u8" },
+  { id:"rtpplay:rtpmadeira", slug:"rtpmadeira", name:"RTP Madeira", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/107-443519141305.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpmadeira.smil/playlist.m3u8" },
+  { id:"rtpplay:rtpacores", slug:"rtpacores", name:"RTP Açores", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/106-563419141305.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpacoresHD.smil/playlist.m3u8" },
+  { id:"rtpplay:rtpafrica", slug:"rtpafrica", name:"RTP África", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/27-363219141305.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpafrica.smil/playlist.m3u8" }
 ]);
 
 function getRtpPlayChannelById(id) {
@@ -3030,7 +3030,7 @@ function getRtpPlayOfficialUrl(channel) {
 async function getRtpPlayChannels() {
   return RTP_PLAY_CHANNELS.map((channel) => ({
     ...channel,
-    url: getRtpPlayOfficialUrl(channel)
+    url: channel.streamUrl || ""
   }));
 }
 
@@ -3911,7 +3911,7 @@ app.get(
 
         /*
          * RTP Play: catálogo nativo de canais públicos.
-         * A reprodução é encaminhada para a página oficial RTP Play.
+         * A reprodução usa os streams HLS públicos RTP diretamente no player.
          */
 
         const channels =
@@ -5328,12 +5328,25 @@ app.get(
           const channel = getRtpPlayChannelById(id);
           if (!channel) return res.json({ streams: [] });
 
+          if (!channel.streamUrl) {
+            return res.json({ streams: [] });
+          }
+
           return res.json({
             streams: [{
               name: "PT•HUB • RTP Play",
-              title: channel.name,
-              externalUrl: getRtpPlayOfficialUrl(channel),
-              behaviorHints: { notWebReady: true }
+              title: `${channel.name} • Em direto`,
+              url: channel.streamUrl,
+              behaviorHints: {
+                notWebReady: true,
+                proxyHeaders: {
+                  request: {
+                    "User-Agent": "Mozilla/5.0",
+                    "Origin": "https://www.rtp.pt",
+                    "Referer": getRtpPlayOfficialUrl(channel)
+                  }
+                }
+              }
             }]
           });
         }
