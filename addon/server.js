@@ -5698,15 +5698,28 @@ const SUBTITLE_STALE_TTL_MS = 60 * 60 * 1000;
 const subtitleCache = new Map();
 
 function cleanSubtitleExtra(extra) {
-  return String(extra || "")
+  let value = String(extra || "")
     .replace(/^\/+/, "")
     .replace(/\.json$/i, "");
+
+  try {
+    value = decodeURIComponent(value);
+  } catch (_) {}
+
+  return value;
+}
+
+function encodeStremioSubtitleId(id) {
+  return String(id || "")
+    .split(":")
+    .map((part) => encodeURIComponent(part))
+    .join(":");
 }
 
 function buildSubtitleProviderUrl(provider, type, id, extra) {
   const base = String(provider.baseUrl || "").replace(/\/+$/, "");
   const path =
-    `${base}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+    `${base}/subtitles/${encodeURIComponent(type)}/${encodeStremioSubtitleId(id)}`;
   const cleanExtra = cleanSubtitleExtra(extra);
 
   return cleanExtra
@@ -5853,6 +5866,16 @@ async function getAggregatedSubtitles(type, id, extra) {
     )
   );
 
+  const totalReturned = results.reduce(
+    (sum, subtitles) => sum + subtitles.length,
+    0
+  );
+
+  console.log(
+    `Legendas PT•HUB: ${type} ${String(id || "").slice(0, 40)} -> ` +
+    `${totalReturned} recebidas de ${SUBTITLE_PROVIDERS.length} fontes`
+  );
+
   const unique = new Map();
 
   for (const subtitles of results) {
@@ -5921,6 +5944,30 @@ async function handleSubtitleRequest(req, res, extra = "") {
     return res.json({ subtitles: [] });
   }
 }
+
+app.get("/debug/subtitles/:type/:id", async (req, res) => {
+  try {
+    const subtitles = await getAggregatedSubtitles(
+      req.params.type,
+      req.params.id,
+      String(req.query.extra || "")
+    );
+
+    return res.json({
+      success: true,
+      type: req.params.type,
+      id: req.params.id,
+      count: subtitles.length,
+      languages: [...new Set(subtitles.map((item) => item.lang))],
+      sample: subtitles.slice(0, 5)
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 app.get(
   "/:config/subtitles/:type/:id.json",
