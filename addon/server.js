@@ -5514,11 +5514,23 @@ const PT_BUILTIN_ADDONS = [
     id: "magnetio",
     name: "Magnetio — Multi Provider",
     manifestUrl:
-      "https://magnetio.peterdsp.dev/" +
-      "providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents," +
-      "limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads," +
-      "therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt" +
-      "|sort=qualityseeders|limit=50/manifest.json",
+      (() => {
+      const engineBase = String(
+        process.env.PT_HUB_TORRENT_ENGINE_URL ||
+        "https://magnetio.peterdsp.dev"
+      ).replace(/\/$/, "");
+
+      // Durante a transição mantém a instância pública como fallback.
+      // Assim que PT_HUB_TORRENT_ENGINE_URL estiver definido no Render,
+      // o PT•HUB passa automaticamente a usar o nosso Torrent Engine.
+      return (
+        engineBase + "/" +
+        "providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents," +
+        "limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads," +
+        "therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt" +
+        "|sort=qualityseeders|limit=50/manifest.json"
+      );
+    })(),
     resources: ["stream"]
   },
   {
