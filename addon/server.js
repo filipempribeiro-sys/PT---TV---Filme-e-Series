@@ -1964,19 +1964,7 @@ function getPtSourceUrls(config, group) {
   }
 
   const selected = config?.ptContentSelectedSources || {};
-  let selectedIds = Array.isArray(selected[group]) ? selected[group] : [];
-
-  // Compatibilidade robusta: configurações antigas podem ter a opção
-  // ativa mas não ter gravado explicitamente o ID do provider.
-  if (!selectedIds.length) {
-    if (group === "ptpt" && config?.features?.ptContentSources?.ptPt === true) {
-      selectedIds = ["cotonet"];
-    }
-
-    if (group === "portuguese" && config?.features?.ptContentSources?.portugueseProduction === true) {
-      selectedIds = ["filmes-series-novelas-portuguesas"];
-    }
-  }
+  const selectedIds = Array.isArray(selected[group]) ? selected[group] : [];
 
   const normalizedSelectedIds = selectedIds.map((sourceId) => {
     if (group === "portuguese" && sourceId === "portuguese-productions") {
@@ -1998,27 +1986,6 @@ function getPtSourceUrls(config, group) {
       .map(normalizeAddonBaseUrl)
       .filter(isValidHttpUrl)
   )];
-}
-
-function isPtContentGroupEnabled(config, group) {
-  const features = config?.features || {};
-  const ptSources = features.ptContentSources || {};
-  const selected = config?.ptContentSelectedSources || {};
-  const selectedIds = Array.isArray(selected[group]) ? selected[group] : [];
-
-  if (group === "ptpt") {
-    return ptSources.ptPt === true || selectedIds.length > 0;
-  }
-
-  if (group === "portuguese") {
-    return ptSources.portugueseProduction === true || selectedIds.length > 0;
-  }
-
-  if (group === "adult") {
-    return features.adultContent === true;
-  }
-
-  return false;
 }
 
 function getPtSourceHash(baseUrl) {
@@ -2257,16 +2224,14 @@ function getPtCatalogDisplayName(group, sourceName, catalogName, catalogId, type
   }
 
   if (group === "portuguese") {
-    const catalogText = normalizeSearchText(
-      `${catalogId || ""} ${catalogName || ""}`
-    );
+    const catalogIdText = normalizeSearchText(catalogId || "");
+
+    if (/novela/.test(catalogIdText)) {
+      return "🇵🇹 Novelas Portuguesas";
+    }
 
     if (type === "movie") {
       return "🇵🇹 Filmes Portugueses";
-    }
-
-    if (/novela/.test(catalogText)) {
-      return "🇵🇹 Novelas Portuguesas";
     }
 
     if (type === "series") {
@@ -2341,20 +2306,15 @@ function getPtHubAggregateCatalogById(id, type) {
 }
 
 function getPtHubManifestCatalogs(config) {
-  const hasAnyPtContent =
-    config?.features?.ptContent === true ||
-    isPtContentGroupEnabled(config, "ptpt") ||
-    isPtContentGroupEnabled(config, "portuguese");
-
-  if (!hasAnyPtContent) {
+  if (!config?.features?.ptContent) {
     return [];
   }
 
-  const ptSources = config?.features?.ptContentSources || {};
+  const ptSources = config.features.ptContentSources || {};
   const result = [];
   const searchExtra = [{ name: "search", isRequired: false }];
 
-  if (isPtContentGroupEnabled(config, "ptpt") && getPtSourceUrls(config, "ptpt").length) {
+  if (ptSources.ptPt === true && getPtSourceUrls(config, "ptpt").length) {
     result.push(
       {
         type: PT_HUB_AGGREGATE_CATALOGS.ptptMovies.type,
@@ -2372,7 +2332,7 @@ function getPtHubManifestCatalogs(config) {
   }
 
   if (
-    isPtContentGroupEnabled(config, "portuguese") &&
+    ptSources.portugueseProduction === true &&
     getPtSourceUrls(config, "portuguese").length
   ) {
     result.push(
@@ -2568,24 +2528,22 @@ async function getPtHubAggregateCatalog(config, type, catalogId, extra = {}) {
     return null;
   }
 
-  if (
-    config?.features?.ptContent !== true &&
-    !isPtContentGroupEnabled(config, "ptpt") &&
-    !isPtContentGroupEnabled(config, "portuguese")
-  ) {
+  if (!config?.features?.ptContent) {
     return { metas: [] };
   }
 
+  const ptSources = config.features.ptContentSources || {};
+
   if (
     aggregateCatalog.group === "ptpt" &&
-    !isPtContentGroupEnabled(config, "ptpt")
+    ptSources.ptPt !== true
   ) {
     return { metas: [] };
   }
 
   if (
     aggregateCatalog.group === "portuguese" &&
-    !isPtContentGroupEnabled(config, "portuguese")
+    ptSources.portugueseProduction !== true
   ) {
     return { metas: [] };
   }
@@ -2629,42 +2587,17 @@ async function getPtHubAggregateCatalog(config, type, catalogId, extra = {}) {
   };
 }
 
-function getCotonetVirtualCatalogs(config) {
-  if (!isPtContentGroupEnabled(config, "ptpt")) {
-    return [];
-  }
-
-  const baseUrl = getPtSourceUrls(config, "ptpt")[0];
-  if (!baseUrl) {
-    return [];
-  }
-
-  const definitions = [
-    { id: "cotonet_todos", name: "🇵🇹 Filmes em PT-PT" },
-    { id: "cotonet_alfabetico", name: "🇵🇹 Filmes em PT-PT • A-Z" },
-    { id: "cotonet_recentes", name: "🇵🇹 Filmes em PT-PT • Mais Recentes" },
-    { id: "cotonet_antigos", name: "🇵🇹 Filmes em PT-PT • Mais Antigos" },
-    { id: "cotonet_avaliacao", name: "🇵🇹 Filmes em PT-PT • Melhor Avaliação" }
-  ];
-
-  return definitions.map((catalog) => ({
-    type: "movie",
-    id: makePtCatalogId("ptpt", baseUrl, catalog.id),
-    name: catalog.name,
-    extra: [{ name: "search", isRequired: false }]
-  }));
-}
-
 async function getPtExternalManifestCatalogs(config) {
   const ptSources = config?.features?.ptContentSources || {};
 
   function groupEnabled(group) {
     if (group === "ptpt") {
-      return isPtContentGroupEnabled(config, "ptpt");
+      return config?.features?.ptContent === true && ptSources.ptPt === true;
     }
 
     if (group === "portuguese") {
-      return isPtContentGroupEnabled(config, "portuguese");
+      return config?.features?.ptContent === true &&
+        ptSources.portugueseProduction === true;
     }
 
     if (group === "adult") {
@@ -3312,27 +3245,10 @@ async function buildManifest(config) {
      String(catalog?.id || "").startsWith("pthub-portuguese-")
    );
 
- const cotonetVirtualIdentityCatalogs =
-   getCotonetVirtualCatalogs(config);
-
- const ptPtIdentityCatalogs = (() => {
-   const merged = [
-     ...cotonetVirtualIdentityCatalogs,
-     ...ptPtExternalIdentityCatalogs
-   ];
-
-   if (!merged.length) {
-     return fixedPtPtIdentityCatalogs;
-   }
-
-   const seen = new Set();
-   return merged.filter((catalog) => {
-     const key = `${catalog.type}:${catalog.id}`;
-     if (seen.has(key)) return false;
-     seen.add(key);
-     return true;
-   });
- })();
+ const ptPtIdentityCatalogs =
+   ptPtExternalIdentityCatalogs.length
+     ? ptPtExternalIdentityCatalogs
+     : fixedPtPtIdentityCatalogs;
 
  function isPortugueseNovelaIdentityCatalog(catalog) {
    return /novela/.test(
@@ -3342,26 +3258,9 @@ async function buildManifest(config) {
    );
  }
 
- const portugueseIdentityCatalogs = (() => {
-   const merged = [
-     ...fixedPortugueseIdentityCatalogs,
-     ...portugueseExternalIdentityCatalogs
-   ];
-
-   const seen = new Set();
-   return merged.filter((catalog) => {
-     const normalizedName = normalizeSearchText(catalog?.name || "");
-     const semanticKey =
-       /novela/.test(normalizedName) ? "novelas" :
-       catalog?.type === "movie" ? "movies" :
-       catalog?.type === "series" ? "series" :
-       `${catalog?.type}:${catalog?.id}`;
-
-     if (seen.has(semanticKey)) return false;
-     seen.add(semanticKey);
-     return true;
-   });
- })();
+ const portugueseIdentityCatalogs = [
+   ...portugueseExternalIdentityCatalogs
+ ];
 
  const hasPortugueseMovie =
    portugueseIdentityCatalogs.some((catalog) => catalog?.type === "movie");
