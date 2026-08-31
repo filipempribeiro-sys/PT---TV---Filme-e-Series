@@ -3496,14 +3496,20 @@ async function buildManifest(config) {
 
  const orderedMovieSeriesCatalogs = [];
 
- // Ordem PT•HUB 2.5:
- // Estreias no Cinema -> TOP Filmes -> TOP Séries -> Novos Filmes -> Novas Séries.
+ // Ordem PT•HUB 3.0:
+ // Novos Filmes -> Estreias no Cinema -> TOP Filmes -> TOP Séries -> Novas Séries.
+ // O Nuvio usa o topo como Hero/TOP Roll; privilegiamos novidades.
  const cinemaNew = findCatalog(filteredMovieCatalogs, "cinema-new");
  const movieNew = findCatalog(filteredMovieCatalogs, "movie-new");
  const seriesNew = findCatalog(filteredSeriesCatalogs, "series-new");
  const popularMovie = findCatalog(filteredMovieCatalogs, "movie-top");
  const popularSeries = findCatalog(filteredSeriesCatalogs, "series-top");
 
+ if (movieNew) {
+   orderedMovieSeriesCatalogs.push({
+     type: "movie", id: movieNew.id, name: movieNew.name, extra: searchExtra
+   });
+ }
  if (cinemaNew) {
    orderedMovieSeriesCatalogs.push({
      type: "movie", id: cinemaNew.id, name: cinemaNew.name, extra: searchExtra
@@ -3517,11 +3523,6 @@ async function buildManifest(config) {
  if (popularSeries) {
    orderedMovieSeriesCatalogs.push({
      type: "series", id: popularSeries.id, name: popularSeries.name, extra: searchExtra
-   });
- }
- if (movieNew) {
-   orderedMovieSeriesCatalogs.push({
-     type: "movie", id: movieNew.id, name: movieNew.name, extra: searchExtra
    });
  }
  if (seriesNew) {
