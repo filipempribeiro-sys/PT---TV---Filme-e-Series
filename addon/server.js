@@ -5630,9 +5630,110 @@ async function getExternalStreams(config, type, id) {
     dedupedStreams.push(stream);
   }
 
-  // Sem limite por qualidade: devolve todos os streams únicos
-  // recebidos de todos os providers selecionados/integrados.
-  return dedupedStreams;
+  // PT•HUB — seleção final de torrents:
+  // máximo 3 por qualidade, privilegiando mais seeders e menor tamanho.
+  function getTorrentQuality(stream) {
+    const text = [
+      stream?.name,
+      stream?.title,
+      stream?.description,
+      stream?.behaviorHints?.filename
+    ].filter(Boolean).join(" ");
+
+    if (/\b(2160p|4k|uhd)\b/i.test(text)) return "4K";
+    if (/\b1080p\b/i.test(text)) return "1080p";
+    if (/\b720p\b/i.test(text)) return "720p";
+    if (/\b(480p|576p|sd)\b/i.test(text)) return "480p";
+    return "Outra";
+  }
+
+  function getTorrentSeeders(stream) {
+    const text = [
+      stream?.name,
+      stream?.title,
+      stream?.description
+    ].filter(Boolean).join(" ");
+
+    const patterns = [
+      /(?:👤|👥|🌱|seed(?:er)?s?|seeds?|peers?)\s*[:=]?\s*(\d+)/i,
+      /(\d+)\s*(?:seed(?:er)?s?|seeds?)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) return Number(match[1]) || 0;
+    }
+
+    const direct =
+      stream?.seeders ??
+      stream?.seeds ??
+      stream?.behaviorHints?.seeders ??
+      stream?.behaviorHints?.seeds;
+
+    return Number(direct) || 0;
+  }
+
+  function getTorrentSizeBytes(stream) {
+    const direct =
+      stream?.size ??
+      stream?.fileSize ??
+      stream?.behaviorHints?.videoSize ??
+      stream?.behaviorHints?.fileSize;
+
+    if (Number.isFinite(Number(direct)) && Number(direct) > 0) {
+      return Number(direct);
+    }
+
+    const text = [
+      stream?.name,
+      stream?.title,
+      stream?.description
+    ].filter(Boolean).join(" ");
+
+    const match = text.match(
+      /(\d+(?:[.,]\d+)?)\s*(TB|TiB|GB|GiB|MB|MiB|KB|KiB)\b/i
+    );
+
+    if (!match) return Number.POSITIVE_INFINITY;
+
+    const value = Number(match[1].replace(",", "."));
+    const unit = match[2].toUpperCase();
+
+    const multipliers = {
+      KB: 1024,
+      KIB: 1024,
+      MB: 1024 ** 2,
+      MIB: 1024 ** 2,
+      GB: 1024 ** 3,
+      GIB: 1024 ** 3,
+      TB: 1024 ** 4,
+      TIB: 1024 ** 4
+    };
+
+    return value * (multipliers[unit] || 1);
+  }
+
+  const qualityOrder = ["4K", "1080p", "720p", "480p", "Outra"];
+  const selectedStreams = [];
+
+  for (const quality of qualityOrder) {
+    const group = dedupedStreams
+      .filter((stream) => getTorrentQuality(stream) === quality)
+      .sort((a, b) => {
+        const seedDiff = getTorrentSeeders(b) - getTorrentSeeders(a);
+        if (seedDiff !== 0) return seedDiff;
+
+        const sizeDiff = getTorrentSizeBytes(a) - getTorrentSizeBytes(b);
+        if (Number.isFinite(sizeDiff) && sizeDiff !== 0) return sizeDiff;
+
+        return 0;
+      })
+      .slice(0, 3);
+
+    selectedStreams.push(...group);
+  }
+
+  return selectedStreams;
 
 }
 
