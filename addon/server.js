@@ -2224,20 +2224,45 @@ function getPtCatalogDisplayName(group, sourceName, catalogName, catalogId, type
   }
 
   if (group === "portuguese") {
+    const originalId = String(catalogId || "").trim().toLowerCase();
+
     /*
-     * O nome do provider contém "Novelas Portuguesas" em TODOS os
-     * catálogos (incluindo Filmes e Séries), por isso nunca pode ser
-     * usado para decidir a categoria. Primeiro distinguimos Filmes
-     * pelo type e, nos catálogos series, usamos apenas o ID real.
+     * IDs reais declarados pelo addon
+     * pt.filmes-series-portuguesas v2.0.0:
+     *
+     * novelaspt_filmes  -> Filmes Portugueses
+     * novelaspt_series  -> Séries Portuguesas
+     * novelaspt_novelas -> Novelas Portuguesas
+     *
+     * Séries e novelas mantêm type "series" por compatibilidade Stremio,
+     * mas são distinguidas pelo catalog.id original.
+     */
+    if (originalId === "novelaspt_filmes") {
+      return "🇵🇹 Filmes Portugueses";
+    }
+
+    if (originalId === "novelaspt_series") {
+      return "🇵🇹 Séries Portuguesas";
+    }
+
+    if (originalId === "novelaspt_novelas") {
+      return "🇵🇹 Novelas Portuguesas";
+    }
+
+    /*
+     * Fallback apenas para fontes personalizadas/versões futuras.
+     * Nunca interfere com os três IDs oficiais acima.
      */
     if (type === "movie") {
       return "🇵🇹 Filmes Portugueses";
     }
 
     if (type === "series") {
-      const idText = normalizeSearchText(catalogId || "");
+      const fallbackText = normalizeSearchText(
+        `${catalogId || ""} ${catalogName || ""}`
+      );
 
-      if (/novela|telenovela/.test(idText)) {
+      if (/novela|telenovela/.test(fallbackText)) {
         return "🇵🇹 Novelas Portuguesas";
       }
 
