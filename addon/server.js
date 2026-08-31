@@ -402,17 +402,64 @@ function getHlsProxyHeaders(profile, targetUrl) {
     "User-Agent": "Mozilla/5.0 (PT-HUB HLS Engine)"
   };
 
-  if (profile === "rtp") {
-    headers.Origin = "https://www.rtp.pt";
-    headers.Referer = "https://www.rtp.pt/play/";
+  if (
+    profile === "rtp" ||
+    profile === "rtp1"
+  ) {
+    headers["User-Agent"] =
+      "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0";
+
+    headers.Origin =
+      "https://www.rtp.pt";
+
+    headers.Referer =
+      profile === "rtp1"
+        ? "https://www.rtp.pt/play/direto/rtp1"
+        : "https://www.rtp.pt/play/";
   }
 
   return headers;
 }
 
-function resolveHlsReference(reference, baseUrl) {
+function resolveHlsReference(reference, baseUrl, profile = "generic") {
   try {
-    return new URL(String(reference || "").trim(), baseUrl).toString();
+    const rawReference =
+      String(reference || "").trim();
+
+    const resolved =
+      new URL(rawReference, baseUrl);
+
+    /*
+     * RTP Play assina o master HLS com parâmetros como ?tk=...
+     * Os URLs relativos das variantes/segmentos podem não repetir
+     * esses parâmetros. Para o perfil RTP propagamos apenas os
+     * parâmetros de autenticação RTP conhecidos quando estão em falta.
+     */
+    if (
+      profile === "rtp" ||
+      profile === "rtp1"
+    ) {
+      const base =
+        new URL(baseUrl);
+
+      for (const key of ["tk"]) {
+        const value =
+          base.searchParams.get(key);
+
+        if (
+          value &&
+          !resolved.searchParams.has(key)
+        ) {
+          resolved.searchParams.set(
+            key,
+            value
+          );
+        }
+      }
+    }
+
+    return resolved.toString();
+
   } catch {
     return "";
   }
@@ -420,8 +467,14 @@ function resolveHlsReference(reference, baseUrl) {
 
 function rewriteHlsAttributeUris(line, baseUrl, req, profile) {
   return String(line || "").replace(/URI=(["'])(.*?)\1/gi, (match, quote, uri) => {
-    const absolute = resolveHlsReference(uri, baseUrl);
+    const absolute = resolveHlsReference(
+      uri,
+      baseUrl,
+      profile
+    );
+
     if (!absolute) return match;
+
     return `URI=${quote}${buildHlsProxyUrl(req, absolute, profile)}${quote}`;
   });
 }
@@ -436,11 +489,28 @@ function rewriteHlsPlaylist(text, baseUrl, req, profile) {
       if (!line) return rawLine;
 
       if (line.startsWith("#")) {
-        return rewriteHlsAttributeUris(rawLine, baseUrl, req, profile);
+        return rewriteHlsAttributeUris(
+          rawLine,
+          baseUrl,
+          req,
+          profile
+        );
       }
 
-      const absolute = resolveHlsReference(line, baseUrl);
-      return absolute ? buildHlsProxyUrl(req, absolute, profile) : rawLine;
+      const absolute =
+        resolveHlsReference(
+          line,
+          baseUrl,
+          profile
+        );
+
+      return absolute
+        ? buildHlsProxyUrl(
+            req,
+            absolute,
+            profile
+          )
+        : rawLine;
     })
     .join("\n");
 }
@@ -3269,6 +3339,117 @@ const RTP_PLAY_CHANNELS = Object.freeze([
   { id:"rtpplay:rtpafrica", slug:"rtpafrica", name:"RTP África", logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/27-363219141305.png", group:"RTP Play • TV em direto", streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpafrica.smil/playlist.m3u8" }
 ]);
 
+const RTP_DYNAMIC_SOURCE_URL =
+  "https://gist.githubusercontent.com/antunesales-dev/8bbdfa5498c180bcd8639b5e29631319/raw/canais.json";
+
+const RTP_DYNAMIC_CACHE_MS = 60 * 1000;
+
+let rtpDynamicCache = {
+  fetchedAt: 0,
+  data: null
+};
+
+function isAllowedRtpDynamicStreamUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "streaming-live.rtp.pt" &&
+      /\.m3u8$/i.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function fetchRtpDynamicSource() {
+  const now = Date.now();
+
+  if (
+    rtpDynamicCache.data &&
+    now - rtpDynamicCache.fetchedAt < RTP_DYNAMIC_CACHE_MS
+  ) {
+    return rtpDynamicCache.data;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(RTP_DYNAMIC_SOURCE_URL, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent": `PT-HUB/${VERSION}`,
+        "Accept": "application/json,text/plain;q=0.9,*/*;q=0.8"
+      }
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(
+        `Fonte RTP dinâmica HTTP ${response.status}`
+      );
+    }
+
+    const data = await response.json();
+
+    if (!data || !Array.isArray(data.channels)) {
+      throw new Error("Resposta RTP dinâmica inválida.");
+    }
+
+    rtpDynamicCache = {
+      fetchedAt: now,
+      data
+    };
+
+    return data;
+
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
+  }
+}
+
+async function resolveRtp1DynamicStream() {
+  try {
+    const data = await fetchRtpDynamicSource();
+
+    const item =
+      data.channels.find((channel) =>
+        String(channel?.id || "").toLowerCase() === "rtp1"
+      );
+
+    const streamUrl =
+      String(item?.stream_url || "").trim();
+
+    if (!isAllowedRtpDynamicStreamUrl(streamUrl)) {
+      throw new Error(
+        "RTP1 dinâmica ausente ou inválida."
+      );
+    }
+
+    return {
+      url: streamUrl,
+      headers:
+        item?.headers &&
+        typeof item.headers === "object"
+          ? item.headers
+          : {}
+    };
+
+  } catch (error) {
+    console.error(
+      "RTP1 resolver:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
 function getRtpPlayChannelById(id) {
   return RTP_PLAY_CHANNELS.find((channel) => channel.id === id) || null;
 }
@@ -5577,18 +5758,65 @@ app.get(
       ) {
 
         if (id.startsWith("rtpplay:")) {
-          const channel = getRtpPlayChannelById(id);
-          if (!channel) return res.json({ streams: [] });
+          const channel =
+            getRtpPlayChannelById(id);
+
+          if (!channel) {
+            return res.json({
+              streams: []
+            });
+          }
+
+          /*
+           * TESTE RTP1:
+           * apenas RTP1 usa resolução dinâmica + token propagado.
+           * Os restantes canais RTP continuam exatamente como antes.
+           */
+          if (id === "rtpplay:rtp1") {
+            const resolved =
+              await resolveRtp1DynamicStream();
+
+            if (!resolved?.url) {
+              return res.json({
+                streams: []
+              });
+            }
+
+            return res.json({
+              streams: [{
+                name:
+                  "PT•HUB • RTP1 • Dynamic HLS",
+                title:
+                  `${channel.name} • Em direto`,
+                url:
+                  buildHlsProxyUrl(
+                    req,
+                    resolved.url,
+                    "rtp1"
+                  ),
+                behaviorHints: {
+                  notWebReady: true
+                }
+              }]
+            });
+          }
 
           if (!channel.streamUrl) {
-            return res.json({ streams: [] });
+            return res.json({
+              streams: []
+            });
           }
 
           return res.json({
             streams: [{
               name: "PT•HUB • RTP Play",
               title: `${channel.name} • Em direto`,
-              url: buildHlsProxyUrl(req, channel.streamUrl, "rtp"),
+              url:
+                buildHlsProxyUrl(
+                  req,
+                  channel.streamUrl,
+                  "rtp"
+                ),
               behaviorHints: {
                 notWebReady: true
               }
