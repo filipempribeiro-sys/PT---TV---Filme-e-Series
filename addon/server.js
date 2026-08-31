@@ -57,7 +57,7 @@ app.get("/version", (req, res) => {
   return res.json({
     name: "PT•HUB",
     version: VERSION,
-    build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831"
+    build: "3.0.0-RC-LEGENDAS-NUVIO-LANG-FIX-20260831"
   });
 });
 
@@ -5642,38 +5642,61 @@ function buildSubtitleProviderUrl(provider, type, id, extra) {
 
 function normalizeSubtitleLanguage(value) {
   const raw = String(value || "").trim();
-  const lang = raw.toLowerCase().replace(/_/g, "-");
+  const normalized = raw.toLowerCase().replace(/_/g, "-");
 
-  if (!lang) return "Desconhecido";
+  if (!normalized) return "und";
 
   const ptPt = new Set([
-    "pt-pt", "por-pt", "pt", "por", "portuguese",
-    "português", "portugues", "português (portugal)",
-    "portugues (portugal)", "portugal"
+    "pt", "pt-pt", "por",
+    "portuguese", "português", "portugues",
+    "portuguese (portugal)", "português (portugal)", "portugues (portugal)",
+    "portugal"
   ]);
+
   const ptBr = new Set([
-    "pt-br", "por-br", "pob", "pb", "brazilian portuguese",
-    "português (brasil)", "portugues (brasil)", "brasil", "brazil"
+    "pt-br", "pob", "pb",
+    "brazilian portuguese",
+    "portuguese (brazil)", "português (brasil)", "portugues (brasil)",
+    "brasil", "brazil"
   ]);
 
-  if (ptBr.has(lang)) return "Português (Brasil)";
-  if (ptPt.has(lang)) return "Português (Portugal)";
+  if (ptPt.has(normalized)) return "por";
+  if (ptBr.has(normalized)) return "pt-BR";
 
-  const names = {
-    eng: "English", en: "English",
-    spa: "Español", es: "Español",
-    fre: "Français", fra: "Français", fr: "Français",
-    ger: "Deutsch", deu: "Deutsch", de: "Deutsch",
-    ita: "Italiano", it: "Italiano"
+  const map = {
+    eng: "eng", en: "eng", english: "eng",
+    spa: "spa", es: "spa", spanish: "spa", "español": "spa", espanol: "spa",
+    fre: "fra", fra: "fra", fr: "fra", french: "fra", "français": "fra", francais: "fra",
+    ger: "deu", deu: "deu", de: "deu", german: "deu",
+    ita: "ita", it: "ita", italian: "ita",
+    rus: "rus", ru: "rus", russian: "rus",
+    dut: "nld", nld: "nld", nl: "nld", dutch: "nld",
+    pol: "pol", pl: "pol", polish: "pol",
+    swe: "swe", sv: "swe", swedish: "swe",
+    nor: "nor", no: "nor", norwegian: "nor",
+    dan: "dan", da: "dan", danish: "dan",
+    fin: "fin", fi: "fin", finnish: "fin",
+    cze: "ces", ces: "ces", cs: "ces", czech: "ces",
+    ron: "ron", rum: "ron", ro: "ron", romanian: "ron",
+    ell: "ell", gre: "ell", el: "ell", greek: "ell",
+    heb: "heb", he: "heb", hebrew: "heb",
+    hrv: "hrv", hr: "hrv", croatian: "hrv",
+    slv: "slv", sl: "slv", slovenian: "slv",
+    tur: "tur", tr: "tur", turkish: "tur"
   };
 
-  return names[lang] || raw;
+  if (map[normalized]) return map[normalized];
+
+  if (/^[a-z]{3}$/.test(normalized)) return normalized;
+  if (/^[a-z]{2}-[A-Za-z]{2}$/.test(raw)) return raw;
+
+  return "und";
 }
 
 function subtitleLanguagePriority(value) {
-  const lang = String(value || "").toLowerCase();
-  if (lang.includes("portugal")) return 0;
-  if (lang.includes("brasil")) return 1;
+  const lang = normalizeSubtitleLanguage(value);
+  if (lang === "por") return 0;
+  if (lang.toLowerCase() === "pt-br") return 1;
   return 2;
 }
 
@@ -5881,7 +5904,7 @@ async function handleSubtitleDebug(req, res) {
     if (!["movie", "series"].includes(type)) {
       return res.status(400).json({
         success: false,
-        build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
+        build: "3.0.0-RC-LEGENDAS-NUVIO-LANG-FIX-20260831",
         error: "type deve ser movie ou series"
       });
     }
@@ -5889,7 +5912,7 @@ async function handleSubtitleDebug(req, res) {
     if (!id) {
       return res.status(400).json({
         success: false,
-        build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
+        build: "3.0.0-RC-LEGENDAS-NUVIO-LANG-FIX-20260831",
         error: "Falta o parâmetro id (IMDb, ex.: tt0111161)"
       });
     }
@@ -5918,7 +5941,7 @@ async function handleSubtitleDebug(req, res) {
 
     return res.json({
       success: true,
-      build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
+      build: "3.0.0-RC-LEGENDAS-NUVIO-LANG-FIX-20260831",
       type,
       id,
       extra: extra || null,
@@ -5931,7 +5954,7 @@ async function handleSubtitleDebug(req, res) {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      build: "3.0.0-RC-LEGENDAS-DEBUG-QUERY-20260831",
+      build: "3.0.0-RC-LEGENDAS-NUVIO-LANG-FIX-20260831",
       error: error.message
     });
   }
