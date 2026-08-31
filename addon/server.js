@@ -2224,17 +2224,23 @@ function getPtCatalogDisplayName(group, sourceName, catalogName, catalogId, type
   }
 
   if (group === "portuguese") {
-    const catalogIdText = normalizeSearchText(catalogId || "");
-
-    if (/novela/.test(catalogIdText)) {
-      return "🇵🇹 Novelas Portuguesas";
-    }
-
+    /*
+     * O nome do provider contém "Novelas Portuguesas" em TODOS os
+     * catálogos (incluindo Filmes e Séries), por isso nunca pode ser
+     * usado para decidir a categoria. Primeiro distinguimos Filmes
+     * pelo type e, nos catálogos series, usamos apenas o ID real.
+     */
     if (type === "movie") {
       return "🇵🇹 Filmes Portugueses";
     }
 
     if (type === "series") {
+      const idText = normalizeSearchText(catalogId || "");
+
+      if (/novela|telenovela/.test(idText)) {
+        return "🇵🇹 Novelas Portuguesas";
+      }
+
       return "🇵🇹 Séries Portuguesas";
     }
 
@@ -2248,7 +2254,6 @@ function getPtCatalogDisplayName(group, sourceName, catalogName, catalogId, type
 
   return `${PT_SOURCE_GROUPS[group]?.prefix || ""} ${String(catalogName || sourceName || "Conteúdo").trim()}`.trim();
 }
-
 
 /* =========================================================
    CATÁLOGOS PORTUGUÊS — ESTRUTURA FIXA PT•HUB
