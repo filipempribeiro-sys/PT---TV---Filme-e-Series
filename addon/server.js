@@ -1216,25 +1216,9 @@ async function getCinemetaCatalog(type, search) {
 }
 
 async function getCinemetaMeta(type, id) {
-  if (
-    !["movie", "series"].includes(String(type || "")) ||
-    !/^tt\d+$/.test(String(id || ""))
-  ) {
-    return { meta: null };
-  }
-
-  let data;
-
-  try {
-    data = await cinemetaFetch(
-      `/meta/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`
-    );
-  } catch (error) {
-    if (/HTTP 404\b/.test(String(error?.message || ""))) {
-      return { meta: null };
-    }
-    throw error;
-  }
+  const data = await cinemetaFetch(
+    `/meta/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`
+  );
 
   // O cliente Stremio/Nuvio decide se mostra trailer/preview, mas o PT•HUB
   // garante sempre os visuais necessários para uma página de detalhe rica.
@@ -5655,21 +5639,20 @@ app.get(
 
 
 /* =========================================================
-   SUBTITLES — AGREGADOR MULTI-PROVIDER ESTÁVEL
+   SUBTITLES — AGREGADOR MULTI-PROVIDER
    ========================================================= */
 
 const SUBTITLE_PROVIDERS = Object.freeze([
   {
-    id: "opensubtitles-v3",
-    name: "OpenSubtitles v3",
-    baseUrl: "https://opensubtitles-v3.strem.io",
-    priority: 10,
-    imdbOnly: true
-  },
-  {
     id: "legendasdivx",
     name: "LegendasDivx",
     baseUrl: "https://e1d6cc1ff4a7-legendasdivx-stremio.baby-beamup.club",
+    priority: 10
+  },
+  {
+    id: "opensubtitles-v3",
+    name: "OpenSubtitles v3",
+    baseUrl: "https://opensubtitles-v3.strem.io",
     priority: 20
   },
   {
@@ -5689,111 +5672,69 @@ const SUBTITLE_PROVIDERS = Object.freeze([
     name: "AIO Streaming",
     baseUrl: "https://3b4bbf5252c4-aio-streaming.baby-beamup.club",
     priority: 50
+  },
+  {
+    id: "opensubtitles-community",
+    name: "OpenSubtitles Community",
+    baseUrl: "https://2ecbbd610840-opensubtitles.baby-beamup.club",
+    priority: 60
+  },
+  {
+    id: "opensubtitles-pro",
+    name: "OpenSubtitles PRO",
+    baseUrl: "https://opensubtitlesv3-pro.dexter21767.com",
+    priority: 70
   }
 ]);
 
-const SUBTITLE_PROVIDER_TIMEOUT_MS = 6500;
-const SUBTITLE_CACHE_TTL_MS = 10 * 60 * 1000;
-const SUBTITLE_STALE_TTL_MS = 60 * 60 * 1000;
-const subtitleCache = new Map();
-
-function cleanSubtitleExtra(extra) {
-  return String(extra || "")
-    .replace(/^\/+/, "")
-    .replace(/\.json$/i, "");
-}
+const SUBTITLE_PROVIDER_TIMEOUT_MS = 7000;
 
 function buildSubtitleProviderUrl(provider, type, id, extra) {
   const base = String(provider.baseUrl || "").replace(/\/+$/, "");
   const path =
     `${base}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
-  const cleanExtra = cleanSubtitleExtra(extra);
 
-  return cleanExtra
-    ? `${path}/${cleanExtra}.json`
+  return extra
+    ? `${path}/${String(extra).replace(/^\/+/, "")}`
     : `${path}.json`;
 }
 
-function normalizeSubtitleLanguage(value) {
-  const raw = String(value || "").trim();
-  const lang = raw.toLowerCase().replace(/_/g, "-");
-
-  if (!lang) return "Desconhecido";
-
-  const ptPt = new Set([
-    "pt-pt", "por-pt", "pt", "por", "portuguese",
-    "português", "portugues", "português (portugal)",
-    "portugues (portugal)", "portugal"
-  ]);
-  const ptBr = new Set([
-    "pt-br", "por-br", "pob", "pb", "brazilian portuguese",
-    "português (brasil)", "portugues (brasil)", "brasil", "brazil"
-  ]);
-
-  if (ptBr.has(lang)) return "Português (Brasil)";
-  if (ptPt.has(lang)) return "Português (Portugal)";
-
-  const names = {
-    eng: "English", en: "English",
-    spa: "Español", es: "Español",
-    fre: "Français", fra: "Français", fr: "Français",
-    ger: "Deutsch", deu: "Deutsch", de: "Deutsch",
-    ita: "Italiano", it: "Italiano"
-  };
-
-  return names[lang] || raw;
-}
-
 function subtitleLanguagePriority(value) {
-  const lang = String(value || "").toLowerCase();
-  if (lang.includes("portugal")) return 0;
-  if (lang.includes("brasil")) return 1;
+  const lang = String(value || "").trim().toLowerCase();
+
+  if (
+    lang === "pt-pt" ||
+    lang === "pt_pt" ||
+    lang === "por-pt" ||
+    lang === "por_pt" ||
+    lang === "pt"
+  ) {
+    return 0;
+  }
+
+  if (
+    lang === "por" ||
+    lang === "pt-br" ||
+    lang === "pt_br" ||
+    lang === "pob"
+  ) {
+    return 1;
+  }
+
   return 2;
 }
 
 function subtitleDedupKey(subtitle) {
   const url = String(subtitle?.url || "").trim().toLowerCase();
-  return url || `${subtitle?.id || ""}|${subtitle?.lang || ""}`.toLowerCase();
-}
+  if (url) return `url:${url}`;
 
-function normalizeSubtitle(provider, subtitle, index) {
-  if (!subtitle || typeof subtitle !== "object") return null;
-
-  const url = String(
-    subtitle.url ||
-    subtitle.fileUrl ||
-    subtitle.file_url ||
-    subtitle.downloadUrl ||
-    subtitle.download_url ||
-    ""
-  ).trim();
-
-  if (!/^https?:\/\//i.test(url)) return null;
-
-  const rawLanguage =
-    subtitle.lang ||
-    subtitle.language ||
-    subtitle.languageCode ||
-    subtitle.language_code ||
-    subtitle.iso639 ||
-    subtitle.iso639_2 ||
-    subtitle.locale ||
-    "";
-
-  return {
-    id:
-      `${provider.id}:` +
-      String(subtitle.id || subtitle.subtitleId || subtitle.subtitle_id || index),
-    url,
-    lang: normalizeSubtitleLanguage(rawLanguage),
-    _ptHubProviderPriority: provider.priority
-  };
+  return [
+    String(subtitle?.id || "").trim().toLowerCase(),
+    String(subtitle?.lang || "").trim().toLowerCase()
+  ].join("|");
 }
 
 async function fetchSubtitleProvider(provider, type, id, extra) {
-  if (!["movie", "series"].includes(String(type || ""))) return [];
-  if (provider.imdbOnly && !/^tt\d+/.test(String(id || ""))) return [];
-
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
@@ -5812,41 +5753,39 @@ async function fetchSubtitleProvider(provider, type, id, extra) {
     });
 
     if (!response.ok) {
-      if (![404, 500, 502, 503, 504].includes(response.status)) {
-        console.warn(`Legendas ${provider.name}: HTTP ${response.status}`);
-      }
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
     const subtitles = Array.isArray(data?.subtitles) ? data.subtitles : [];
 
     return subtitles
-      .map((subtitle, index) => normalizeSubtitle(provider, subtitle, index))
-      .filter(Boolean);
+      .filter((subtitle) =>
+        subtitle &&
+        typeof subtitle === "object" &&
+        typeof subtitle.url === "string" &&
+        subtitle.url.trim()
+      )
+      .map((subtitle, index) => ({
+        ...subtitle,
+        id:
+          String(subtitle.id || "").trim() ||
+          `${provider.id}-${index}`,
+        _ptHubProvider: provider.name,
+        _ptHubProviderPriority: provider.priority
+      }));
   } catch (error) {
-    if (error.name !== "AbortError") {
-      console.warn(`Legendas ${provider.name}: ${error.message}`);
-    }
+    console.warn(
+      `Legendas ${provider.name}:`,
+      error.name === "AbortError" ? "timeout" : error.message
+    );
     return [];
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function subtitleCacheKey(type, id, extra) {
-  return `${type}|${id}|${cleanSubtitleExtra(extra)}`;
-}
-
 async function getAggregatedSubtitles(type, id, extra) {
-  const key = subtitleCacheKey(type, id, extra);
-  const cached = subtitleCache.get(key);
-  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
-
-  if (cached && age < SUBTITLE_CACHE_TTL_MS) {
-    return cached.subtitles;
-  }
-
   const results = await Promise.all(
     SUBTITLE_PROVIDERS.map((provider) =>
       fetchSubtitleProvider(provider, type, id, extra)
@@ -5862,7 +5801,7 @@ async function getAggregatedSubtitles(type, id, extra) {
     }
   }
 
-  const subtitles = [...unique.values()]
+  return [...unique.values()]
     .sort((a, b) => {
       const langDiff =
         subtitleLanguagePriority(a.lang) -
@@ -5877,23 +5816,10 @@ async function getAggregatedSubtitles(type, id, extra) {
     })
     .map((subtitle) => {
       const clean = { ...subtitle };
+      delete clean._ptHubProvider;
       delete clean._ptHubProviderPriority;
       return clean;
     });
-
-  if (subtitles.length) {
-    subtitleCache.set(key, {
-      subtitles,
-      fetchedAt: Date.now()
-    });
-    return subtitles;
-  }
-
-  if (cached && age < SUBTITLE_STALE_TTL_MS) {
-    return cached.subtitles;
-  }
-
-  return [];
 }
 
 async function handleSubtitleRequest(req, res, extra = "") {
@@ -5908,11 +5834,6 @@ async function handleSubtitleRequest(req, res, extra = "") {
       req.params.type,
       req.params.id,
       extra
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "public, max-age=300, stale-while-revalidate=600, stale-if-error=3600"
     );
 
     return res.json({ subtitles });
