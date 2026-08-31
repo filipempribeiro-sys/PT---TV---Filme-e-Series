@@ -275,6 +275,160 @@ function getConfigHash(config) {
     .slice(0, 16);
 }
 /* =========================================================
+   PT•HUB HLS ENGINE — PROXY / PLAYLIST REWRITE
+   ========================================================= */
+
+const HLS_PROXY_TIMEOUT_MS = 20000;
+
+function encodeHlsTarget(url) {
+  return Buffer.from(String(url || ""), "utf8").toString("base64url");
+}
+
+function decodeHlsTarget(value) {
+  try {
+    return Buffer.from(String(value || ""), "base64url").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function buildHlsProxyUrl(req, targetUrl, profile = "generic") {
+  const protocol = String(req.headers["x-forwarded-proto"] || req.protocol || "https")
+    .split(",")[0].trim();
+  const host = req.get("host");
+  return `${protocol}://${host}/hls-proxy/${encodeURIComponent(profile)}/${encodeHlsTarget(targetUrl)}`;
+}
+
+function getHlsProxyHeaders(profile, targetUrl) {
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (PT-HUB HLS Engine)"
+  };
+
+  if (profile === "rtp") {
+    headers.Origin = "https://www.rtp.pt";
+    headers.Referer = "https://www.rtp.pt/play/";
+  }
+
+  return headers;
+}
+
+function resolveHlsReference(reference, baseUrl) {
+  try {
+    return new URL(String(reference || "").trim(), baseUrl).toString();
+  } catch {
+    return "";
+  }
+}
+
+function rewriteHlsAttributeUris(line, baseUrl, req, profile) {
+  return String(line || "").replace(/URI=(["'])(.*?)\1/gi, (match, quote, uri) => {
+    const absolute = resolveHlsReference(uri, baseUrl);
+    if (!absolute) return match;
+    return `URI=${quote}${buildHlsProxyUrl(req, absolute, profile)}${quote}`;
+  });
+}
+
+function rewriteHlsPlaylist(text, baseUrl, req, profile) {
+  return String(text || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((rawLine) => {
+      const line = rawLine.trim();
+
+      if (!line) return rawLine;
+
+      if (line.startsWith("#")) {
+        return rewriteHlsAttributeUris(rawLine, baseUrl, req, profile);
+      }
+
+      const absolute = resolveHlsReference(line, baseUrl);
+      return absolute ? buildHlsProxyUrl(req, absolute, profile) : rawLine;
+    })
+    .join("\n");
+}
+
+function isHlsPlaylistResponse(targetUrl, response, buffer) {
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  if (
+    contentType.includes("mpegurl") ||
+    contentType.includes("vnd.apple.mpegurl") ||
+    /\.m3u8(?:$|[?#])/i.test(targetUrl)
+  ) {
+    return true;
+  }
+
+  return buffer.subarray(0, 64).toString("utf8").trimStart().startsWith("#EXTM3U");
+}
+
+app.get("/hls-proxy/:profile/:target", async (req, res) => {
+  const targetUrl = decodeHlsTarget(req.params.target);
+  const profile = String(req.params.profile || "generic").toLowerCase();
+
+  if (!isValidHttpUrl(targetUrl)) {
+    return res.status(400).send("HLS target inválido.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HLS_PROXY_TIMEOUT_MS);
+
+  try {
+    const upstreamHeaders = getHlsProxyHeaders(profile, targetUrl);
+
+    if (req.headers.range) {
+      upstreamHeaders.Range = req.headers.range;
+    }
+
+    const upstream = await fetch(targetUrl, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: upstreamHeaders
+    });
+
+    clearTimeout(timeout);
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).send(`HLS upstream HTTP ${upstream.status}`);
+    }
+
+    const arrayBuffer = await upstream.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Accept-Ranges", "bytes");
+
+    if (isHlsPlaylistResponse(targetUrl, upstream, buffer)) {
+      const finalUrl = upstream.url || targetUrl;
+      const rewritten = rewriteHlsPlaylist(
+        buffer.toString("utf8"),
+        finalUrl,
+        req,
+        profile
+      );
+
+      res.type("application/vnd.apple.mpegurl");
+      return res.send(rewritten);
+    }
+
+    const contentType = upstream.headers.get("content-type");
+    if (contentType) res.setHeader("Content-Type", contentType);
+
+    const contentRange = upstream.headers.get("content-range");
+    if (contentRange) res.setHeader("Content-Range", contentRange);
+
+    const acceptRanges = upstream.headers.get("accept-ranges");
+    if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
+
+    return res.status(upstream.status).send(buffer);
+
+  } catch (error) {
+    clearTimeout(timeout);
+    console.error("Erro HLS proxy:", error.message);
+    return res.status(502).send("Falha no PT•HUB HLS Engine.");
+  }
+});
+
+/* =========================================================
    M3U
    ========================================================= */
 function parseM3U(content) {
@@ -5336,16 +5490,9 @@ app.get(
             streams: [{
               name: "PT•HUB • RTP Play",
               title: `${channel.name} • Em direto`,
-              url: channel.streamUrl,
+              url: buildHlsProxyUrl(req, channel.streamUrl, "rtp"),
               behaviorHints: {
-                notWebReady: true,
-                proxyHeaders: {
-                  request: {
-                    "User-Agent": "Mozilla/5.0",
-                    "Origin": "https://www.rtp.pt",
-                    "Referer": getRtpPlayOfficialUrl(channel)
-                  }
-                }
+                notWebReady: true
               }
             }]
           });
@@ -5407,7 +5554,9 @@ app.get(
                 channel.name,
 
               url:
-                channel.url,
+                /\.m3u8(?:$|[?#])/i.test(String(channel.url || ""))
+                  ? buildHlsProxyUrl(req, channel.url, "generic")
+                  : channel.url,
 
               behaviorHints: {
                 notWebReady: true
