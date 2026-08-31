@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "2.6";
+const VERSION = "2.5";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -2257,12 +2257,16 @@ function getPtCatalogDisplayName(group, sourceName, catalogName, catalogId, type
   }
 
   if (group === "portuguese") {
-    if (/novela/.test(text)) {
-      return "🇵🇹 Novelas Portuguesas";
-    }
+    const catalogText = normalizeSearchText(
+      `${catalogId || ""} ${catalogName || ""}`
+    );
 
     if (type === "movie") {
       return "🇵🇹 Filmes Portugueses";
+    }
+
+    if (/novela/.test(catalogText)) {
+      return "🇵🇹 Novelas Portuguesas";
     }
 
     if (type === "series") {
