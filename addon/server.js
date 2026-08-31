@@ -5359,8 +5359,13 @@ async function fetchExternalStreamSource(baseUrl, type, id) {
     await getExternalSourceName(normalizedBase)
       .catch(() => null);
 
+  const builtinAddon =
+    PT_BUILTIN_ADDONS.find((addon) =>
+      normalizeUrl(addon.manifestUrl).replace(/\/manifest\.json$/i, "") === normalizedBase
+    );
+
   const label =
-    sourceName || normalizedBase;
+    sourceName || builtinAddon?.name || normalizedBase;
 
   const maxAttempts = 2;
 
@@ -5485,7 +5490,7 @@ const PT_BUILTIN_ADDONS = [
     id: "watchhub",
     name: "WatchHub",
     manifestUrl: "https://watchhub-us.strem.io/manifest.json",
-    resources: ["stream"]
+    resources: []
   },
   {
     id: "cinemeta-rpdb",
@@ -5503,6 +5508,17 @@ const PT_BUILTIN_ADDONS = [
     id: "torrentio",
     name: "Torrentio",
     manifestUrl: "https://torrentio.strem.fun/manifest.json",
+    resources: ["stream"]
+  },
+  {
+    id: "magnetio",
+    name: "Magnetio — Multi Provider",
+    manifestUrl:
+      "https://magnetio.peterdsp.dev/" +
+      "providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents," +
+      "limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads," +
+      "therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt" +
+      "|sort=qualityseeders|limit=50/manifest.json",
     resources: ["stream"]
   },
   {
