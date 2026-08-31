@@ -5353,66 +5353,115 @@ async function fetchExternalStreamSource(baseUrl, type, id) {
   }
 
   const url =
-    `${normalizedBase}/stream/${encodeURIComponent(type)}/${id}.json`;
+    `${normalizedBase}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`;
 
-  const controller =
-    new AbortController();
+  const sourceName =
+    await getExternalSourceName(normalizedBase)
+      .catch(() => null);
 
-  const timeout =
-    setTimeout(() => controller.abort(), 12000);
+  const label =
+    sourceName || normalizedBase;
 
-  try {
+  const maxAttempts = 2;
 
-    const [response, sourceName] =
-      await Promise.all([
-        fetch(url, {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+
+    const controller =
+      new AbortController();
+
+    const timeout =
+      setTimeout(() => controller.abort(), 25000);
+
+    try {
+
+      const response =
+        await fetch(url, {
           signal: controller.signal,
+          redirect: "follow",
           headers: {
-            "User-Agent": `PT-HUB/${VERSION}`,
-            "Accept": "application/json"
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+              "AppleWebKit/537.36 (KHTML, like Gecko) " +
+              "Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/json,text/plain,*/*",
+            "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache"
           }
-        }),
-        getExternalSourceName(normalizedBase)
-      ]);
+        });
 
-    clearTimeout(timeout);
+      clearTimeout(timeout);
 
-    if (!response.ok) {
+      if (!response.ok) {
+
+        console.warn(
+          `Streams ${label}: HTTP ${response.status}` +
+          ` — tentativa ${attempt}/${maxAttempts}`
+        );
+
+        if (
+          attempt < maxAttempts &&
+          (response.status === 429 || response.status >= 500)
+        ) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, 900 * attempt)
+          );
+          continue;
+        }
+
+        return [];
+      }
+
+      const data =
+        await response.json();
+
+      const streams =
+        Array.isArray(data?.streams)
+          ? data.streams
+          : [];
+
+      console.log(
+        `Streams ${label}: HTTP ${response.status}` +
+        ` — ${streams.length} resultado(s)` +
+        ` — ${type} ${id}`
+      );
+
+      if (!sourceName) {
+        return streams;
+      }
+
+      return streams.map((stream) => ({
+        ...stream,
+        name:
+          `🔗 ${sourceName}` +
+          (stream.name ? `\n${stream.name}` : "")
+      }));
+
+    } catch (error) {
+
+      clearTimeout(timeout);
+
+      const reason =
+        error?.name === "AbortError"
+          ? "timeout"
+          : (error?.message || "erro desconhecido");
+
+      console.warn(
+        `Streams ${label}: ${reason}` +
+        ` — tentativa ${attempt}/${maxAttempts}`
+      );
+
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 900 * attempt)
+        );
+        continue;
+      }
+
       return [];
     }
-
-    const data =
-      await response.json();
-
-    const streams =
-      Array.isArray(data?.streams)
-        ? data.streams
-        : [];
-
-    if (!sourceName) {
-      return streams;
-    }
-
-    return streams.map((stream) => ({
-      ...stream,
-      name:
-        `🔗 ${sourceName}` +
-        (stream.name ? `\n${stream.name}` : "")
-    }));
-
-  } catch (error) {
-
-    clearTimeout(timeout);
-
-    console.error(
-      `Erro ao obter streams externos de ${normalizedBase}:`,
-      error.message
-    );
-
-    return [];
-
   }
 
+  return [];
 }
 
 
