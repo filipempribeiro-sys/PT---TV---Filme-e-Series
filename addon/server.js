@@ -5470,6 +5470,133 @@ async function fetchExternalStreamSource(baseUrl, type, id) {
 }
 
 
+
+function formatTorrentSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "tamanho desconhecido";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  const decimals = unit >= 3 ? 2 : unit >= 2 ? 1 : 0;
+  return `${size.toFixed(decimals)} ${units[unit]}`;
+}
+
+async function fetchPtHubTorrentEngine(type, id) {
+  const configuredBase = String(process.env.PT_HUB_TORRENT_ENGINE_URL || "").trim();
+  if (!configuredBase) return [];
+
+  const engineBase = normalizeUrl(configuredBase).replace(/\/$/, "");
+  if (!isValidHttpUrl(engineBase)) {
+    console.warn("PT•HUB Torrent Engine: PT_HUB_TORRENT_ENGINE_URL inválido");
+    return [];
+  }
+
+  const url = `${engineBase}/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        redirect: "follow",
+        headers: {
+          "User-Agent": `PT-HUB/${VERSION}`,
+          "Accept": "application/json",
+          "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8"
+        }
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        console.warn(
+          `PT•HUB Torrent Engine: HTTP ${response.status}` +
+          ` — tentativa ${attempt}/${maxAttempts} — ${type} ${id}`
+        );
+
+        if (attempt < maxAttempts && (response.status === 429 || response.status >= 500)) {
+          await new Promise((resolve) => setTimeout(resolve, 900 * attempt));
+          continue;
+        }
+        return [];
+      }
+
+      const data = await response.json();
+      const torrents = Array.isArray(data?.streams) ? data.streams : [];
+
+      console.log(
+        `PT•HUB Torrent Engine: HTTP ${response.status}` +
+        ` — ${torrents.length} resultado(s)` +
+        ` — cache ${data?.cached === true ? "HIT" : "MISS"}` +
+        ` — ${type} ${id}`
+      );
+
+      return torrents
+        .filter((torrent) => String(torrent?.infoHash || "").trim())
+        .map((torrent) => {
+          const provider = String(torrent?.provider || "Torrent").trim() || "Torrent";
+          const torrentTitle = String(torrent?.title || "").trim();
+          const seeders = Number(torrent?.seeders) || 0;
+          const size = Number(torrent?.size) || 0;
+          const trackers = Array.isArray(torrent?.trackers)
+            ? torrent.trackers.filter(Boolean)
+            : [];
+
+          const stream = {
+            infoHash: String(torrent.infoHash).trim(),
+            name: `PT•HUB • ${provider}`,
+            title:
+              (torrentTitle || `${provider} torrent`) +
+              `\n🌱 ${seeders} seeders • ${formatTorrentSize(size)}`,
+            seeders,
+            size,
+            quality: torrent?.quality || null,
+            provider,
+            behaviorHints: {
+              ...(torrentTitle ? { filename: torrentTitle } : {})
+            }
+          };
+
+          if (Number.isFinite(Number(torrent?.fileIdx))) {
+            stream.fileIdx = Number(torrent.fileIdx);
+          }
+
+          if (trackers.length) {
+            stream.sources = trackers.map((tracker) => `tracker:${tracker}`);
+          }
+
+          return stream;
+        });
+
+    } catch (error) {
+      clearTimeout(timeout);
+      const reason = error?.name === "AbortError"
+        ? "timeout"
+        : (error?.message || "erro desconhecido");
+
+      console.warn(
+        `PT•HUB Torrent Engine: ${reason}` +
+        ` — tentativa ${attempt}/${maxAttempts} — ${type} ${id}`
+      );
+
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 900 * attempt));
+        continue;
+      }
+      return [];
+    }
+  }
+
+  return [];
+}
+
 /* =========================================================
    FONTES INTEGRADAS PT•HUB — 2.5
    =========================================================
@@ -5512,26 +5639,15 @@ const PT_BUILTIN_ADDONS = [
   },
   {
     id: "magnetio",
-    name: "Magnetio — Multi Provider",
+    name: "Magnetio — Multi Provider (fallback público)",
     manifestUrl:
-      (() => {
-      const engineBase = String(
-        process.env.PT_HUB_TORRENT_ENGINE_URL ||
-        "https://magnetio.peterdsp.dev"
-      ).replace(/\/$/, "");
-
-      // Durante a transição mantém a instância pública como fallback.
-      // Assim que PT_HUB_TORRENT_ENGINE_URL estiver definido no Render,
-      // o PT•HUB passa automaticamente a usar o nosso Torrent Engine.
-      return (
-        engineBase + "/" +
-        "providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents," +
-        "limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads," +
-        "therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt" +
-        "|sort=qualityseeders|limit=50/manifest.json"
-      );
-    })(),
-    resources: ["stream"]
+      "https://magnetio.peterdsp.dev/" +
+      "providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents," +
+      "limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads," +
+      "therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt" +
+      "|sort=qualityseeders|limit=50/manifest.json",
+    // O fallback público só entra quando o Torrent Engine próprio não está definido.
+    resources: process.env.PT_HUB_TORRENT_ENGINE_URL ? [] : ["stream"]
   },
   {
     id: "torrentsdb",
@@ -5614,15 +5730,14 @@ async function getExternalStreams(config, type, id) {
     return [];
   }
 
-  const results =
-    await Promise.all(
-      sources.map((source) =>
-        fetchExternalStreamSource(source, type, id)
-      )
-    );
+  const resultGroups = await Promise.all([
+    ...sources.map((source) =>
+      fetchExternalStreamSource(source, type, id)
+    ),
+    fetchPtHubTorrentEngine(type, id)
+  ]);
 
-  const allStreams =
-    results.flat();
+  const allStreams = resultGroups.flat();
 
   // Evita que o mesmo torrent/stream apareça repetido por providers diferentes.
   const dedupedStreams = [];
@@ -5646,6 +5761,7 @@ async function getExternalStreams(config, type, id) {
   // máximo 3 por qualidade, privilegiando mais seeders e menor tamanho.
   function getTorrentQuality(stream) {
     const text = [
+      stream?.quality,
       stream?.name,
       stream?.title,
       stream?.description,
