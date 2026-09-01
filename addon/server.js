@@ -5494,6 +5494,22 @@ function normalizeTorrentQualityLabel(value, fallbackText = "") {
   return "Qualidade N/D";
 }
 
+function extractTorrentRealSource(provider, title = "") {
+  const text = String(title || "");
+
+  // TorrentsDB / Filtorrent costumam incluir a origem real no título:
+  // "⚙️ sktorrent", "⚙️ ThePirateBay", etc.
+  const gearMatch = text.match(/⚙️\s*([^\n\r•|]+)/i);
+  if (gearMatch?.[1]) {
+    const source = gearMatch[1].trim();
+    if (source) return source;
+  }
+
+  // No Magnetio, o campo provider já corresponde normalmente à fonte real
+  // (YTS, Bitsearch, Rutracker, ...). Nos restantes casos funciona como fallback.
+  return String(provider || "Torrent").trim() || "Torrent";
+}
+
 const torrentEngineSleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -5643,16 +5659,21 @@ async function fetchPtHubTorrentEngine(type, id) {
             torrentTitle
           );
 
+          const realSource = extractTorrentRealSource(provider, torrentTitle);
+          const hasSourceInTitle = /⚙️\s*[^\n\r]+/i.test(torrentTitle);
+
           const stream = {
             infoHash: String(torrent.infoHash).trim(),
-            name: `${quality} • PT•HUB • ${provider}`,
+            name: `${quality} • PT•HUB`,
             title:
-              (torrentTitle || `${provider} torrent`) +
+              (torrentTitle || `${realSource} torrent`) +
+              (hasSourceInTitle ? "" : `\n⚙️ ${realSource}`) +
               `\n🌱 ${seeders} seeders • ${formatTorrentSize(size)}`,
             seeders,
             size,
             quality,
             provider,
+            _ptHubSource: realSource,
             behaviorHints: {
               ...(torrentTitle ? { filename: torrentTitle } : {})
             }
@@ -5938,10 +5959,71 @@ async function getExternalStreams(config, type, id) {
     return value * (multipliers[unit] || 1);
   }
 
-  // TESTE TEMPORÁRIO — sem limite por qualidade.
-  // Devolve todos os torrents únicos recebidos do PT•HUB Torrent Engine
-  // para validar a diversidade real de providers.
-  return dedupedStreams;
+  function getTorrentSource(stream) {
+    if (stream?._ptHubSource) {
+      return String(stream._ptHubSource).trim().toLowerCase();
+    }
+
+    const text = [
+      stream?.title,
+      stream?.description
+    ].filter(Boolean).join("\n");
+
+    const gearMatch = text.match(/⚙️\s*([^\n\r•|]+)/i);
+    if (gearMatch?.[1]) {
+      return gearMatch[1].trim().toLowerCase();
+    }
+
+    return String(stream?.provider || stream?.name || "desconhecida")
+      .trim()
+      .toLowerCase();
+  }
+
+  const qualityOrder = ["4K", "1080p", "720p", "480p", "Outra"];
+  const selectedStreams = [];
+
+  for (const quality of qualityOrder) {
+    const candidates = dedupedStreams
+      .filter((stream) => getTorrentQuality(stream) === quality)
+      .sort((a, b) => {
+        const seedDiff = getTorrentSeeders(b) - getTorrentSeeders(a);
+        if (seedDiff !== 0) return seedDiff;
+
+        // Em igualdade de seeders, favorece o ficheiro mais pequeno.
+        return getTorrentSizeBytes(a) - getTorrentSizeBytes(b);
+      });
+
+    const selectedForQuality = [];
+    const usedSources = new Set();
+
+    // 1.ª passagem: diversidade — uma fonte diferente por posição sempre que possível.
+    for (const stream of candidates) {
+      if (selectedForQuality.length >= 3) break;
+
+      const source = getTorrentSource(stream);
+      if (usedSources.has(source)) continue;
+
+      usedSources.add(source);
+      selectedForQuality.push(stream);
+    }
+
+    // 2.ª passagem: se não existirem 3 fontes diferentes, completa com os melhores restantes.
+    if (selectedForQuality.length < 3) {
+      for (const stream of candidates) {
+        if (selectedForQuality.length >= 3) break;
+        if (selectedForQuality.includes(stream)) continue;
+        selectedForQuality.push(stream);
+      }
+    }
+
+    selectedStreams.push(...selectedForQuality);
+  }
+
+  return selectedStreams.map((stream) => {
+    const clean = { ...stream };
+    delete clean._ptHubSource;
+    return clean;
+  });
 
 }
 
