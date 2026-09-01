@@ -6469,7 +6469,55 @@ async function getAggregatedSubtitles(type, id, extra, country) {
     }
   }
 
-  return [...unique.values()]
+  const allowedLanguages =
+    new Set(
+      preferredLanguages.map(
+        normalizeSubtitleLanguage
+      )
+    );
+
+  const filtered =
+    [...unique.values()].filter(
+      (subtitle) => {
+        const lang =
+          normalizeSubtitleLanguage(
+            subtitle?.lang
+          );
+
+        if (!lang) {
+          return false;
+        }
+
+        if (allowedLanguages.has(lang)) {
+          return true;
+        }
+
+        const base =
+          lang.split("-")[0];
+
+        return preferredLanguages.some(
+          (preferred) => {
+            const normalizedPreferred =
+              normalizeSubtitleLanguage(
+                preferred
+              );
+
+            return (
+              normalizedPreferred === base ||
+              normalizedPreferred.split("-")[0] === base
+            );
+          }
+        );
+      }
+    );
+
+  console.log(
+    `Legendas PT•HUB [${String(country || "PT").toUpperCase()}]: ` +
+    `${unique.size} recebida(s) — ${filtered.length} aceite(s) — ` +
+    `idiomas ${preferredLanguages.join(",")}`
+  );
+
+  return filtered
     .sort((a, b) =>
       subtitleLanguagePriority(a?.lang, preferredLanguages) -
       subtitleLanguagePriority(b?.lang, preferredLanguages)
