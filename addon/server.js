@@ -1522,7 +1522,39 @@ async function getDiscoveryCatalog(type, mode, country) {
     );
   }
 
-  const result = { metas: metas.slice(0, 100) };
+  let finalMetas = metas.slice(0, 100);
+
+  /*
+   * Alguns países/combinações do JustWatch podem devolver zero resultados
+   * para monetizationTypes=["CINEMA"]. O Nuvio mostra isso como EmptyContent.
+   * Para "Estreias no Cinema", fazemos fallback seguro para títulos recentes
+   * do mesmo país, preservando a linha em vez de devolver um catálogo vazio.
+   */
+  if (mode === "cinema" && finalMetas.length === 0) {
+    try {
+      const fallback =
+        await getDiscoveryCatalog(
+          type,
+          "new",
+          countryCode
+        );
+
+      finalMetas =
+        Array.isArray(fallback?.metas)
+          ? fallback.metas.slice(0, 100)
+          : [];
+
+      console.warn(
+        `PT•HUB Cinema [${countryCode}]: JustWatch CINEMA vazio — fallback Novos Filmes (${finalMetas.length})`
+      );
+    } catch (error) {
+      console.warn(
+        `PT•HUB Cinema [${countryCode}]: fallback falhou — ${error.message}`
+      );
+    }
+  }
+
+  const result = { metas: finalMetas };
   discoveryCatalogCache.set(cacheKey, { data: result, time: Date.now() });
 
   return result;
