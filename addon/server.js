@@ -5546,7 +5546,8 @@ const torrentEngineSleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 const TORRENT_ENGINE_HEALTH_TIMEOUT_MS = 8000;
-const TORRENT_ENGINE_WAKE_MAX_MS = 55000;
+const TORRENT_ENGINE_ROOT_TIMEOUT_MS = 10000;
+const TORRENT_ENGINE_WAKE_MAX_MS = 65000;
 const TORRENT_ENGINE_WAKE_POLL_MS = 2500;
 const TORRENT_ENGINE_STREAM_TIMEOUT_MS = 30000;
 const TORRENT_ENGINE_KEEPALIVE_MS = 10 * 60 * 1000;
@@ -5574,7 +5575,117 @@ function getConfiguredPtHubTorrentEngineBase() {
     : "";
 }
 
-async function probePtHubTorrentEngine(engineBase) {
+function getTorrentEngineErrorReason(error) {
+  if (!error) {
+    return "erro desconhecido";
+  }
+
+  if (
+    error?.name === "AbortError" ||
+    error?.cause?.name === "AbortError"
+  ) {
+    return "timeout";
+  }
+
+  const parts = [];
+
+  if (error?.name) {
+    parts.push(error.name);
+  }
+
+  if (error?.message) {
+    parts.push(error.message);
+  }
+
+  if (error?.cause?.code) {
+    parts.push(error.cause.code);
+  }
+
+  if (error?.cause?.message) {
+    parts.push(error.cause.message);
+  }
+
+  return parts.length
+    ? [...new Set(parts)].join(" — ")
+    : "erro desconhecido";
+}
+
+/*
+ * Faz um pedido simples à raiz pública do Engine.
+ *
+ * O objetivo NÃO é validar saúde — é apenas provocar
+ * tráfego HTTP público suficiente para o Render iniciar
+ * o spin-up do serviço quando ele está adormecido.
+ *
+ * Uma resposta 404/401/403 continua a provar que chegámos
+ * ao serviço/edge do Render, por isso é registada mas não
+ * é tratada como health OK.
+ */
+async function primePtHubTorrentEngine(
+  engineBase,
+  attempt
+) {
+  const controller =
+    new AbortController();
+
+  const timeout =
+    setTimeout(
+      () => controller.abort(),
+      TORRENT_ENGINE_ROOT_TIMEOUT_MS
+    );
+
+  try {
+    const response =
+      await fetch(
+        `${engineBase}/`,
+        {
+          method: "GET",
+          signal: controller.signal,
+          redirect: "follow",
+          headers: {
+            "User-Agent": `PT-HUB/${VERSION}`,
+            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+            "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache"
+          }
+        }
+      );
+
+    console.log(
+      `PT•HUB Torrent Engine: / → HTTP ${response.status}` +
+      ` — wake tentativa ${attempt}`
+    );
+
+    return {
+      reached: true,
+      status: response.status
+    };
+
+  } catch (error) {
+    const reason =
+      getTorrentEngineErrorReason(error);
+
+    console.warn(
+      `PT•HUB Torrent Engine: / → ${reason}` +
+      ` — wake tentativa ${attempt}`
+    );
+
+    return {
+      reached: false,
+      status: 0,
+      error: reason
+    };
+
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function probePtHubTorrentEngine(
+  engineBase,
+  attempt = 0
+) {
   const controller =
     new AbortController();
 
@@ -5589,26 +5700,61 @@ async function probePtHubTorrentEngine(engineBase) {
       await fetch(
         `${engineBase}/health`,
         {
+          method: "GET",
           signal: controller.signal,
           redirect: "follow",
           headers: {
             "User-Agent": `PT-HUB/${VERSION}`,
             "Accept": "application/json",
-            "Cache-Control": "no-cache"
+            "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache"
           }
         }
       );
 
     if (!response.ok) {
+      console.warn(
+        `PT•HUB Torrent Engine: /health → HTTP ${response.status}` +
+        (
+          attempt
+            ? ` — wake tentativa ${attempt}`
+            : ""
+        )
+      );
+
       return false;
     }
 
     torrentEngineLastHealthyAt =
       Date.now();
 
+    console.log(
+      `PT•HUB Torrent Engine: /health → HTTP ${response.status}` +
+      (
+        attempt
+          ? ` — wake tentativa ${attempt}`
+          : ""
+      )
+    );
+
     return true;
-  } catch {
+
+  } catch (error) {
+    const reason =
+      getTorrentEngineErrorReason(error);
+
+    console.warn(
+      `PT•HUB Torrent Engine: /health → ${reason}` +
+      (
+        attempt
+          ? ` — wake tentativa ${attempt}`
+          : ""
+      )
+    );
+
     return false;
+
   } finally {
     clearTimeout(timeout);
   }
@@ -5652,9 +5798,22 @@ async function wakePtHubTorrentEngine(engineBase) {
       ) {
         attempt++;
 
+        /*
+         * 1.º provocamos tráfego na raiz pública.
+         * 2.º confirmamos a disponibilidade real em /health.
+         *
+         * Isto evita depender exclusivamente de /health para
+         * desencadear o spin-up de uma instância Render Free.
+         */
+        await primePtHubTorrentEngine(
+          engineBase,
+          attempt
+        );
+
         const ok =
           await probePtHubTorrentEngine(
-            engineBase
+            engineBase,
+            attempt
           );
 
         if (ok) {
@@ -5707,8 +5866,25 @@ function triggerPtHubTorrentEngineWake(
     getConfiguredPtHubTorrentEngineBase();
 
   if (!engineBase) {
+    if (
+      String(
+        process.env
+          .PT_HUB_TORRENT_ENGINE_URL ||
+        ""
+      ).trim()
+    ) {
+      console.warn(
+        "PT•HUB Torrent Engine: PT_HUB_TORRENT_ENGINE_URL inválido"
+      );
+    }
+
     return;
   }
+
+  console.log(
+    `PT•HUB Torrent Engine: wake iniciado — ${reason}` +
+    ` — ${engineBase}`
+  );
 
   wakePtHubTorrentEngine(engineBase)
     .then((ok) => {
@@ -5716,11 +5892,16 @@ function triggerPtHubTorrentEngineWake(
         console.log(
           `PT•HUB Torrent Engine: pronto — ${reason}`
         );
+      } else {
+        console.warn(
+          `PT•HUB Torrent Engine: wake terminou sem /health 200 — ${reason}`
+        );
       }
     })
     .catch((error) => {
       console.warn(
-        `PT•HUB Torrent Engine: wake background falhou — ${reason} — ${error.message}`
+        `PT•HUB Torrent Engine: wake background falhou — ${reason}` +
+        ` — ${getTorrentEngineErrorReason(error)}`
       );
     });
 }
@@ -5767,7 +5948,7 @@ if (
  */
 const torrentEngineKeepAliveTimer =
   setInterval(
-    () => {
+    async () => {
       const engineBase =
         getConfiguredPtHubTorrentEngineBase();
 
@@ -5775,19 +5956,16 @@ const torrentEngineKeepAliveTimer =
         return;
       }
 
-      probePtHubTorrentEngine(engineBase)
-        .then((ok) => {
-          if (!ok) {
-            triggerPtHubTorrentEngineWake(
-              "keep-alive"
-            );
-          }
-        })
-        .catch(() => {
-          triggerPtHubTorrentEngineWake(
-            "keep-alive"
-          );
-        });
+      const ok =
+        await probePtHubTorrentEngine(
+          engineBase
+        );
+
+      if (!ok) {
+        triggerPtHubTorrentEngineWake(
+          "keep-alive"
+        );
+      }
     },
     TORRENT_ENGINE_KEEPALIVE_MS
   );
@@ -5841,7 +6019,8 @@ async function fetchPtHubTorrentEngine(
 
   if (!awake) {
     console.warn(
-      `PT•HUB Torrent Engine: não ficou disponível após wake-up — ${type} ${id}`
+      `PT•HUB Torrent Engine: não ficou disponível após wake-up` +
+      ` — ${type} ${id}`
     );
 
     return [];
@@ -5890,16 +6069,17 @@ async function fetchPtHubTorrentEngine(
                 "pt-PT,pt;q=0.9,en;q=0.8",
 
               "Cache-Control":
+                "no-cache, no-store",
+
+              "Pragma":
                 "no-cache"
             }
           }
         );
 
-      clearTimeout(timeout);
-
       if (!response.ok) {
         console.warn(
-          `PT•HUB Torrent Engine: HTTP ${response.status}` +
+          `PT•HUB Torrent Engine: /streams → HTTP ${response.status}` +
           ` — tentativa ${attempt}/${maxAttempts}` +
           ` — ${type} ${id}`
         );
@@ -6077,21 +6257,11 @@ async function fetchPtHubTorrentEngine(
         );
 
     } catch (error) {
-      clearTimeout(timeout);
-
       const reason =
-        error?.name ===
-        "AbortError"
-
-          ? "timeout"
-
-          : (
-              error?.message ||
-              "erro desconhecido"
-            );
+        getTorrentEngineErrorReason(error);
 
       console.warn(
-        `PT•HUB Torrent Engine: ${reason}` +
+        `PT•HUB Torrent Engine: /streams → ${reason}` +
         ` — tentativa ${attempt}/${maxAttempts}` +
         ` — ${type} ${id}`
       );
@@ -6114,11 +6284,15 @@ async function fetchPtHubTorrentEngine(
       }
 
       return [];
+
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
   return [];
 }
+
 
 /* =========================================================
    FONTES INTEGRADAS PT•HUB — 2.5
