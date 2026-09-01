@@ -5545,23 +5545,50 @@ function extractTorrentRealSource(provider, title = "") {
 const torrentEngineSleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-let torrentEngineWakePromise = null;
+const TORRENT_ENGINE_HEALTH_TIMEOUT_MS = 8000;
+const TORRENT_ENGINE_WAKE_MAX_MS = 55000;
+const TORRENT_ENGINE_WAKE_POLL_MS = 2500;
+const TORRENT_ENGINE_STREAM_TIMEOUT_MS = 30000;
+const TORRENT_ENGINE_KEEPALIVE_MS = 10 * 60 * 1000;
+const TORRENT_ENGINE_RECENT_HEALTH_MS = 2 * 60 * 1000;
 
-async function wakePtHubTorrentEngine(engineBase) {
-  if (torrentEngineWakePromise) {
-    return torrentEngineWakePromise;
+let torrentEngineWakePromise = null;
+let torrentEngineLastHealthyAt = 0;
+
+function getConfiguredPtHubTorrentEngineBase() {
+  const configuredBase =
+    String(
+      process.env.PT_HUB_TORRENT_ENGINE_URL || ""
+    ).trim();
+
+  if (!configuredBase) {
+    return "";
   }
 
-  torrentEngineWakePromise = (async () => {
-    const healthUrl = `${engineBase}/health`;
-    const maxAttempts = 10;
+  const engineBase =
+    normalizeUrl(configuredBase)
+      .replace(/\/$/, "");
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12000);
+  return isValidHttpUrl(engineBase)
+    ? engineBase
+    : "";
+}
 
-      try {
-        const response = await fetch(healthUrl, {
+async function probePtHubTorrentEngine(engineBase) {
+  const controller =
+    new AbortController();
+
+  const timeout =
+    setTimeout(
+      () => controller.abort(),
+      TORRENT_ENGINE_HEALTH_TIMEOUT_MS
+    );
+
+  try {
+    const response =
+      await fetch(
+        `${engineBase}/health`,
+        {
           signal: controller.signal,
           redirect: "follow",
           headers: {
@@ -5569,40 +5596,97 @@ async function wakePtHubTorrentEngine(engineBase) {
             "Accept": "application/json",
             "Cache-Control": "no-cache"
           }
-        });
+        }
+      );
 
-        clearTimeout(timeout);
+    if (!response.ok) {
+      return false;
+    }
 
-        if (response.ok) {
-          console.log(
-            `PT•HUB Torrent Engine: wake-up OK — tentativa ${attempt}/${maxAttempts}`
+    torrentEngineLastHealthyAt =
+      Date.now();
+
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function wakePtHubTorrentEngine(engineBase) {
+  /*
+   * Se confirmámos recentemente que o Engine está online,
+   * não fazemos um novo /health antes de cada stream.
+   */
+  if (
+    torrentEngineLastHealthyAt &&
+    (
+      Date.now() -
+      torrentEngineLastHealthyAt
+    ) < TORRENT_ENGINE_RECENT_HEALTH_MS
+  ) {
+    return true;
+  }
+
+  /*
+   * Vários pedidos simultâneos do Stremio/Nuvio
+   * partilham o mesmo processo de wake.
+   */
+  if (torrentEngineWakePromise) {
+    return torrentEngineWakePromise;
+  }
+
+  torrentEngineWakePromise =
+    (async () => {
+      const startedAt =
+        Date.now();
+
+      let attempt = 0;
+
+      while (
+        (
+          Date.now() -
+          startedAt
+        ) < TORRENT_ENGINE_WAKE_MAX_MS
+      ) {
+        attempt++;
+
+        const ok =
+          await probePtHubTorrentEngine(
+            engineBase
           );
+
+        if (ok) {
+          console.log(
+            `PT•HUB Torrent Engine: wake-up OK — tentativa ${attempt}`
+          );
+
           return true;
         }
 
         console.warn(
-          `PT•HUB Torrent Engine: wake-up HTTP ${response.status}` +
-          ` — tentativa ${attempt}/${maxAttempts}`
+          `PT•HUB Torrent Engine: ainda a acordar — tentativa ${attempt}`
         );
-      } catch (error) {
-        clearTimeout(timeout);
-        const reason = error?.name === "AbortError"
-          ? "timeout"
-          : (error?.message || "erro desconhecido");
 
-        console.warn(
-          `PT•HUB Torrent Engine: wake-up ${reason}` +
-          ` — tentativa ${attempt}/${maxAttempts}`
+        const elapsed =
+          Date.now() -
+          startedAt;
+
+        if (
+          elapsed >=
+          TORRENT_ENGINE_WAKE_MAX_MS
+        ) {
+          break;
+        }
+
+        await torrentEngineSleep(
+          TORRENT_ENGINE_WAKE_POLL_MS
         );
       }
 
-      if (attempt < maxAttempts) {
-        await torrentEngineSleep(attempt <= 2 ? 2500 : 5000);
-      }
-    }
-
-    return false;
-  })();
+      return false;
+    })();
 
   try {
     return await torrentEngineWakePromise;
@@ -5611,133 +5695,424 @@ async function wakePtHubTorrentEngine(engineBase) {
   }
 }
 
-async function fetchPtHubTorrentEngine(type, id) {
-  const configuredBase = String(process.env.PT_HUB_TORRENT_ENGINE_URL || "").trim();
-  if (!configuredBase) return [];
+/*
+ * Inicia o wake sem bloquear o pedido atual.
+ *
+ * Isto é usado no arranque e no keep-alive.
+ */
+function triggerPtHubTorrentEngineWake(
+  reason = "background"
+) {
+  const engineBase =
+    getConfiguredPtHubTorrentEngineBase();
 
-  const engineBase = normalizeUrl(configuredBase).replace(/\/$/, "");
-  if (!isValidHttpUrl(engineBase)) {
-    console.warn("PT•HUB Torrent Engine: PT_HUB_TORRENT_ENGINE_URL inválido");
+  if (!engineBase) {
+    return;
+  }
+
+  wakePtHubTorrentEngine(engineBase)
+    .then((ok) => {
+      if (ok) {
+        console.log(
+          `PT•HUB Torrent Engine: pronto — ${reason}`
+        );
+      }
+    })
+    .catch((error) => {
+      console.warn(
+        `PT•HUB Torrent Engine: wake background falhou — ${reason} — ${error.message}`
+      );
+    });
+}
+
+/*
+ * =========================================================
+ * WAKE AUTOMÁTICO NO ARRANQUE DO PT•HUB
+ * =========================================================
+ *
+ * Quando o próprio PT•HUB acorda no Render, iniciamos
+ * imediatamente o wake do Torrent Engine.
+ *
+ * O pedido que acordou o PT•HUB não fica bloqueado.
+ * =========================================================
+ */
+const torrentEngineInitialWakeTimer =
+  setTimeout(
+    () => {
+      triggerPtHubTorrentEngineWake(
+        "arranque PT•HUB"
+      );
+    },
+    1000
+  );
+
+if (
+  typeof torrentEngineInitialWakeTimer.unref ===
+  "function"
+) {
+  torrentEngineInitialWakeTimer.unref();
+}
+
+/*
+ * =========================================================
+ * KEEP-ALIVE
+ * =========================================================
+ *
+ * Enquanto o PT•HUB estiver acordado, verifica o Engine
+ * de 10 em 10 minutos.
+ *
+ * Assim, numa utilização normal do PT•HUB, o Engine
+ * permanece pronto para responder.
+ * =========================================================
+ */
+const torrentEngineKeepAliveTimer =
+  setInterval(
+    () => {
+      const engineBase =
+        getConfiguredPtHubTorrentEngineBase();
+
+      if (!engineBase) {
+        return;
+      }
+
+      probePtHubTorrentEngine(engineBase)
+        .then((ok) => {
+          if (!ok) {
+            triggerPtHubTorrentEngineWake(
+              "keep-alive"
+            );
+          }
+        })
+        .catch(() => {
+          triggerPtHubTorrentEngineWake(
+            "keep-alive"
+          );
+        });
+    },
+    TORRENT_ENGINE_KEEPALIVE_MS
+  );
+
+if (
+  typeof torrentEngineKeepAliveTimer.unref ===
+  "function"
+) {
+  torrentEngineKeepAliveTimer.unref();
+}
+
+/*
+ * =========================================================
+ * PT•HUB TORRENT ENGINE
+ * =========================================================
+ */
+async function fetchPtHubTorrentEngine(
+  type,
+  id
+) {
+  const engineBase =
+    getConfiguredPtHubTorrentEngineBase();
+
+  if (!engineBase) {
+    if (
+      String(
+        process.env
+          .PT_HUB_TORRENT_ENGINE_URL ||
+        ""
+      ).trim()
+    ) {
+      console.warn(
+        "PT•HUB Torrent Engine: PT_HUB_TORRENT_ENGINE_URL inválido"
+      );
+    }
+
     return [];
   }
 
-  // Render Free pode suspender o serviço. Primeiro acordamos o Engine
-  // e só depois lançamos a pesquisa de torrents.
-  const awake = await wakePtHubTorrentEngine(engineBase);
+  /*
+   * Normalmente este wake será instantâneo porque:
+   *
+   * 1. o Engine acordou juntamente com o PT•HUB;
+   * 2. existe keep-alive;
+   * 3. existe cache de health recente.
+   */
+  const awake =
+    await wakePtHubTorrentEngine(
+      engineBase
+    );
+
   if (!awake) {
     console.warn(
       `PT•HUB Torrent Engine: não ficou disponível após wake-up — ${type} ${id}`
     );
+
     return [];
   }
 
-  const url = `${engineBase}/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+  const url =
+    `${engineBase}/streams/` +
+    `${encodeURIComponent(type)}/` +
+    `${encodeURIComponent(id)}`;
+
   const maxAttempts = 2;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 40000);
+  for (
+    let attempt = 1;
+    attempt <= maxAttempts;
+    attempt++
+  ) {
+    const controller =
+      new AbortController();
+
+    const timeout =
+      setTimeout(
+        () => controller.abort(),
+        TORRENT_ENGINE_STREAM_TIMEOUT_MS
+      );
 
     try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        redirect: "follow",
-        headers: {
-          "User-Agent": `PT-HUB/${VERSION}`,
-          "Accept": "application/json",
-          "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
-          "Cache-Control": "no-cache"
-        }
-      });
+      const response =
+        await fetch(
+          url,
+          {
+            signal:
+              controller.signal,
+
+            redirect:
+              "follow",
+
+            headers: {
+              "User-Agent":
+                `PT-HUB/${VERSION}`,
+
+              "Accept":
+                "application/json",
+
+              "Accept-Language":
+                "pt-PT,pt;q=0.9,en;q=0.8",
+
+              "Cache-Control":
+                "no-cache"
+            }
+          }
+        );
 
       clearTimeout(timeout);
 
       if (!response.ok) {
         console.warn(
           `PT•HUB Torrent Engine: HTTP ${response.status}` +
-          ` — tentativa ${attempt}/${maxAttempts} — ${type} ${id}`
+          ` — tentativa ${attempt}/${maxAttempts}` +
+          ` — ${type} ${id}`
         );
 
-        if (attempt < maxAttempts && (response.status === 429 || response.status >= 500)) {
-          await wakePtHubTorrentEngine(engineBase);
-          await torrentEngineSleep(2500);
+        if (
+          attempt < maxAttempts &&
+          (
+            response.status === 429 ||
+            response.status >= 500
+          )
+        ) {
+          torrentEngineLastHealthyAt = 0;
+
+          triggerPtHubTorrentEngineWake(
+            "retry stream"
+          );
+
+          await torrentEngineSleep(
+            2000
+          );
+
           continue;
         }
+
         return [];
       }
 
-      const data = await response.json();
-      const torrents = Array.isArray(data?.streams) ? data.streams : [];
+      /*
+       * Uma resposta /streams bem-sucedida confirma
+       * igualmente que o Engine está saudável.
+       */
+      torrentEngineLastHealthyAt =
+        Date.now();
+
+      const data =
+        await response.json();
+
+      const torrents =
+        Array.isArray(data?.streams)
+          ? data.streams
+          : [];
 
       console.log(
         `PT•HUB Torrent Engine: HTTP ${response.status}` +
         ` — ${torrents.length} resultado(s)` +
-        ` — cache ${data?.cached === true ? "HIT" : "MISS"}` +
+        ` — cache ${
+          data?.cached === true
+            ? "HIT"
+            : "MISS"
+        }` +
         ` — ${type} ${id}`
       );
 
       return torrents
-        .filter((torrent) => String(torrent?.infoHash || "").trim())
-        .map((torrent) => {
-          const provider = String(torrent?.provider || "Torrent").trim() || "Torrent";
-          const torrentTitle = String(torrent?.title || "").trim();
-          const seeders = Number(torrent?.seeders) || 0;
-          const size = Number(torrent?.size) || 0;
-          const trackers = Array.isArray(torrent?.trackers)
-            ? torrent.trackers.filter(Boolean)
-            : [];
-          const quality = normalizeTorrentQualityLabel(
-            torrent?.quality,
-            torrentTitle
-          );
+        .filter(
+          (torrent) =>
+            String(
+              torrent?.infoHash ||
+              ""
+            ).trim()
+        )
+        .map(
+          (torrent) => {
+            const provider =
+              String(
+                torrent?.provider ||
+                "Torrent"
+              ).trim() ||
+              "Torrent";
 
-          const realSource = extractTorrentRealSource(provider, torrentTitle);
-          const hasSourceInTitle = /⚙️\s*[^\n\r]+/i.test(torrentTitle);
+            const torrentTitle =
+              String(
+                torrent?.title ||
+                ""
+              ).trim();
 
-          const stream = {
-            infoHash: String(torrent.infoHash).trim(),
-            name: `${quality} • PT•HUB`,
-            title:
-              (torrentTitle || `${realSource} torrent`) +
-              (hasSourceInTitle ? "" : `\n⚙️ ${realSource}`) +
-              `\n🌱 ${seeders} seeders • ${formatTorrentSize(size)}`,
-            seeders,
-            size,
-            quality,
-            provider,
-            _ptHubSource: realSource,
-            behaviorHints: {
-              ...(torrentTitle ? { filename: torrentTitle } : {})
+            const seeders =
+              Number(
+                torrent?.seeders
+              ) || 0;
+
+            const size =
+              Number(
+                torrent?.size
+              ) || 0;
+
+            const trackers =
+              Array.isArray(
+                torrent?.trackers
+              )
+                ? torrent.trackers
+                    .filter(Boolean)
+                : [];
+
+            const quality =
+              normalizeTorrentQualityLabel(
+                torrent?.quality,
+                torrentTitle
+              );
+
+            const realSource =
+              extractTorrentRealSource(
+                provider,
+                torrentTitle
+              );
+
+            const hasSourceInTitle =
+              /⚙️\s*[^\n\r]+/i
+                .test(torrentTitle);
+
+            const stream = {
+              infoHash:
+                String(
+                  torrent.infoHash
+                ).trim(),
+
+              name:
+                `${quality} • PT•HUB`,
+
+              title:
+                (
+                  torrentTitle ||
+                  `${realSource} torrent`
+                ) +
+                (
+                  hasSourceInTitle
+                    ? ""
+                    : `\n⚙️ ${realSource}`
+                ) +
+                `\n🌱 ${seeders} seeders • ${formatTorrentSize(size)}`,
+
+              seeders,
+              size,
+              quality,
+              provider,
+
+              _ptHubSource:
+                realSource,
+
+              behaviorHints: {
+                ...(
+                  torrentTitle
+                    ? {
+                        filename:
+                          torrentTitle
+                      }
+                    : {}
+                )
+              }
+            };
+
+            if (
+              Number.isFinite(
+                Number(
+                  torrent?.fileIdx
+                )
+              )
+            ) {
+              stream.fileIdx =
+                Number(
+                  torrent.fileIdx
+                );
             }
-          };
 
-          if (Number.isFinite(Number(torrent?.fileIdx))) {
-            stream.fileIdx = Number(torrent.fileIdx);
+            if (trackers.length) {
+              stream.sources =
+                trackers.map(
+                  (tracker) =>
+                    `tracker:${tracker}`
+                );
+            }
+
+            return stream;
           }
-
-          if (trackers.length) {
-            stream.sources = trackers.map((tracker) => `tracker:${tracker}`);
-          }
-
-          return stream;
-        });
+        );
 
     } catch (error) {
       clearTimeout(timeout);
-      const reason = error?.name === "AbortError"
-        ? "timeout"
-        : (error?.message || "erro desconhecido");
+
+      const reason =
+        error?.name ===
+        "AbortError"
+
+          ? "timeout"
+
+          : (
+              error?.message ||
+              "erro desconhecido"
+            );
 
       console.warn(
         `PT•HUB Torrent Engine: ${reason}` +
-        ` — tentativa ${attempt}/${maxAttempts} — ${type} ${id}`
+        ` — tentativa ${attempt}/${maxAttempts}` +
+        ` — ${type} ${id}`
       );
 
-      if (attempt < maxAttempts) {
-        await wakePtHubTorrentEngine(engineBase);
-        await torrentEngineSleep(2500);
+      torrentEngineLastHealthyAt = 0;
+
+      if (
+        attempt <
+        maxAttempts
+      ) {
+        triggerPtHubTorrentEngineWake(
+          "retry após erro"
+        );
+
+        await torrentEngineSleep(
+          2000
+        );
+
         continue;
       }
+
       return [];
     }
   }
