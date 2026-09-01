@@ -6221,89 +6221,142 @@ app.get(
 
 
 /* =========================================================
-   SUBTITLES — AGREGADOR MULTI-PROVIDER
+   SUBTITLES — SUBSENSE + IDIOMAS AUTOMÁTICOS POR PAÍS
    ========================================================= */
 
-const SUBTITLE_PROVIDERS = Object.freeze([
-  {
-    id: "legendasdivx",
-    name: "LegendasDivx",
-    baseUrl: "https://e1d6cc1ff4a7-legendasdivx-stremio.baby-beamup.club",
-    priority: 10
-  },
-  {
-    id: "opensubtitles-v3",
-    name: "OpenSubtitles v3",
-    baseUrl: "https://opensubtitles-v3.strem.io",
-    priority: 20
-  },
-  {
-    id: "aio-subtitle",
-    name: "AIO Subtitle",
-    baseUrl: "https://api.aiosubtitle.org/stremio",
-    priority: 30
-  },
-  {
-    id: "yify-subtitles",
-    name: "YIFY Subtitles",
-    baseUrl: "https://2ecbbd610840-yifysubtitles.baby-beamup.club",
-    priority: 40
-  },
-  {
-    id: "aio-streaming",
-    name: "AIO Streaming",
-    baseUrl: "https://3b4bbf5252c4-aio-streaming.baby-beamup.club",
-    priority: 50
-  },
-  {
-    id: "opensubtitles-community",
-    name: "OpenSubtitles Community",
-    baseUrl: "https://2ecbbd610840-opensubtitles.baby-beamup.club",
-    priority: 60
-  },
-  {
-    id: "opensubtitles-pro",
-    name: "OpenSubtitles PRO",
-    baseUrl: "https://opensubtitlesv3-pro.dexter21767.com",
-    priority: 70
-  }
-]);
+const SUBSENSE_BASE_URL =
+  "https://subsense.nepiraw.com";
 
-const SUBTITLE_PROVIDER_TIMEOUT_MS = 7000;
+const SUBSENSE_INSTALL_PREFIX =
+  "bj6uhmdn-";
 
-function buildSubtitleProviderUrl(provider, type, id, extra) {
-  const base = String(provider.baseUrl || "").replace(/\/+$/, "");
-  const path =
-    `${base}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+const SUBSENSE_MAX_SUBTITLES = 10;
+const SUBSENSE_TIMEOUT_MS = 12000;
 
-  return extra
-    ? `${path}/${String(extra).replace(/^\/+/, "")}`
-    : `${path}.json`;
+/*
+ * Idiomas automáticos por país.
+ * O primeiro idioma é o principal; inglês é mantido como fallback.
+ * Portugal e Brasil recebem também a variante portuguesa complementar.
+ */
+const SUBTITLE_LANGUAGES_BY_COUNTRY = Object.freeze({
+  PT: ["pt", "pt-br", "en"],
+  BR: ["pt-br", "pt", "en"],
+  ES: ["es", "en"],
+  FR: ["fr", "en"],
+  DE: ["de", "en"],
+  IT: ["it", "en"],
+  NL: ["nl", "en"],
+  BE: ["nl", "fr", "en"],
+  CH: ["de", "fr", "it", "en"],
+  AT: ["de", "en"],
+  GB: ["en"],
+  IE: ["en"],
+  US: ["en"],
+  CA: ["en", "fr"],
+  AU: ["en"],
+  NZ: ["en"],
+  MX: ["es", "en"],
+  AR: ["es", "en"],
+  CL: ["es", "en"],
+  CO: ["es", "en"],
+  PE: ["es", "en"],
+  UY: ["es", "en"],
+  PY: ["es", "en"],
+  BO: ["es", "en"],
+  EC: ["es", "en"],
+  VE: ["es", "en"],
+  PL: ["pl", "en"],
+  CZ: ["cs", "en"],
+  SK: ["sk", "en"],
+  HU: ["hu", "en"],
+  RO: ["ro", "en"],
+  BG: ["bg", "en"],
+  GR: ["el", "en"],
+  TR: ["tr", "en"],
+  SE: ["sv", "en"],
+  NO: ["no", "en"],
+  DK: ["da", "en"],
+  FI: ["fi", "en"],
+  IS: ["is", "en"],
+  EE: ["et", "en"],
+  LV: ["lv", "en"],
+  LT: ["lt", "en"],
+  SI: ["sl", "en"],
+  HR: ["hr", "en"],
+  RS: ["sr", "en"],
+  BA: ["bs", "hr", "sr", "en"],
+  ME: ["sr", "en"],
+  MK: ["mk", "en"],
+  AL: ["sq", "en"],
+  UA: ["uk", "en"],
+  RU: ["ru", "en"],
+  JP: ["ja", "en"],
+  KR: ["ko", "en"],
+  CN: ["zh", "en"],
+  TW: ["zh", "en"],
+  HK: ["zh", "en"],
+  IN: ["hi", "en"],
+  ID: ["id", "en"],
+  MY: ["ms", "en"],
+  TH: ["th", "en"],
+  VN: ["vi", "en"],
+  PH: ["tl", "en"],
+  IL: ["he", "en"],
+  SA: ["ar", "en"],
+  AE: ["ar", "en"],
+  EG: ["ar", "en"],
+  MA: ["ar", "fr", "en"],
+  ZA: ["en"]
+});
+
+function getSubtitleLanguagesForCountry(country) {
+  const code = String(country || "PT").trim().toUpperCase();
+
+  const configured =
+    SUBTITLE_LANGUAGES_BY_COUNTRY[code] ||
+    ["en"];
+
+  return [...new Set(
+    configured
+      .map((lang) => String(lang || "").trim().toLowerCase())
+      .filter(Boolean)
+  )];
 }
 
-function subtitleLanguagePriority(value) {
-  const lang = String(value || "").trim().toLowerCase();
+function normalizeSubtitleLanguage(value) {
+  const lang = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
 
-  if (
-    lang === "pt-pt" ||
-    lang === "pt_pt" ||
-    lang === "por-pt" ||
-    lang === "por_pt" ||
-    lang === "pt"
-  ) {
-    return 0;
-  }
+  if (["pt-pt", "por-pt", "pt"].includes(lang)) return "pt";
+  if (["pt-br", "por-br", "pob", "por"].includes(lang)) return "pt-br";
+  if (["eng", "en-us", "en-gb"].includes(lang)) return "en";
+  if (["spa", "es-es", "es-mx"].includes(lang)) return "es";
+  if (["fre", "fra", "fr-fr"].includes(lang)) return "fr";
+  if (["ger", "deu", "de-de"].includes(lang)) return "de";
+  if (["ita", "it-it"].includes(lang)) return "it";
 
-  if (
-    lang === "por" ||
-    lang === "pt-br" ||
-    lang === "pt_br" ||
-    lang === "pob"
-  ) {
-    return 1;
-  }
+  return lang;
+}
 
-  return 2;
+function subtitleLanguagePriority(value, preferredLanguages) {
+  const lang = normalizeSubtitleLanguage(value);
+  const preferred = Array.isArray(preferredLanguages)
+    ? preferredLanguages.map(normalizeSubtitleLanguage)
+    : ["en"];
+
+  const exactIndex = preferred.indexOf(lang);
+  if (exactIndex >= 0) return exactIndex;
+
+  const base = lang.split("-")[0];
+  const baseIndex = preferred.findIndex(
+    (item) => item === base || item.split("-")[0] === base
+  );
+
+  return baseIndex >= 0
+    ? baseIndex
+    : preferred.length + 10;
 }
 
 function subtitleDedupKey(subtitle) {
@@ -6312,130 +6365,166 @@ function subtitleDedupKey(subtitle) {
 
   return [
     String(subtitle?.id || "").trim().toLowerCase(),
-    String(subtitle?.lang || "").trim().toLowerCase()
+    normalizeSubtitleLanguage(subtitle?.lang)
   ].join("|");
 }
 
-async function fetchSubtitleProvider(provider, type, id, extra) {
+function buildSubSenseConfigSegment(languages) {
+  const config = {
+    languages,
+    maxSubtitles: SUBSENSE_MAX_SUBTITLES
+  };
+
+  return (
+    SUBSENSE_INSTALL_PREFIX +
+    encodeURIComponent(JSON.stringify(config))
+  );
+}
+
+function buildSubSenseSubtitleUrl(type, id, extra, languages) {
+  const base = SUBSENSE_BASE_URL.replace(/\/+$/, "");
+  const configSegment = buildSubSenseConfigSegment(languages);
+  const path =
+    `${base}/${configSegment}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+
+  return extra
+    ? `${path}/${String(extra).replace(/^\/+/, "")}`
+    : `${path}.json`;
+}
+
+async function fetchSubSenseSubtitles(type, id, extra, languages) {
+  const url =
+    buildSubSenseSubtitleUrl(
+      type,
+      id,
+      extra,
+      languages
+    );
+
   const controller = new AbortController();
-  const timeout = setTimeout(
+  const timer = setTimeout(
     () => controller.abort(),
-    SUBTITLE_PROVIDER_TIMEOUT_MS
+    SUBSENSE_TIMEOUT_MS
   );
 
   try {
-    const url = buildSubtitleProviderUrl(provider, type, id, extra);
     const response = await fetch(url, {
       signal: controller.signal,
-      redirect: "follow",
       headers: {
-        "User-Agent": `PT-HUB/${VERSION}`,
-        "Accept": "application/json"
+        Accept: "application/json",
+        "User-Agent": "PT-HUB/3.0.0"
       }
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      console.warn(
+        `Legendas SubSense [${languages.join(",")}]: HTTP ${response.status}`
+      );
+      return [];
     }
 
     const data = await response.json();
-    const subtitles = Array.isArray(data?.subtitles) ? data.subtitles : [];
+    const subtitles =
+      Array.isArray(data?.subtitles)
+        ? data.subtitles
+        : [];
 
-    return subtitles
-      .filter((subtitle) =>
-        subtitle &&
-        typeof subtitle === "object" &&
-        typeof subtitle.url === "string" &&
-        subtitle.url.trim()
-      )
-      .map((subtitle, index) => ({
-        ...subtitle,
-        id:
-          String(subtitle.id || "").trim() ||
-          `${provider.id}-${index}`,
-        _ptHubProvider: provider.name,
-        _ptHubProviderPriority: provider.priority
-      }));
+    console.log(
+      `Legendas SubSense [${languages.join(",")}]: HTTP 200 — ${subtitles.length} resultado(s)`
+    );
+
+    return subtitles;
   } catch (error) {
     console.warn(
-      `Legendas ${provider.name}:`,
-      error.name === "AbortError" ? "timeout" : error.message
+      `Legendas SubSense [${languages.join(",")}]: ${
+        error?.name === "AbortError"
+          ? "timeout"
+          : error.message
+      }`
     );
     return [];
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }
 
-async function getAggregatedSubtitles(type, id, extra) {
-  const results = await Promise.all(
-    SUBTITLE_PROVIDERS.map((provider) =>
-      fetchSubtitleProvider(provider, type, id, extra)
-    )
-  );
+async function getAggregatedSubtitles(type, id, extra, country) {
+  const preferredLanguages =
+    getSubtitleLanguagesForCountry(country);
+
+  const subtitles =
+    await fetchSubSenseSubtitles(
+      type,
+      id,
+      extra,
+      preferredLanguages
+    );
 
   const unique = new Map();
 
-  for (const subtitles of results) {
-    for (const subtitle of subtitles) {
-      const key = subtitleDedupKey(subtitle);
-      if (!unique.has(key)) unique.set(key, subtitle);
+  for (const subtitle of subtitles) {
+    const key = subtitleDedupKey(subtitle);
+    if (!unique.has(key)) {
+      unique.set(key, subtitle);
     }
   }
 
   return [...unique.values()]
-    .sort((a, b) => {
-      const langDiff =
-        subtitleLanguagePriority(a.lang) -
-        subtitleLanguagePriority(b.lang);
-
-      if (langDiff !== 0) return langDiff;
-
-      return (
-        Number(a._ptHubProviderPriority || 999) -
-        Number(b._ptHubProviderPriority || 999)
-      );
-    })
-    .map((subtitle) => {
-      const clean = { ...subtitle };
-      delete clean._ptHubProvider;
-      delete clean._ptHubProviderPriority;
-      return clean;
-    });
+    .sort((a, b) =>
+      subtitleLanguagePriority(a?.lang, preferredLanguages) -
+      subtitleLanguagePriority(b?.lang, preferredLanguages)
+    )
+    .slice(0, SUBSENSE_MAX_SUBTITLES);
 }
 
 async function handleSubtitleRequest(req, res, extra = "") {
   try {
-    const config = decodeConfig(req.params.config);
+    const config =
+      decodeConfig(req.params.config);
 
     if (config?.features?.subtitles === false) {
       return res.json({ subtitles: [] });
     }
 
-    const subtitles = await getAggregatedSubtitles(
-      req.params.type,
-      req.params.id,
-      extra
-    );
+    const country =
+      config?.catalogCountry || "PT";
+
+    const subtitles =
+      await getAggregatedSubtitles(
+        req.params.type,
+        req.params.id,
+        extra,
+        country
+      );
 
     return res.json({ subtitles });
   } catch (error) {
-    console.error("Erro agregador de legendas:", error.message);
-    return res.json({ subtitles: [] });
+    console.error(
+      "Erro SubSense:",
+      error.message
+    );
+
+    return res.json({
+      subtitles: []
+    });
   }
 }
 
 app.get(
   "/:config/subtitles/:type/:id.json",
-  async (req, res) => handleSubtitleRequest(req, res)
+  async (req, res) =>
+    handleSubtitleRequest(req, res)
 );
 
 app.get(
   "/:config/subtitles/:type/:id/:extra.json",
   async (req, res) =>
-    handleSubtitleRequest(req, res, req.params.extra)
+    handleSubtitleRequest(
+      req,
+      res,
+      req.params.extra
+    )
 );
-
 
 /* =========================================================
    HOME
