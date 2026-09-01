@@ -5938,27 +5938,10 @@ async function getExternalStreams(config, type, id) {
     return value * (multipliers[unit] || 1);
   }
 
-  const qualityOrder = ["4K", "1080p", "720p", "480p", "Outra"];
-  const selectedStreams = [];
-
-  for (const quality of qualityOrder) {
-    const group = dedupedStreams
-      .filter((stream) => getTorrentQuality(stream) === quality)
-      .sort((a, b) => {
-        const seedDiff = getTorrentSeeders(b) - getTorrentSeeders(a);
-        if (seedDiff !== 0) return seedDiff;
-
-        const sizeDiff = getTorrentSizeBytes(a) - getTorrentSizeBytes(b);
-        if (Number.isFinite(sizeDiff) && sizeDiff !== 0) return sizeDiff;
-
-        return 0;
-      })
-      .slice(0, 3);
-
-    selectedStreams.push(...group);
-  }
-
-  return selectedStreams;
+  // TESTE TEMPORÁRIO — sem limite por qualidade.
+  // Devolve todos os torrents únicos recebidos do PT•HUB Torrent Engine
+  // para validar a diversidade real de providers.
+  return dedupedStreams;
 
 }
 
