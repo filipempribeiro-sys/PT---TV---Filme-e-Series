@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "3.1.0";
+const VERSION = "3.1.1";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -238,9 +238,36 @@ function normalizeLogoMatchText(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\b(?:uhd|fhd|fullhd|hd|sd|4k|8k|hevc|h265|h264|backup|lowdelay)\b/gi, " ")
-    .replace(/^[a-z]{2,3}\s*[|:\-]\s*/i, "")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(?:uhd|fhd|full\s*hd|fullhd|hd|sd|4k|8k|hevc|h265|h264|av1|50fps|60fps|backup|low\s*delay|lowdelay|vip|premium|raw)\b/gi, " ")
+    .replace(/^(?:pt|br|es|fr|de|it|uk|gb|us|usa|ca)\s*[|:\-]\s*/i, "")
+    .replace(/\.(?:pt|br|es|fr|de|it|uk|gb|us|ca)$/i, "")
     .replace(/[^a-z0-9]/g, "");
+}
+
+function getChannelLogoLookupKeys(...values) {
+  const keys = new Set();
+
+  for (const value of values.flat(Infinity)) {
+    const raw = String(value || "").trim();
+    if (!raw) continue;
+
+    const variants = [
+      raw,
+      raw.replace(/\[[^\]]*\]/g, " "),
+      raw.replace(/\([^)]*\)/g, " "),
+      raw.replace(/^(?:pt|br|es|fr|de|it|uk|gb|us|usa|ca)\s*[|:\-]\s*/i, ""),
+      raw.replace(/\.(?:pt|br|es|fr|de|it|uk|gb|us|ca)$/i, "")
+    ];
+
+    for (const variant of variants) {
+      const key = normalizeLogoMatchText(variant);
+      if (key) keys.add(key);
+    }
+  }
+
+  return [...keys];
 }
 
 /* =========================================================
@@ -252,8 +279,8 @@ function normalizeLogoMatchText(value) {
    3. catálogo mundial tv-logo/tv-logos (GitHub RAW)
    4. PT_HUB_LOGO no ponto onde o meta é devolvido
 
-   Durante os testes, o índice mundial é obtido da árvore pública GitHub.
-   As imagens são usadas diretamente por raw.githubusercontent.com.
+   O matching usa nome do canal + tvg-name + tvg-id quando disponíveis.
+   O índice mundial é obtido da árvore pública GitHub e fica em cache.
    ========================================================= */
 
 const TV_LOGO_REPOSITORY = "tv-logo/tv-logos";
@@ -275,8 +302,10 @@ const channelLogosIndex =
   }));
 
 let tvLogoWorldIndex = new Map();
+let tvLogoWorldKeys = [];
 let tvLogoWorldLoadedAt = 0;
 let tvLogoWorldLoadPromise = null;
+const tvLogoMatchCache = new Map();
 
 function getTvLogoFileKeys(fileName) {
   const stem = String(fileName || "")
@@ -285,7 +314,7 @@ function getTvLogoFileKeys(fileName) {
 
   const variants = new Set([stem]);
 
-  // Os ficheiros do projeto terminam normalmente no código do país:
+  // Os ficheiros terminam normalmente no código do país:
   // rtp-1-pt.png, bbc-one-uk.png, etc.
   variants.add(stem.replace(/-[a-z]{2,3}$/i, ""));
 
@@ -369,7 +398,9 @@ async function loadTvLogoWorldIndex() {
     }
 
     tvLogoWorldIndex = nextIndex;
+    tvLogoWorldKeys = [...nextIndex.keys()];
     tvLogoWorldLoadedAt = Date.now();
+    tvLogoMatchCache.clear();
 
     console.log(
       `PT•HUB Logos: catálogo mundial carregado — ${logoCount} logo(s), ${nextIndex.size} chave(s).`
@@ -442,23 +473,8 @@ function getPreferredLogoCountry(config) {
   return aliases[raw] || raw.replace(/\s+/g, "-");
 }
 
-function findWorldChannelLogo(channelName, config = null) {
-  const key = normalizeLogoMatchText(channelName);
-  if (!key || !tvLogoWorldIndex.size) return "";
-
-  let candidates = tvLogoWorldIndex.get(key) || [];
-
-  // Segunda tentativa: remover prefixos/sufixos muito comuns de listas IPTV.
-  if (!candidates.length) {
-    const relaxed = normalizeLogoMatchText(
-      String(channelName || "")
-        .replace(/\[[^\]]*\]/g, " ")
-        .replace(/\([^)]*(?:hd|fhd|uhd|4k|hevc|pt|br|uk|us)[^)]*\)/gi, " ")
-    );
-    candidates = tvLogoWorldIndex.get(relaxed) || [];
-  }
-
-  if (!candidates.length) return "";
+function chooseWorldLogoCandidate(candidates, config = null) {
+  if (!Array.isArray(candidates) || !candidates.length) return "";
 
   const preferredCountry = getPreferredLogoCountry(config);
 
@@ -476,26 +492,89 @@ function findWorldChannelLogo(channelName, config = null) {
   return sorted[0]?.logo || "";
 }
 
-function findChannelLogo(channelName, config = null) {
-  const normalizedName = normalizeLogoMatchText(channelName);
+function findWorldChannelLogo(channelIdentity, config = null) {
+  const keys = getChannelLogoLookupKeys(channelIdentity);
+  if (!keys.length || !tvLogoWorldIndex.size) return "";
 
-  if (!normalizedName) {
+  const preferredCountry = getPreferredLogoCountry(config);
+  const cacheKey = `${preferredCountry}|${keys.join("|")}`;
+  if (tvLogoMatchCache.has(cacheKey)) {
+    return tvLogoMatchCache.get(cacheKey);
+  }
+
+  // 1) Correspondência exata — é sempre a opção mais segura.
+  for (const key of keys) {
+    const candidates = tvLogoWorldIndex.get(key) || [];
+    if (candidates.length) {
+      const logo = chooseWorldLogoCandidate(candidates, config);
+      tvLogoMatchCache.set(cacheKey, logo);
+      return logo;
+    }
+  }
+
+  // 2) Correspondência tolerante para nomes IPTV com lixo adicional.
+  // Apenas para chaves suficientemente específicas, reduzindo falsos positivos.
+  let best = null;
+
+  for (const query of keys) {
+    if (query.length < 5) continue;
+
+    for (const candidateKey of tvLogoWorldKeys) {
+      if (candidateKey.length < 5) continue;
+
+      const contains =
+        query.includes(candidateKey) ||
+        candidateKey.includes(query);
+
+      if (!contains) continue;
+
+      const diff = Math.abs(query.length - candidateKey.length);
+      if (diff > 10) continue;
+
+      const score = 100 - diff;
+      if (!best || score > best.score) {
+        best = { key: candidateKey, score };
+      }
+    }
+  }
+
+  if (best) {
+    const logo = chooseWorldLogoCandidate(
+      tvLogoWorldIndex.get(best.key) || [],
+      config
+    );
+    tvLogoMatchCache.set(cacheKey, logo);
+    return logo;
+  }
+
+  tvLogoMatchCache.set(cacheKey, "");
+  return "";
+}
+
+function findChannelLogo(channelIdentity, config = null) {
+  const lookupKeys = getChannelLogoLookupKeys(channelIdentity);
+
+  if (!lookupKeys.length) {
     return "";
   }
 
   // Primeiro preservamos qualquer catálogo local PT•HUB existente.
-  for (const entry of channelLogosIndex) {
-    const matched =
-      entry.keywords.some((keyword) =>
-        keyword && normalizedName.includes(keyword)
-      );
+  for (const normalizedName of lookupKeys) {
+    for (const entry of channelLogosIndex) {
+      const matched =
+        entry.keywords.some((keyword) =>
+          keyword &&
+          (normalizedName === keyword ||
+           (keyword.length >= 5 && normalizedName.includes(keyword)))
+        );
 
-    if (matched && entry.logo) {
-      return entry.logo;
+      if (matched && entry.logo) {
+        return entry.logo;
+      }
     }
   }
 
-  return findWorldChannelLogo(channelName, config);
+  return findWorldChannelLogo(channelIdentity, config);
 }
 
 const manifestTemplate = loadJSON(
@@ -807,6 +886,10 @@ function parseM3U(content, config = null) {
           tvgIdMatch?.[1] ||
           "",
 
+        tvgName:
+          tvgNameMatch?.[1] ||
+          "",
+
         logo:
           tvgLogoMatch?.[1] ||
           "",
@@ -832,7 +915,12 @@ function parseM3U(content, config = null) {
         id: `m3u:${idHash}`,
         type: "channel",
         name: currentInfo.name,
-        logo: currentInfo.logo || findChannelLogo(currentInfo.name, config),
+        logo:
+          currentInfo.logo ||
+          findChannelLogo(
+            [currentInfo.name, currentInfo.tvgName, currentInfo.tvgId],
+            config
+          ),
         group: currentInfo.group,
         tvgId: currentInfo.tvgId,
         url: line
@@ -1186,7 +1274,11 @@ async function getXtreamChannels(config) {
         item.stream_icon ||
         item.logo ||
         findChannelLogo(
-          item.name || item.stream_display_name || ""
+          [
+            item.name || item.stream_display_name || "",
+            item.epg_channel_id || ""
+          ],
+          config
         ),
 
       group:
@@ -1462,7 +1554,7 @@ async function getIPTVChannels(config) {
     const channels = await getXtreamChannels(config);
     return channels.map((channel) => ({
       ...channel,
-      logo: channel.logo || findChannelLogo(channel.name || channel.tvgId || channel.id, config)
+      logo: channel.logo || findChannelLogo([channel.name, channel.tvgId, channel.id], config)
     }));
   }
 
@@ -1470,7 +1562,7 @@ async function getIPTVChannels(config) {
     const channels = await getIPTVOrgChannels(config);
     return channels.map((channel) => ({
       ...channel,
-      logo: channel.logo || findChannelLogo(channel.name || channel.tvgId || channel.id, config)
+      logo: channel.logo || findChannelLogo([channel.name, channel.tvgId, channel.id], config)
     }));
   }
 
@@ -4418,6 +4510,8 @@ app.get(
                 name:
                   channel.name,
 
+                posterShape: "landscape",
+
                 poster:
                   channel.logo ||
                   PT_HUB_LOGO,
@@ -4454,6 +4548,7 @@ app.get(
             id: channel.id,
             type: "channel",
             name: channel.name,
+            posterShape: "landscape",
             poster: channel.logo || PT_HUB_LOGO,
             logo: channel.logo || PT_HUB_LOGO,
             description: channel.group || "RTP Play"
@@ -4476,6 +4571,7 @@ app.get(
             id: channel.id,
             type: "channel",
             name: channel.name,
+            posterShape: "landscape",
             poster: channel.logo || PT_HUB_LOGO,
             logo: channel.logo || PT_HUB_LOGO,
             description:
@@ -4550,6 +4646,7 @@ app.get(
             id: channel.id,
             type: "channel",
             name: channel.name,
+            posterShape: "landscape",
             poster: channel.logo || PT_HUB_LOGO,
             logo: channel.logo || PT_HUB_LOGO,
             description:
@@ -4572,6 +4669,7 @@ app.get(
             id: channel.id,
             type: "channel",
             name: channel.name,
+            posterShape: "landscape",
             poster: channel.logo || PT_HUB_LOGO,
             logo: channel.logo || PT_HUB_LOGO,
             description:
@@ -5394,6 +5492,8 @@ app.get(
 
               name:
                 channel.name,
+
+              posterShape: "landscape",
 
               poster:
                 channel.logo ||
