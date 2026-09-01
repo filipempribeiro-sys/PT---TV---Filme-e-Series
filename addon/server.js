@@ -5491,7 +5491,7 @@ function normalizeTorrentQualityLabel(value, fallbackText = "") {
   if (/\b1080p\b/i.test(text)) return "1080p";
   if (/\b720p\b/i.test(text)) return "720p";
   if (/\b(480p|576p|sd)\b/i.test(text)) return "480p";
-  return "Qualidade N/D";
+  return "OUTRA";
 }
 
 function extractTorrentRealSource(provider, title = "") {
@@ -5890,7 +5890,7 @@ async function getExternalStreams(config, type, id) {
     ].filter(Boolean).join(" ");
 
     const normalized = normalizeTorrentQualityLabel("", text);
-    return normalized === "Qualidade N/D" ? "Outra" : normalized;
+    return normalized === "OUTRA" ? "Outra" : normalized;
   }
 
   function getTorrentSeeders(stream) {
@@ -5995,25 +5995,37 @@ async function getExternalStreams(config, type, id) {
 
     const selectedForQuality = [];
     const usedSources = new Set();
+    const remaining = [...candidates];
 
-    // 1.ª passagem: diversidade — uma fonte diferente por posição sempre que possível.
-    for (const stream of candidates) {
-      if (selectedForQuality.length >= 3) break;
-
-      const source = getTorrentSource(stream);
-      if (usedSources.has(source)) continue;
-
-      usedSources.add(source);
-      selectedForQuality.push(stream);
+    // O melhor resultado entra sempre primeiro: seeders > tamanho.
+    if (remaining.length) {
+      const best = remaining.shift();
+      selectedForQuality.push(best);
+      usedSources.add(getTorrentSource(best));
     }
 
-    // 2.ª passagem: se não existirem 3 fontes diferentes, completa com os melhores restantes.
-    if (selectedForQuality.length < 3) {
-      for (const stream of candidates) {
-        if (selectedForQuality.length >= 3) break;
-        if (selectedForQuality.includes(stream)) continue;
-        selectedForQuality.push(stream);
-      }
+    // Para o 2.º e 3.º lugares, diversidade é apenas um critério secundário.
+    // Só preferimos outra fonte quando ela mantém pelo menos 80% dos seeders
+    // do melhor candidato ainda disponível. Assim nunca sacrificamos demasiado
+    // a saúde do torrent apenas para mostrar um indexador diferente.
+    while (selectedForQuality.length < 3 && remaining.length) {
+      const bestRemaining = remaining[0];
+      const bestRemainingSeeders = getTorrentSeeders(bestRemaining);
+      const minimumCompetitiveSeeders = bestRemainingSeeders * 0.8;
+
+      const diverseIndex = remaining.findIndex((stream) => {
+        const source = getTorrentSource(stream);
+        if (usedSources.has(source)) return false;
+
+        const seeders = getTorrentSeeders(stream);
+        return seeders >= minimumCompetitiveSeeders;
+      });
+
+      const chosenIndex = diverseIndex >= 0 ? diverseIndex : 0;
+      const [chosen] = remaining.splice(chosenIndex, 1);
+
+      selectedForQuality.push(chosen);
+      usedSources.add(getTorrentSource(chosen));
     }
 
     selectedStreams.push(...selectedForQuality);
