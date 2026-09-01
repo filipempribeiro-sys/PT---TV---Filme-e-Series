@@ -238,8 +238,32 @@ function normalizeLogoMatchText(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(?:uhd|fhd|fullhd|hd|sd|4k|8k|hevc|h265|h264|backup|lowdelay)\b/gi, " ")
+    .replace(/^[a-z]{2,3}\s*[|:\-]\s*/i, "")
     .replace(/[^a-z0-9]/g, "");
 }
+
+/* =========================================================
+   IPTV — LOGOS AUTOMÁTICOS tv-logo/tv-logos
+   =========================================================
+   Prioridade:
+   1. logo fornecido pelo M3U/Xtream/IPTV-org
+   2. catálogo local ../data/channel-logos.json
+   3. catálogo mundial tv-logo/tv-logos (GitHub RAW)
+   4. PT_HUB_LOGO no ponto onde o meta é devolvido
+
+   Durante os testes, o índice mundial é obtido da árvore pública GitHub.
+   As imagens são usadas diretamente por raw.githubusercontent.com.
+   ========================================================= */
+
+const TV_LOGO_REPOSITORY = "tv-logo/tv-logos";
+const TV_LOGO_BRANCH = "main";
+const TV_LOGO_TREE_URL =
+  `https://api.github.com/repos/${TV_LOGO_REPOSITORY}/git/trees/${TV_LOGO_BRANCH}?recursive=1`;
+const TV_LOGO_RAW_BASE =
+  `https://raw.githubusercontent.com/${TV_LOGO_REPOSITORY}/${TV_LOGO_BRANCH}/`;
+const TV_LOGO_INDEX_TTL_MS = 24 * 60 * 60 * 1000;
+const TV_LOGO_FETCH_TIMEOUT_MS = 20000;
 
 const channelLogosIndex =
   channelLogos.map((entry) => ({
@@ -250,17 +274,217 @@ const channelLogosIndex =
         .map(normalizeLogoMatchText)
   }));
 
-function findChannelLogo(channelName) {
+let tvLogoWorldIndex = new Map();
+let tvLogoWorldLoadedAt = 0;
+let tvLogoWorldLoadPromise = null;
 
-  const normalizedName =
-    normalizeLogoMatchText(channelName);
+function getTvLogoFileKeys(fileName) {
+  const stem = String(fileName || "")
+    .replace(/\.(?:png|webp|jpe?g)$/i, "")
+    .toLowerCase();
+
+  const variants = new Set([stem]);
+
+  // Os ficheiros do projeto terminam normalmente no código do país:
+  // rtp-1-pt.png, bbc-one-uk.png, etc.
+  variants.add(stem.replace(/-[a-z]{2,3}$/i, ""));
+
+  for (const value of [...variants]) {
+    variants.add(value.replace(/-(?:uhd|fhd|full-hd|hd|sd|4k|8k)$/i, ""));
+    variants.add(value.replace(/-(?:uhd|fhd|full-hd|hd|sd|4k|8k)-[a-z]{2,3}$/i, ""));
+  }
+
+  return [...variants]
+    .map(normalizeLogoMatchText)
+    .filter(Boolean);
+}
+
+function addTvLogoCandidate(index, key, candidate) {
+  if (!key) return;
+  const current = index.get(key) || [];
+
+  if (!current.some((item) => item.path === candidate.path)) {
+    current.push(candidate);
+  }
+
+  index.set(key, current);
+}
+
+async function loadTvLogoWorldIndex() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TV_LOGO_FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(TV_LOGO_TREE_URL, {
+      signal: controller.signal,
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": `PT-HUB/${VERSION}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const tree = Array.isArray(data?.tree) ? data.tree : [];
+    const nextIndex = new Map();
+    let logoCount = 0;
+
+    for (const item of tree) {
+      const repoPath = String(item?.path || "");
+
+      if (
+        item?.type !== "blob" ||
+        !repoPath.startsWith("countries/") ||
+        !/\.(?:png|webp|jpe?g)$/i.test(repoPath)
+      ) {
+        continue;
+      }
+
+      const parts = repoPath.split("/");
+      if (parts.length < 3) continue;
+
+      const country = parts[1];
+      const fileName = parts[parts.length - 1];
+      if (/^0_/i.test(fileName)) continue;
+
+      const candidate = {
+        path: repoPath,
+        country,
+        logo: `${TV_LOGO_RAW_BASE}${repoPath}`,
+        hd: /(?:^|-)hd(?:-|\.)/i.test(fileName)
+      };
+
+      for (const key of getTvLogoFileKeys(fileName)) {
+        addTvLogoCandidate(nextIndex, key, candidate);
+      }
+
+      logoCount++;
+    }
+
+    if (!logoCount) {
+      throw new Error("O catálogo mundial não devolveu logos.");
+    }
+
+    tvLogoWorldIndex = nextIndex;
+    tvLogoWorldLoadedAt = Date.now();
+
+    console.log(
+      `PT•HUB Logos: catálogo mundial carregado — ${logoCount} logo(s), ${nextIndex.size} chave(s).`
+    );
+
+    return true;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function ensureTvLogoWorldIndex() {
+  if (
+    tvLogoWorldIndex.size > 0 &&
+    Date.now() - tvLogoWorldLoadedAt < TV_LOGO_INDEX_TTL_MS
+  ) {
+    return true;
+  }
+
+  if (tvLogoWorldLoadPromise) {
+    return tvLogoWorldLoadPromise;
+  }
+
+  tvLogoWorldLoadPromise = loadTvLogoWorldIndex()
+    .catch((error) => {
+      console.error(
+        "PT•HUB Logos: não foi possível atualizar catálogo mundial:",
+        error.message
+      );
+      return false;
+    })
+    .finally(() => {
+      tvLogoWorldLoadPromise = null;
+    });
+
+  return tvLogoWorldLoadPromise;
+}
+
+function getPreferredLogoCountry(config) {
+  const raw = String(
+    config?.country ||
+    config?.countryCode ||
+    config?.iptvCountry ||
+    config?.iptvOrgCountry ||
+    ""
+  ).trim().toLowerCase();
+
+  const aliases = {
+    pt: "portugal",
+    portugal: "portugal",
+    br: "brazil",
+    brazil: "brazil",
+    brasil: "brazil",
+    es: "spain",
+    spain: "spain",
+    espana: "spain",
+    fr: "france",
+    france: "france",
+    de: "germany",
+    germany: "germany",
+    it: "italy",
+    italy: "italy",
+    uk: "united-kingdom",
+    gb: "united-kingdom",
+    us: "united-states",
+    usa: "united-states",
+    ca: "canada"
+  };
+
+  return aliases[raw] || raw.replace(/\s+/g, "-");
+}
+
+function findWorldChannelLogo(channelName, config = null) {
+  const key = normalizeLogoMatchText(channelName);
+  if (!key || !tvLogoWorldIndex.size) return "";
+
+  let candidates = tvLogoWorldIndex.get(key) || [];
+
+  // Segunda tentativa: remover prefixos/sufixos muito comuns de listas IPTV.
+  if (!candidates.length) {
+    const relaxed = normalizeLogoMatchText(
+      String(channelName || "")
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/\([^)]*(?:hd|fhd|uhd|4k|hevc|pt|br|uk|us)[^)]*\)/gi, " ")
+    );
+    candidates = tvLogoWorldIndex.get(relaxed) || [];
+  }
+
+  if (!candidates.length) return "";
+
+  const preferredCountry = getPreferredLogoCountry(config);
+
+  const sorted = [...candidates].sort((a, b) => {
+    const aCountry = preferredCountry && a.country === preferredCountry ? 1 : 0;
+    const bCountry = preferredCountry && b.country === preferredCountry ? 1 : 0;
+    if (aCountry !== bCountry) return bCountry - aCountry;
+
+    // Em empate, preferir a variante normal à variante explicitamente HD.
+    if (a.hd !== b.hd) return Number(a.hd) - Number(b.hd);
+
+    return a.path.length - b.path.length;
+  });
+
+  return sorted[0]?.logo || "";
+}
+
+function findChannelLogo(channelName, config = null) {
+  const normalizedName = normalizeLogoMatchText(channelName);
 
   if (!normalizedName) {
     return "";
   }
 
+  // Primeiro preservamos qualquer catálogo local PT•HUB existente.
   for (const entry of channelLogosIndex) {
-
     const matched =
       entry.keywords.some((keyword) =>
         keyword && normalizedName.includes(keyword)
@@ -269,10 +493,9 @@ function findChannelLogo(channelName) {
     if (matched && entry.logo) {
       return entry.logo;
     }
-
   }
 
-  return "";
+  return findWorldChannelLogo(channelName, config);
 }
 
 const manifestTemplate = loadJSON(
@@ -536,7 +759,7 @@ app.get("/hls-proxy/:profile/:target", async (req, res) => {
 /* =========================================================
    M3U
    ========================================================= */
-function parseM3U(content) {
+function parseM3U(content, config = null) {
   const lines = String(content || "")
     .replace(/\r/g, "")
     .split("\n");
@@ -609,7 +832,7 @@ function parseM3U(content) {
         id: `m3u:${idHash}`,
         type: "channel",
         name: currentInfo.name,
-        logo: currentInfo.logo || findChannelLogo(currentInfo.name),
+        logo: currentInfo.logo || findChannelLogo(currentInfo.name, config),
         group: currentInfo.group,
         tvgId: currentInfo.tvgId,
         url: line
@@ -625,7 +848,7 @@ function parseM3U(content) {
    M3U FETCH
    ========================================================= */
 
-async function fetchM3U(url) {
+async function fetchM3U(url, config = null) {
   if (!isValidHttpUrl(url)) {
     throw new Error("URL M3U inválido.");
   }
@@ -661,7 +884,7 @@ async function fetchM3U(url) {
         throw new Error("A lista M3U está vazia.");
       }
 
-      return parseM3U(text);
+      return parseM3U(text, config);
 
     } catch (error) {
 
@@ -1197,6 +1420,9 @@ async function getIPTVOrgChannels(config) {
    ========================================================= */
 
 async function getIPTVChannels(config) {
+  // Carrega/atualiza o índice mundial uma vez; falha silenciosa mantém IPTV funcional.
+  await ensureTvLogoWorldIndex();
+
   if (!config || !config.mode) {
     return [];
   }
@@ -1215,12 +1441,12 @@ async function getIPTVChannels(config) {
           );
         }
 
-        return parseM3U(stored.content);
+        return parseM3U(stored.content, config);
 
       }
 
       if (config.m3uFileData) {
-        return parseM3U(config.m3uFileData);
+        return parseM3U(config.m3uFileData, config);
       }
 
       throw new Error(
@@ -1229,15 +1455,23 @@ async function getIPTVChannels(config) {
 
     }
 
-    return await fetchM3U(config.m3uUrl);
+    return await fetchM3U(config.m3uUrl, config);
   }
 
   if (config.mode === "xtream") {
-    return await getXtreamChannels(config);
+    const channels = await getXtreamChannels(config);
+    return channels.map((channel) => ({
+      ...channel,
+      logo: channel.logo || findChannelLogo(channel.name || channel.tvgId || channel.id, config)
+    }));
   }
 
   if (config.mode === "iptv-org") {
-    return await getIPTVOrgChannels(config);
+    const channels = await getIPTVOrgChannels(config);
+    return channels.map((channel) => ({
+      ...channel,
+      logo: channel.logo || findChannelLogo(channel.name || channel.tvgId || channel.id, config)
+    }));
   }
 
   return [];
