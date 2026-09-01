@@ -5485,6 +5485,84 @@ function formatTorrentSize(bytes) {
   return `${size.toFixed(decimals)} ${units[unit]}`;
 }
 
+function normalizeTorrentQualityLabel(value, fallbackText = "") {
+  const text = `${value || ""} ${fallbackText || ""}`;
+  if (/\b(2160p|4k|uhd)\b/i.test(text)) return "4K";
+  if (/\b1080p\b/i.test(text)) return "1080p";
+  if (/\b720p\b/i.test(text)) return "720p";
+  if (/\b(480p|576p|sd)\b/i.test(text)) return "480p";
+  return "Qualidade N/D";
+}
+
+const torrentEngineSleep = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+let torrentEngineWakePromise = null;
+
+async function wakePtHubTorrentEngine(engineBase) {
+  if (torrentEngineWakePromise) {
+    return torrentEngineWakePromise;
+  }
+
+  torrentEngineWakePromise = (async () => {
+    const healthUrl = `${engineBase}/health`;
+    const maxAttempts = 10;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+
+      try {
+        const response = await fetch(healthUrl, {
+          signal: controller.signal,
+          redirect: "follow",
+          headers: {
+            "User-Agent": `PT-HUB/${VERSION}`,
+            "Accept": "application/json",
+            "Cache-Control": "no-cache"
+          }
+        });
+
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          console.log(
+            `PT•HUB Torrent Engine: wake-up OK — tentativa ${attempt}/${maxAttempts}`
+          );
+          return true;
+        }
+
+        console.warn(
+          `PT•HUB Torrent Engine: wake-up HTTP ${response.status}` +
+          ` — tentativa ${attempt}/${maxAttempts}`
+        );
+      } catch (error) {
+        clearTimeout(timeout);
+        const reason = error?.name === "AbortError"
+          ? "timeout"
+          : (error?.message || "erro desconhecido");
+
+        console.warn(
+          `PT•HUB Torrent Engine: wake-up ${reason}` +
+          ` — tentativa ${attempt}/${maxAttempts}`
+        );
+      }
+
+      if (attempt < maxAttempts) {
+        await torrentEngineSleep(attempt <= 2 ? 2500 : 5000);
+      }
+    }
+
+    return false;
+  })();
+
+  try {
+    return await torrentEngineWakePromise;
+  } finally {
+    torrentEngineWakePromise = null;
+  }
+}
+
 async function fetchPtHubTorrentEngine(type, id) {
   const configuredBase = String(process.env.PT_HUB_TORRENT_ENGINE_URL || "").trim();
   if (!configuredBase) return [];
@@ -5495,12 +5573,22 @@ async function fetchPtHubTorrentEngine(type, id) {
     return [];
   }
 
+  // Render Free pode suspender o serviço. Primeiro acordamos o Engine
+  // e só depois lançamos a pesquisa de torrents.
+  const awake = await wakePtHubTorrentEngine(engineBase);
+  if (!awake) {
+    console.warn(
+      `PT•HUB Torrent Engine: não ficou disponível após wake-up — ${type} ${id}`
+    );
+    return [];
+  }
+
   const url = `${engineBase}/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
   const maxAttempts = 2;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    const timeout = setTimeout(() => controller.abort(), 40000);
 
     try {
       const response = await fetch(url, {
@@ -5509,7 +5597,8 @@ async function fetchPtHubTorrentEngine(type, id) {
         headers: {
           "User-Agent": `PT-HUB/${VERSION}`,
           "Accept": "application/json",
-          "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8"
+          "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+          "Cache-Control": "no-cache"
         }
       });
 
@@ -5522,7 +5611,8 @@ async function fetchPtHubTorrentEngine(type, id) {
         );
 
         if (attempt < maxAttempts && (response.status === 429 || response.status >= 500)) {
-          await new Promise((resolve) => setTimeout(resolve, 900 * attempt));
+          await wakePtHubTorrentEngine(engineBase);
+          await torrentEngineSleep(2500);
           continue;
         }
         return [];
@@ -5548,16 +5638,20 @@ async function fetchPtHubTorrentEngine(type, id) {
           const trackers = Array.isArray(torrent?.trackers)
             ? torrent.trackers.filter(Boolean)
             : [];
+          const quality = normalizeTorrentQualityLabel(
+            torrent?.quality,
+            torrentTitle
+          );
 
           const stream = {
             infoHash: String(torrent.infoHash).trim(),
-            name: `PT•HUB • ${provider}`,
+            name: `${quality} • PT•HUB • ${provider}`,
             title:
               (torrentTitle || `${provider} torrent`) +
               `\n🌱 ${seeders} seeders • ${formatTorrentSize(size)}`,
             seeders,
             size,
-            quality: torrent?.quality || null,
+            quality,
             provider,
             behaviorHints: {
               ...(torrentTitle ? { filename: torrentTitle } : {})
@@ -5587,7 +5681,8 @@ async function fetchPtHubTorrentEngine(type, id) {
       );
 
       if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 900 * attempt));
+        await wakePtHubTorrentEngine(engineBase);
+        await torrentEngineSleep(2500);
         continue;
       }
       return [];
@@ -5635,7 +5730,7 @@ const PT_BUILTIN_ADDONS = [
     id: "torrentio",
     name: "Torrentio",
     manifestUrl: "https://torrentio.strem.fun/manifest.json",
-    resources: ["stream"]
+    resources: []
   },
   {
     id: "magnetio",
@@ -5646,20 +5741,19 @@ const PT_BUILTIN_ADDONS = [
       "limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads," +
       "therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt" +
       "|sort=qualityseeders|limit=50/manifest.json",
-    // O fallback público só entra quando o Torrent Engine próprio não está definido.
-    resources: process.env.PT_HUB_TORRENT_ENGINE_URL ? [] : ["stream"]
+    resources: []
   },
   {
     id: "torrentsdb",
     name: "TorrentsDB",
     manifestUrl: "https://torrentsdb.com/manifest.json",
-    resources: ["stream"]
+    resources: []
   },
   {
     id: "ytztvio",
     name: "Ytztvio",
     manifestUrl: "https://ytztvio.galacticcapsule.workers.dev/manifest.json",
-    resources: ["stream"]
+    resources: []
   },
   {
     id: "torrent-catalogs",
@@ -5671,7 +5765,7 @@ const PT_BUILTIN_ADDONS = [
     id: "thepiratebay-plus",
     name: "ThePirateBay+",
     manifestUrl: "https://thepiratebay-plus.strem.fun/manifest.json",
-    resources: ["stream"]
+    resources: []
   },
   {
     id: "marvel",
@@ -5718,15 +5812,19 @@ async function getExternalStreams(config, type, id) {
       ? config.externalStreamSources.filter(Boolean)
       : [];
 
-  // Fontes integradas funcionam sempre. "Fontes Externas" é agora
-  // apenas uma forma de acrescentar providers extra escolhidos pelo utilizador.
+  // O Torrent Engine é a única fonte de torrents integrada do PT•HUB.
+  // Fontes Externas personalizadas continuam disponíveis apenas quando
+  // o utilizador as adiciona explicitamente na configuração.
   const sources = [...new Set(
     [...getBuiltinStreamSources(), ...customSources]
       .map((source) => normalizeUrl(source))
       .filter(isValidHttpUrl)
   )];
 
-  if (!sources.length) {
+  const hasPtHubTorrentEngine =
+    Boolean(String(process.env.PT_HUB_TORRENT_ENGINE_URL || "").trim());
+
+  if (!sources.length && !hasPtHubTorrentEngine) {
     return [];
   }
 
@@ -5734,7 +5832,9 @@ async function getExternalStreams(config, type, id) {
     ...sources.map((source) =>
       fetchExternalStreamSource(source, type, id)
     ),
-    fetchPtHubTorrentEngine(type, id)
+    ...(hasPtHubTorrentEngine
+      ? [fetchPtHubTorrentEngine(type, id)]
+      : [])
   ]);
 
   const allStreams = resultGroups.flat();
@@ -5768,11 +5868,8 @@ async function getExternalStreams(config, type, id) {
       stream?.behaviorHints?.filename
     ].filter(Boolean).join(" ");
 
-    if (/\b(2160p|4k|uhd)\b/i.test(text)) return "4K";
-    if (/\b1080p\b/i.test(text)) return "1080p";
-    if (/\b720p\b/i.test(text)) return "720p";
-    if (/\b(480p|576p|sd)\b/i.test(text)) return "480p";
-    return "Outra";
+    const normalized = normalizeTorrentQualityLabel("", text);
+    return normalized === "Qualidade N/D" ? "Outra" : normalized;
   }
 
   function getTorrentSeeders(stream) {
