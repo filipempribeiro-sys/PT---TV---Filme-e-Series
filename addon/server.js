@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const BASE_DIR = __dirname;
 
-const VERSION = "3.1.4";
+const VERSION = "3.1.5";
 
 const PT_HUB_LOGO =
   "https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
@@ -6082,13 +6082,12 @@ function extractTorrentRealSource(provider, title = "") {
 const torrentEngineSleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const TORRENT_ENGINE_HEALTH_TIMEOUT_MS = 8000;
-const TORRENT_ENGINE_ROOT_TIMEOUT_MS = 10000;
-const TORRENT_ENGINE_WAKE_MAX_MS = 65000;
-const TORRENT_ENGINE_WAKE_POLL_MS = 2500;
+const TORRENT_ENGINE_HEALTH_TIMEOUT_MS = 12000;
+const TORRENT_ENGINE_WAKE_MAX_MS = 150000;
 const TORRENT_ENGINE_STREAM_TIMEOUT_MS = 30000;
 const TORRENT_ENGINE_KEEPALIVE_MS = 10 * 60 * 1000;
 const TORRENT_ENGINE_RECENT_HEALTH_MS = 2 * 60 * 1000;
+const TORRENT_ENGINE_WAKE_BACKOFF_MS = [3000, 5000, 8000, 12000, 15000, 20000];
 
 let torrentEngineWakePromise = null;
 let torrentEngineLastHealthyAt = 0;
@@ -6145,78 +6144,6 @@ function getTorrentEngineErrorReason(error) {
   return parts.length
     ? [...new Set(parts)].join(" — ")
     : "erro desconhecido";
-}
-
-/*
- * Faz um pedido simples à raiz pública do Engine.
- *
- * O objetivo NÃO é validar saúde — é apenas provocar
- * tráfego HTTP público suficiente para o Render iniciar
- * o spin-up do serviço quando ele está adormecido.
- *
- * Uma resposta 404/401/403 continua a provar que chegámos
- * ao serviço/edge do Render, por isso é registada mas não
- * é tratada como health OK.
- */
-async function primePtHubTorrentEngine(
-  engineBase,
-  attempt
-) {
-  const controller =
-    new AbortController();
-
-  const timeout =
-    setTimeout(
-      () => controller.abort(),
-      TORRENT_ENGINE_ROOT_TIMEOUT_MS
-    );
-
-  try {
-    const response =
-      await fetch(
-        `${engineBase}/`,
-        {
-          method: "GET",
-          signal: controller.signal,
-          redirect: "follow",
-          headers: {
-            "User-Agent": `PT-HUB/${VERSION}`,
-            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
-            "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
-            "Cache-Control": "no-cache, no-store",
-            "Pragma": "no-cache"
-          }
-        }
-      );
-
-    console.log(
-      `PT•HUB Torrent Engine: / → HTTP ${response.status}` +
-      ` — wake tentativa ${attempt}`
-    );
-
-    return {
-      reached: true,
-      status: response.status
-    };
-
-  } catch (error) {
-    const reason =
-      getTorrentEngineErrorReason(error);
-
-    console.warn(
-      `PT•HUB Torrent Engine: / → ${reason}` +
-      ` — wake tentativa ${attempt}`
-    );
-
-    return {
-      reached: false,
-      status: 0,
-      error: reason
-    };
-
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 async function probePtHubTorrentEngine(
@@ -6299,90 +6226,82 @@ async function probePtHubTorrentEngine(
 
 async function wakePtHubTorrentEngine(engineBase) {
   /*
-   * Se confirmámos recentemente que o Engine está online,
-   * não fazemos um novo /health antes de cada stream.
+   * WAKE V3
+   * -------
+   * O GitHub Actions mantém normalmente o Engine acordado.
+   * Este bloco é apenas a segunda linha de defesa quando o
+   * Render ficou realmente suspenso ou temporariamente indisponível.
+   *
+   * - usa apenas /health;
+   * - aguarda até 150 s;
+   * - aplica backoff progressivo;
+   * - todos os pedidos simultâneos partilham a mesma Promise.
    */
   if (
     torrentEngineLastHealthyAt &&
-    (
-      Date.now() -
-      torrentEngineLastHealthyAt
-    ) < TORRENT_ENGINE_RECENT_HEALTH_MS
+    (Date.now() - torrentEngineLastHealthyAt) < TORRENT_ENGINE_RECENT_HEALTH_MS
   ) {
     return true;
   }
 
-  /*
-   * Vários pedidos simultâneos do Stremio/Nuvio
-   * partilham o mesmo processo de wake.
-   */
   if (torrentEngineWakePromise) {
+    console.log(
+      "PT•HUB Torrent Engine: wake V3 já em curso — pedido associado ao wake existente"
+    );
     return torrentEngineWakePromise;
   }
 
-  torrentEngineWakePromise =
-    (async () => {
-      const startedAt =
-        Date.now();
+  torrentEngineWakePromise = (async () => {
+    const startedAt = Date.now();
+    let attempt = 0;
 
-      let attempt = 0;
+    while ((Date.now() - startedAt) < TORRENT_ENGINE_WAKE_MAX_MS) {
+      attempt++;
 
-      while (
-        (
-          Date.now() -
-          startedAt
-        ) < TORRENT_ENGINE_WAKE_MAX_MS
-      ) {
-        attempt++;
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      console.log(
+        `PT•HUB Torrent Engine: wake V3 /health — tentativa ${attempt}` +
+        ` — ${elapsedSec}s/${Math.round(TORRENT_ENGINE_WAKE_MAX_MS / 1000)}s`
+      );
 
-        /*
-         * 1.º provocamos tráfego na raiz pública.
-         * 2.º confirmamos a disponibilidade real em /health.
-         *
-         * Isto evita depender exclusivamente de /health para
-         * desencadear o spin-up de uma instância Render Free.
-         */
-        await primePtHubTorrentEngine(
-          engineBase,
-          attempt
+      const ok = await probePtHubTorrentEngine(engineBase, attempt);
+
+      if (ok) {
+        const totalSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+        console.log(
+          `PT•HUB Torrent Engine: wake V3 OK — tentativa ${attempt} — ${totalSec}s`
         );
-
-        const ok =
-          await probePtHubTorrentEngine(
-            engineBase,
-            attempt
-          );
-
-        if (ok) {
-          console.log(
-            `PT•HUB Torrent Engine: wake-up OK — tentativa ${attempt}`
-          );
-
-          return true;
-        }
-
-        console.warn(
-          `PT•HUB Torrent Engine: ainda a acordar — tentativa ${attempt}`
-        );
-
-        const elapsed =
-          Date.now() -
-          startedAt;
-
-        if (
-          elapsed >=
-          TORRENT_ENGINE_WAKE_MAX_MS
-        ) {
-          break;
-        }
-
-        await torrentEngineSleep(
-          TORRENT_ENGINE_WAKE_POLL_MS
-        );
+        return true;
       }
 
-      return false;
-    })();
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= TORRENT_ENGINE_WAKE_MAX_MS) {
+        break;
+      }
+
+      const backoff = TORRENT_ENGINE_WAKE_BACKOFF_MS[
+        Math.min(attempt - 1, TORRENT_ENGINE_WAKE_BACKOFF_MS.length - 1)
+      ];
+
+      const remaining = TORRENT_ENGINE_WAKE_MAX_MS - elapsed;
+      const waitMs = Math.min(backoff, remaining);
+
+      console.warn(
+        `PT•HUB Torrent Engine: ainda indisponível — wake V3 tentativa ${attempt}` +
+        ` — nova tentativa em ${Math.round(waitMs / 1000)}s`
+      );
+
+      if (waitMs > 0) {
+        await torrentEngineSleep(waitMs);
+      }
+    }
+
+    const totalSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+    console.warn(
+      `PT•HUB Torrent Engine: wake V3 esgotado — ${totalSec}s sem /health 200`
+    );
+    return false;
+  })();
 
   try {
     return await torrentEngineWakePromise;
@@ -6394,7 +6313,7 @@ async function wakePtHubTorrentEngine(engineBase) {
 /*
  * Inicia o wake sem bloquear o pedido atual.
  *
- * Isto é usado no arranque e no keep-alive.
+ * Isto é usado no arranque e como recuperação em background.
  */
 function triggerPtHubTorrentEngineWake(
   reason = "background"
@@ -6419,7 +6338,7 @@ function triggerPtHubTorrentEngineWake(
   }
 
   console.log(
-    `PT•HUB Torrent Engine: wake iniciado — ${reason}` +
+    `PT•HUB Torrent Engine: wake V3 iniciado — ${reason}` +
     ` — ${engineBase}`
   );
 
@@ -6427,17 +6346,17 @@ function triggerPtHubTorrentEngineWake(
     .then((ok) => {
       if (ok) {
         console.log(
-          `PT•HUB Torrent Engine: pronto — ${reason}`
+          `PT•HUB Torrent Engine: wake V3 pronto — ${reason}`
         );
       } else {
         console.warn(
-          `PT•HUB Torrent Engine: wake terminou sem /health 200 — ${reason}`
+          `PT•HUB Torrent Engine: wake V3 terminou sem /health 200 — ${reason}`
         );
       }
     })
     .catch((error) => {
       console.warn(
-        `PT•HUB Torrent Engine: wake background falhou — ${reason}` +
+        `PT•HUB Torrent Engine: wake V3 background falhou — ${reason}` +
         ` — ${getTorrentEngineErrorReason(error)}`
       );
     });
@@ -6545,8 +6464,8 @@ async function fetchPtHubTorrentEngine(
   /*
    * Normalmente este wake será instantâneo porque:
    *
-   * 1. o Engine acordou juntamente com o PT•HUB;
-   * 2. existe keep-alive;
+   * 1. o GitHub Actions mantém normalmente o Engine acordado;
+   * 2. o Wake V3 recupera um eventual cold start;
    * 3. existe cache de health recente.
    */
   const awake =
@@ -6621,24 +6540,23 @@ async function fetchPtHubTorrentEngine(
           ` — ${type} ${id}`
         );
 
-        if (
-          attempt < maxAttempts &&
-          (
-            response.status === 429 ||
-            response.status >= 500
-          )
-        ) {
-          torrentEngineLastHealthyAt = 0;
+        if (attempt < maxAttempts) {
+          if ([502, 503, 504].includes(response.status)) {
+            torrentEngineLastHealthyAt = 0;
 
-          triggerPtHubTorrentEngineWake(
-            "retry stream"
-          );
+            console.warn(
+              `PT•HUB Torrent Engine: stream encontrou HTTP ${response.status}` +
+              " — a executar recuperação Wake V3"
+            );
 
-          await torrentEngineSleep(
-            2000
-          );
+            await wakePtHubTorrentEngine(engineBase);
+            continue;
+          }
 
-          continue;
+          if (response.status === 429 || response.status >= 500) {
+            await torrentEngineSleep(2000);
+            continue;
+          }
         }
 
         return [];
@@ -6805,18 +6723,13 @@ async function fetchPtHubTorrentEngine(
 
       torrentEngineLastHealthyAt = 0;
 
-      if (
-        attempt <
-        maxAttempts
-      ) {
-        triggerPtHubTorrentEngineWake(
-          "retry após erro"
+      if (attempt < maxAttempts) {
+        console.warn(
+          "PT•HUB Torrent Engine: erro de rede/timeout no stream" +
+          " — a executar recuperação Wake V3"
         );
 
-        await torrentEngineSleep(
-          2000
-        );
-
+        await wakePtHubTorrentEngine(engineBase);
         continue;
       }
 
