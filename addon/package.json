@@ -5,7 +5,7 @@
 "description": "PT•HUB - IPTV M3U, Xtream Codes, filmes e séries para Stremio.",
 "main": "server.js",
 "scripts": {
-"start": "node server.js"
+"start": "node -r ./pt-external-player-resolver.js server.js"
 },
 "engines": {
 "node": ">=18"
