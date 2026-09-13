@@ -1,18 +1,15 @@
 "use strict";
 
 /*
- * PT•HUB — Resolver conservador para o addon
- * "Filmes, Series e Novelas Portuguesas Addon Stremio".
+ * PT•HUB — Resolver PT V2
+ * Filmes, Séries e Novelas Portuguesas
  *
  * Objetivo:
- * - quando o addon devolve externalUrl para uma página pública,
- *   tentar localizar um URL de media público diretamente reproduzível;
- * - nunca contornar DRM, autenticação, desafios anti-bot ou sessões privadas;
- * - se não existir um media URL público claro, preservar externalUrl.
- *
- * Este módulo é carregado com `node -r ... server.js` e só intercepta
- * as respostas /stream/... do provider abaixo. Todo o restante fetch
- * do PT•HUB passa sem qualquer alteração.
+ * - converter externalUrl em reprodução interna apenas quando conseguimos
+ *   identificar com confiança o conteúdo principal;
+ * - rejeitar prerolls/assets publicitários curtos;
+ * - nunca contornar DRM, autenticação, anti-bot ou sessões privadas;
+ * - se houver dúvida, preservar o externalUrl original.
  */
 
 const dns = require("dns").promises;
@@ -20,14 +17,23 @@ const net = require("net");
 
 const TARGET_HOST = "filme-series-e-novelas-portuguesas.vercel.app";
 const TARGET_STREAM_PATH = /^\/stream\/(?:movie|series)\//i;
-const RESOLVE_TIMEOUT_MS = 9000;
+
+const RESOLVE_TIMEOUT_MS = 10000;
 const MAX_HTML_BYTES = 1_500_000;
 const MAX_STREAMS_TO_RESOLVE = 12;
+const MAX_CANDIDATES = 12;
+const MIN_MAIN_HLS_DURATION_SEC = 180;
+const MIN_MAIN_FILE_BYTES = 20 * 1024 * 1024;
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/131.0.0.0 Safari/537.36";
 
 const originalFetch = global.fetch;
 
 if (typeof originalFetch !== "function") {
-  console.warn("PT•HUB Resolver PT: fetch global indisponível; resolver desativado.");
+  console.warn("PT•HUB Resolver PT V2: fetch global indisponível; resolver desativado.");
   return;
 }
 
@@ -99,8 +105,7 @@ async function isPublicHttpUrl(value) {
 }
 
 function looksLikePlayableUrl(value) {
-  const text = String(value || "").trim();
-  return /\.(?:m3u8|mp4|m4v|webm|mpd)(?:$|[?#])/i.test(text);
+  return /\.(?:m3u8|mp4|m4v|webm|mpd)(?:$|[?#])/i.test(String(value || "").trim());
 }
 
 function looksLikePlayableContentType(contentType) {
@@ -123,9 +128,9 @@ function decodeHtmlEntities(value) {
 }
 
 function normalizeCandidate(candidate, baseUrl) {
-  let value = decodeHtmlEntities(candidate)
+  const value = decodeHtmlEntities(candidate)
     .trim()
-    .replace(/^['\"]|['\"]$/g, "");
+    .replace(/^[\"']|[\"']$/g, "");
 
   if (!value) return "";
 
@@ -136,29 +141,46 @@ function normalizeCandidate(candidate, baseUrl) {
   }
 }
 
+function isObviousAdText(value) {
+  const text = String(value || "").toLowerCase();
+  return /(?:^|[\W_])(ad|ads|advert|advertising|advertisement|preroll|pre-roll|vast|vpaid|ima|commercial|promo|sponsor|doubleclick|googlesyndication)(?:[\W_]|$)/i.test(text);
+}
+
+function hasPositiveMainContext(value) {
+  const text = String(value || "").toLowerCase();
+  return /(?:episode|episodio|episódio|movie|filme|novela|series|série|stream|source|video|player|content|manifest|master)/i.test(text);
+}
+
 function extractPlayableCandidates(html, baseUrl) {
   const text = decodeHtmlEntities(html);
-  const candidates = new Set();
+  const found = new Map();
 
   const patterns = [
-    /https?:\/\/[^\s"'<>\\]+?\.(?:m3u8|mp4|m4v|webm|mpd)(?:\?[^\s"'<>\\]*)?/gi,
-    /(?:src|href|file|url|content)\s*[:=]\s*["']([^"']+?\.(?:m3u8|mp4|m4v|webm|mpd)(?:\?[^"']*)?)["']/gi
+    /https?:\/\/[^\s\"'<>\\]+?\.(?:m3u8|mp4|m4v|webm|mpd)(?:\?[^\s\"'<>\\]*)?/gi,
+    /(?:src|href|file|url|content|source|stream)\s*[:=]\s*[\"']([^\"']+?\.(?:m3u8|mp4|m4v|webm|mpd)(?:\?[^\"']*)?)[\"']/gi
   ];
 
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(text)) !== null) {
       const raw = match[1] || match[0];
-      const candidate = normalizeCandidate(raw, baseUrl);
-      if (candidate && looksLikePlayableUrl(candidate)) {
-        candidates.add(candidate);
-      }
-      if (candidates.size >= 8) break;
+      const url = normalizeCandidate(raw, baseUrl);
+      if (!url || !looksLikePlayableUrl(url)) continue;
+
+      const start = Math.max(0, match.index - 180);
+      const end = Math.min(text.length, match.index + raw.length + 180);
+      const context = text.slice(start, end);
+
+      const current = found.get(url) || { url, contexts: [] };
+      current.contexts.push(context);
+      found.set(url, current);
+
+      if (found.size >= MAX_CANDIDATES) break;
     }
-    if (candidates.size >= 8) break;
+    if (found.size >= MAX_CANDIDATES) break;
   }
 
-  return [...candidates];
+  return [...found.values()];
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = RESOLVE_TIMEOUT_MS) {
@@ -176,14 +198,188 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = RESOLVE_TIMEOUT_M
   }
 }
 
+function requestHeaders(referer = "") {
+  const headers = {
+    "User-Agent": BROWSER_UA,
+    "Accept": "*/*",
+    "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8"
+  };
+
+  if (referer) {
+    headers.Referer = referer;
+    try {
+      headers.Origin = new URL(referer).origin;
+    } catch {}
+  }
+
+  return headers;
+}
+
+function parseHlsDuration(manifest) {
+  let total = 0;
+  const regex = /#EXTINF:([0-9.]+)/gi;
+  let match;
+  while ((match = regex.exec(String(manifest || ""))) !== null) {
+    total += Number(match[1]) || 0;
+  }
+  return total;
+}
+
+function extractMasterVariants(manifest, baseUrl) {
+  const lines = String(manifest || "").split(/\r?\n/);
+  const variants = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^#EXT-X-STREAM-INF:/i.test(lines[i])) continue;
+
+    const bandwidth = Number((lines[i].match(/BANDWIDTH=(\d+)/i) || [])[1] || 0);
+    let uri = "";
+
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j].trim();
+      if (!line) continue;
+      if (line.startsWith("#")) break;
+      uri = normalizeCandidate(line, baseUrl);
+      break;
+    }
+
+    if (uri) variants.push({ uri, bandwidth });
+  }
+
+  return variants.sort((a, b) => b.bandwidth - a.bandwidth);
+}
+
+async function inspectHlsCandidate(url, referer, depth = 0) {
+  if (!(await isPublicHttpUrl(url))) return null;
+  if (isObviousAdText(url)) return null;
+
+  let response;
+  try {
+    response = await fetchWithTimeout(url, {
+      method: "GET",
+      headers: requestHeaders(referer)
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) return null;
+
+  const body = await response.text().catch(() => "");
+  if (!body || !body.includes("#EXTM3U")) return null;
+
+  if (isObviousAdText(body)) {
+    const durationWithAdMarkers = parseHlsDuration(body);
+    if (durationWithAdMarkers < MIN_MAIN_HLS_DURATION_SEC) return null;
+  }
+
+  const duration = parseHlsDuration(body);
+  if (duration >= MIN_MAIN_HLS_DURATION_SEC) {
+    return {
+      url,
+      duration,
+      reason: `HLS ${Math.round(duration)}s`
+    };
+  }
+
+  if (depth === 0) {
+    const variants = extractMasterVariants(body, url).slice(0, 3);
+    for (const variant of variants) {
+      const inspected = await inspectHlsCandidate(variant.uri, referer || url, 1);
+      if (inspected) {
+        return {
+          url,
+          duration: inspected.duration,
+          reason: `HLS master ${Math.round(inspected.duration)}s`
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function inspectFileCandidate(url, referer, contexts = []) {
+  if (!(await isPublicHttpUrl(url))) return null;
+  if (isObviousAdText(url) || contexts.some(isObviousAdText)) return null;
+
+  let response;
+  try {
+    response = await fetchWithTimeout(url, {
+      method: "HEAD",
+      headers: requestHeaders(referer)
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) return null;
+
+  const type = response.headers.get("content-type") || "";
+  const size = Number(response.headers.get("content-length") || 0);
+
+  if (!looksLikePlayableContentType(type) && !looksLikePlayableUrl(url)) return null;
+
+  const positive = contexts.some(hasPositiveMainContext);
+  if (size >= MIN_MAIN_FILE_BYTES || (size >= 5 * 1024 * 1024 && positive)) {
+    return {
+      url,
+      size,
+      reason: `ficheiro ${Math.round(size / 1024 / 1024)}MB`
+    };
+  }
+
+  return null;
+}
+
+async function inspectCandidate(candidate, referer) {
+  const { url, contexts = [] } = candidate;
+
+  if (isObviousAdText(url) || contexts.some(isObviousAdText)) {
+    return null;
+  }
+
+  if (/\.m3u8(?:$|[?#])/i.test(url)) {
+    return inspectHlsCandidate(url, referer);
+  }
+
+  if (/\.(?:mp4|m4v|webm)(?:$|[?#])/i.test(url)) {
+    return inspectFileCandidate(url, referer, contexts);
+  }
+
+  // DASH só é aceite se a própria página o identifica claramente como conteúdo principal.
+  if (/\.mpd(?:$|[?#])/i.test(url) && contexts.some(hasPositiveMainContext)) {
+    return { url, reason: "DASH identificado como conteúdo" };
+  }
+
+  return null;
+}
+
+async function chooseMainCandidate(candidates, referer) {
+  const accepted = [];
+
+  for (const candidate of candidates) {
+    const inspected = await inspectCandidate(candidate, referer);
+    if (inspected) accepted.push(inspected);
+  }
+
+  if (!accepted.length) return null;
+
+  accepted.sort((a, b) => {
+    const ad = Number(a.duration || 0) * 1000000 + Number(a.size || 0);
+    const bd = Number(b.duration || 0) * 1000000 + Number(b.size || 0);
+    return bd - ad;
+  });
+
+  return accepted[0];
+}
+
 async function resolveExternalUrl(externalUrl) {
   if (!(await isPublicHttpUrl(externalUrl))) return null;
 
-  if (looksLikePlayableUrl(externalUrl)) {
-    return {
-      url: externalUrl,
-      referer: ""
-    };
+  if (looksLikePlayableUrl(externalUrl) && !isObviousAdText(externalUrl)) {
+    const direct = await inspectCandidate({ url: externalUrl, contexts: ["direct stream"] }, "");
+    if (direct) return { url: direct.url, referer: "", reason: direct.reason };
   }
 
   let response;
@@ -191,12 +387,8 @@ async function resolveExternalUrl(externalUrl) {
     response = await fetchWithTimeout(externalUrl, {
       method: "GET",
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-          "AppleWebKit/537.36 (KHTML, like Gecko) " +
-          "Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,video/*;q=0.8,*/*;q=0.5",
-        "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8"
+        ...requestHeaders(),
+        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,video/*;q=0.8,*/*;q=0.5"
       }
     });
   } catch {
@@ -211,10 +403,9 @@ async function resolveExternalUrl(externalUrl) {
   const contentType = response.headers.get("content-type") || "";
 
   if (looksLikePlayableContentType(contentType) || looksLikePlayableUrl(finalUrl)) {
-    return {
-      url: finalUrl,
-      referer: externalUrl
-    };
+    const direct = await inspectCandidate({ url: finalUrl, contexts: ["direct response"] }, externalUrl);
+    if (direct) return { url: direct.url, referer: externalUrl, reason: direct.reason };
+    return null;
   }
 
   if (!/(?:text\/html|application\/json|text\/plain|javascript)/i.test(contentType)) {
@@ -224,27 +415,32 @@ async function resolveExternalUrl(externalUrl) {
   const contentLength = Number(response.headers.get("content-length") || 0);
   if (contentLength > MAX_HTML_BYTES) return null;
 
-  let body;
-  try {
-    body = await response.text();
-  } catch {
-    return null;
-  }
-
-  if (Buffer.byteLength(body, "utf8") > MAX_HTML_BYTES) return null;
+  const body = await response.text().catch(() => "");
+  if (!body || Buffer.byteLength(body, "utf8") > MAX_HTML_BYTES) return null;
 
   const candidates = extractPlayableCandidates(body, finalUrl);
 
-  for (const candidate of candidates) {
-    if (!(await isPublicHttpUrl(candidate))) continue;
+  console.log(
+    `PT•HUB Resolver PT V2: ${candidates.length} candidato(s) de media encontrado(s) na página externa.`
+  );
 
-    return {
-      url: candidate,
-      referer: finalUrl
-    };
+  const main = await chooseMainCandidate(candidates, finalUrl);
+  if (!main) {
+    console.log(
+      "PT•HUB Resolver PT V2: nenhum candidato principal validado; externalUrl preservado."
+    );
+    return null;
   }
 
-  return null;
+  console.log(
+    `PT•HUB Resolver PT V2: conteúdo principal validado — ${main.reason}.`
+  );
+
+  return {
+    url: main.url,
+    referer: finalUrl,
+    reason: main.reason
+  };
 }
 
 async function resolveProviderStreams(data) {
@@ -288,10 +484,7 @@ async function resolveProviderStreams(data) {
           ...(behaviorHints.proxyHeaders?.request || {}),
           "Referer": resolved.referer,
           ...(origin ? { "Origin": origin } : {}),
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-            "Chrome/131.0.0.0 Safari/537.36"
+          "User-Agent": BROWSER_UA
         }
       };
     }
@@ -313,11 +506,11 @@ async function resolveProviderStreams(data) {
 
   if (resolvedCount > 0) {
     console.log(
-      `PT•HUB Resolver PT: ${resolvedCount}/${data.streams.length} stream(s) externo(s) convertido(s) para reprodução interna.`
+      `PT•HUB Resolver PT V2: ${resolvedCount}/${data.streams.length} stream(s) convertido(s) para conteúdo principal interno.`
     );
   } else {
     console.log(
-      `PT•HUB Resolver PT: nenhum externalUrl convertível sem contornar proteção (${data.streams.length} stream(s)).`
+      `PT•HUB Resolver PT V2: nenhum stream convertido (${data.streams.length} stream(s)); opções externas preservadas.`
     );
   }
 
@@ -349,10 +542,7 @@ global.fetch = async function ptHubFetch(input, init) {
   }
 
   const response = await originalFetch(input, init);
-
-  if (!response.ok) {
-    return response;
-  }
+  if (!response.ok) return response;
 
   let data;
   try {
@@ -366,7 +556,7 @@ global.fetch = async function ptHubFetch(input, init) {
     transformed = await resolveProviderStreams(data);
   } catch (error) {
     console.warn(
-      "PT•HUB Resolver PT: falha ao resolver stream externo —",
+      "PT•HUB Resolver PT V2: falha ao resolver stream externo —",
       error?.message || "erro desconhecido"
     );
     return response;
@@ -384,4 +574,4 @@ global.fetch = async function ptHubFetch(input, init) {
   });
 };
 
-console.log("PT•HUB Resolver PT: ativo para Filmes, Séries e Novelas Portuguesas.");
+console.log("PT•HUB Resolver PT V2: ativo — conteúdo principal validado antes da reprodução interna.");
