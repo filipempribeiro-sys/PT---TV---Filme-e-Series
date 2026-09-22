@@ -37,8 +37,54 @@ function decodeConfig(token){
   return JSON.parse(Buffer.from(v.replace(/-/g,"+").replace(/_/g,"/"),"base64").toString("utf8"));
  }catch{return null}
 }
-function manifest(){
- return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub de TV Portugal, IPTV M3U/Xtream Codes, filmes e séries.",logo:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png",resources:["catalog","meta","stream","addon_catalog","subtitles"],types:["channel","tv","movie","series"],catalogs:[{type:"movie",id:"movie-top",name:"🔥 Filmes Populares"},{type:"series",id:"series-top",name:"🔥 Séries Populares"},{type:"movie",id:"featured",name:"⭐ Filmes em Destaque"},{type:"series",id:"featured",name:"⭐ Séries em Destaque"},{type:"channel",id:"m3u",name:"Minha IPTV"},{type:"channel",id:"pt-services",name:"TV Portugal"}],addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
+const STREAMERS=[
+{id:"netflix",name:"Netflix"},{id:"hbomax",name:"HBO Max"},{id:"prime-video",name:"Prime Video"},{id:"disney-plus",name:"Disney+"},{id:"apple-tv-plus",name:"Apple TV+"}
+];
+const BASE_CATALOGS=[
+{id:"movie-new",type:"movie",name:"🆕 Novos Filmes"},
+{id:"cinema-new",type:"movie",name:"🎬 Estreias no Cinema"},
+{id:"movie-top",type:"movie",name:"🔥 Filmes Populares"},
+{id:"series-top",type:"series",name:"🔥 Séries Populares"},
+{id:"series-new",type:"series",name:"🆕 Novas Séries"},
+{id:"featured",type:"movie",name:"⭐ Filmes em Destaque"},
+{id:"featured",type:"series",name:"⭐ Séries em Destaque"}
+];
+const OPERATORS=[{id:"meo",name:"MEO"},{id:"nos",name:"NOS"},{id:"vodafone",name:"Vodafone"},{id:"digi",name:"DIGI"}];
+async function manifest(config=null){
+ const features=config?.features||{}, hasConfig=!!config;
+ const showFeatured=features.featured===true, featuredContent=features.featuredContent||{movies:true,series:true};
+ const showStreamers=features.streamers===true;
+ const sm=Array.isArray(features.selectedStreamerMovies)?features.selectedStreamerMovies:(Array.isArray(features.selectedStreamers)?features.selectedStreamers:null);
+ const ss=Array.isArray(features.selectedStreamerSeries)?features.selectedStreamerSeries:(Array.isArray(features.selectedStreamers)?features.selectedStreamers:null);
+ const catalogs=[];
+ const add=(type,id,name)=>catalogs.push({type,id,name,extra:[{name:"search",isRequired:false}]});
+ for(const base of BASE_CATALOGS){
+   const special=["featured","movie-top","series-top","cinema-new","movie-new","series-new"].includes(base.id);
+   if(hasConfig&&special){
+     if(!showFeatured) continue;
+     if(base.type==="movie"&&featuredContent.movies!==true) continue;
+     if(base.type==="series"&&featuredContent.series!==true) continue;
+   }
+   if(base.id==="featured"||special) add(base.type,base.id,base.name);
+ }
+ if(!hasConfig||showStreamers){
+   for(const st of STREAMERS){
+     if(!hasConfig||!sm||sm.includes(st.id)) add("movie",st.id,st.name);
+     if(!hasConfig||!ss||ss.includes(st.id)) add("series",st.id,st.name);
+   }
+ }
+ const showIPTV=features.iptv===true;
+ if(showIPTV){
+   const name=config?.mode==="xtream"?(config?.xtreamCatalogName||"📡 Xtream API"):config?.mode==="iptv-org"?(config?.iptvOrg?.catalogName||"📡 IPTV-org Free"):(config?.m3uCatalogName||"📡 Minha IPTV");
+   add("channel","m3u",name);
+ }
+ if(features.operators===true){
+   const selected=Array.isArray(features.selectedOperators)?features.selectedOperators:[];
+   for(const op of OPERATORS) if(!hasConfig||selected.includes(op.id)) add("channel",op.id,op.name);
+ }
+ const showPt=features.ptContent===true||features.ptContentSources?.ptPt===true||features.ptContentSources?.portugueseProduction===true;
+ if(showPt&&features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
+ return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta","stream","addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
 async function hlsProxy(request,url,profile,target){
  if(!isHttp(target))return new Response("HLS target inválido.",{status:400,headers:CORS});
