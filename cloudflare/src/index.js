@@ -46,6 +46,32 @@ async function hlsProxy(request,url,profile,target){
  return new Response(rewritten,{headers:{...CORS,"content-type":"application/vnd.apple.mpegurl","Cache-Control":"no-store"}});
 }
 
+
+const SERVICES=[
+{id:"pttv:vodafone",name:"Vodafone TV",description:"Acesso oficial à Vodafone TV para clientes Vodafone TV.",url:"https://www.vodafone.pt/pacotes/televisao/em-todos-ecras.html",logo:"https://www.vodafone.pt/content/dam/digital/vodafone/images/logos/vodafone-logo-red.svg"},
+{id:"pttv:digi",name:"DIGI TV",description:"Acesso oficial à DIGI TV para clientes DIGI.",url:"https://www.digi.pt/tv/",logo:"https://www.digi.pt/favicon.ico"},
+{id:"pttv:meogo",name:"MEO Go",description:"Acesso oficial ao MEO Go.",url:"https://tv.meo.pt/pt",logo:"https://www.meo.pt/favicon.ico"},
+{id:"pttv:nos",name:"NOS TV",description:"Acesso oficial à NOS TV.",url:"https://www.nos.pt/tv/app-nos-tv",logo:"https://www.nos.pt/favicon.ico"}];
+const ADDONS=[
+{name:"Streaming Catalogs",status:"reference",url:"https://github.com/markflaisz/stremio-catalog"},
+{name:"OpenSubtitles",status:"reference",url:"https://opensubtitles.strem.io/stremio/v1/manifest.json"},
+{name:"Torrentio",status:"reference",url:"https://torrentio.strem.fun/manifest.json"},
+{name:"TorrentsDB",status:"reference",url:"https://beta.stremio-addons.net/addons/torrentsdb/manifest.json"}];
+const CINEMETA_BASE="https://v3-cinemeta.strem.io";
+async function fetchJson(target){try{const r=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/4.0.0"}});return r.ok?await r.json():null}catch{return null}}
+function serviceMeta(s){return{id:s.id,type:"channel",name:s.name,description:s.description,poster:s.logo,logo:s.logo,links:[{name:"Abrir serviço",category:"external",url:s.url}],behaviorHints:{defaultVideoId:s.id}}}
+async function catalog(type,id,extra=""){
+ if(type==="channel"&&id==="pt-services")return SERVICES.map(serviceMeta);
+ if((type==="movie"&&id==="movie-top")||(type==="series"&&id==="series-top")){const d=await fetchJson(`${CINEMETA_BASE}/catalog/${type}/top${extra?"/"+extra:""}.json`);return Array.isArray(d?.metas)?d.metas:[]}
+ if((type==="movie"||type==="series")&&id==="featured"){const d=await fetchJson(`${CINEMETA_BASE}/catalog/${type}/top${extra?"/"+extra:""}.json`);return Array.isArray(d?.metas)?d.metas.slice(0,20):[]}
+ return[];
+}
+async function meta(type,id){
+ const service=SERVICES.find(x=>x.id===id);if(type==="channel"&&service)return serviceMeta(service);
+ if(type==="movie"||type==="series"){const d=await fetchJson(`${CINEMETA_BASE}/meta/${type}/${encodeURIComponent(id)}.json`);if(d?.meta)return d.meta}
+ return null;
+}
+
 const SUBSENSE_BASE_URL="https://subsense.nepiraw.com";
 const SUBSENSE_INSTALL_PREFIX="bj6uhmdn-";
 const SUBSENSE_MAX_SUBTITLES=10;
@@ -79,6 +105,12 @@ export default {async fetch(request,env){
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
  }
  if(request.method==="GET"&&p==="/manifest.json")return json(manifest(),200,noCache);
+ let ac=p.match(/^\\/([^/]+)\\/catalog\\/addon\\/recommended(?:\\/([^/]+))?\\.json$/);
+ if(request.method==="GET"&&ac)return json({addons:ADDONS});
+ let cm=p.match(/^\\/([^/]+)\\/catalog\\/([^/]+)\\/([^/]+)(?:\\/([^/]+))?\\.json$/);
+ if(request.method==="GET"&&cm)return json({metas:await catalog(decodeURIComponent(cm[2]),decodeURIComponent(cm[3]),cm[4]?decodeURIComponent(cm[4]):"")});
+ let mm=p.match(/^\\/([^/]+)\\/meta\\/([^/]+)\\/([^/]+)\\.json$/);
+ if(request.method==="GET"&&mm){const v=await meta(decodeURIComponent(mm[2]),decodeURIComponent(mm[3]));return json({meta:v||null});}
  let sm=p.match(/^\\/([^/]+)\\/subtitles\\/([^/]+)\\/([^/]+?)(?:\\/([^/]+))?\\.json$/);
  if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
  let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){decodeConfig(m[1]);return json(manifest(),200,noCache)}
