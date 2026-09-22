@@ -90,11 +90,27 @@ async function getXtreamChannels(config){
  const data=await r.json();if(!Array.isArray(data))return[];
  return data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||"",group:x.category_name||"TV",tvgId:x.epg_channel_id||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}});
 }
+
+const IPTVORG_CHANNELS_URL="https://iptv-org.github.io/api/channels.json";
+const IPTVORG_STREAMS_URL="https://iptv-org.github.io/api/streams.json";
+const IPTVORG_LOGOS_URL="https://iptv-org.github.io/api/logos.json";
+const COUNTRY_MAP={PORTUGAL:"PT",BRASIL:"BR",BRAZIL:"BR",ESPANHA:"ES",SPAIN:"ES","REINO UNIDO":"GB","UNITED KINGDOM":"GB",FRANCA:"FR","FRANÇA":"FR",FRANCE:"FR",ALEMANHA:"DE",GERMANY:"DE",ITALIA:"IT","ITÁLIA":"IT",ITALY:"IT","ESTADOS UNIDOS":"US",USA:"US","UNITED STATES":"US"};
+function countryCode(v){const s=String(v||"").trim().toUpperCase();return s.length===2?s:(COUNTRY_MAP[s]||s)}
+async function getIPTVOrgChannels(config){
+ const opt=config?.iptvOrg||{}, rawCountry=String(opt.country||"").trim(), category=String(opt.category||"").trim().toLowerCase(), country=rawCountry||category?countryCode(rawCountry):"PT";
+ const [cr,sr,lr]=await Promise.all([fetch(IPTVORG_CHANNELS_URL),fetch(IPTVORG_STREAMS_URL),fetch(IPTVORG_LOGOS_URL).catch(()=>null)]);
+ if(!cr.ok||!sr.ok)throw new Error("IPTV-org indisponível");
+ const channels=await cr.json(),streams=await sr.json(),logos=lr?.ok?await lr.json():[];
+ const by=new Map(),logo=new Map();for(const s of streams){if(s.channel&&s.url){const a=by.get(s.channel)||[];a.push(s);by.set(s.channel,a)}}for(const x of logos)if(x.channel&&!logo.has(x.channel))logo.set(x.channel,x.url);
+ const out=[];for(const ch of channels){if(country&&String(ch.country||"").toUpperCase()!==country)continue;if(category&&!(ch.categories||[]).map(x=>String(x).toLowerCase()).some(x=>x===category||x.includes(category)||category.includes(x)))continue;const ss=by.get(ch.id)||[];if(!ss.length)continue;out.push({id:`iptvorg:${ch.id}`,type:"channel",name:ch.name||ch.id,logo:ch.logo||logo.get(ch.id)||"",group:ch.categories?.[0]||"TV",tvgId:ch.id,url:ss[0].url})}return out;
+}
+
 async function getIPTVChannels(config){
  if(!config||config?.features?.iptv===false)return[];
  if(config.mode==="m3u"&&config.m3uSource!=="file"&&isHttp(config.m3uUrl))return getM3UChannels(config);
  if(config.mode==="m3u"&&config.m3uFileData)return parseM3U(config.m3uFileData);
  if(config.mode==="xtream")return getXtreamChannels(config);
+ if(config.mode==="iptv-org")return getIPTVOrgChannels(config);
  return[];
 }
 function channelMeta(x){return{id:x.id,type:"channel",name:x.name,poster:x.logo||manifest().logo,logo:x.logo||manifest().logo,description:x.group||"TV"}}
