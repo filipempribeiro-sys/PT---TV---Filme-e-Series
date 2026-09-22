@@ -166,6 +166,11 @@ export default {async fetch(request,env){
    return json({success:true,m3uFileId:id,persistent:true,expiresInDays:30});
   }catch(e){return json({success:false,error:e?.message||"Não foi possível guardar a lista M3U."},500)}
  }
+ if(request.method==="GET"&&p==="/api/storage-health"){
+  if(!env.PT_HUB_M3U)return json({ok:false,storage:"kv",binding:"PT_HUB_M3U",error:"Binding indisponível."},503);
+  try{const probe="health:"+crypto.randomUUID();await env.PT_HUB_M3U.put(probe,"ok",{expirationTtl:60});const value=await env.PT_HUB_M3U.get(probe);await env.PT_HUB_M3U.delete(probe);return json({ok:value==="ok",storage:"kv",binding:"PT_HUB_M3U",readWriteDelete:value==="ok"})}
+  catch(e){return json({ok:false,storage:"kv",binding:"PT_HUB_M3U",error:e?.message||"Falha KV."},500)}
+ }
  if(request.method==="GET"&&p==="/manifest.json")return json(manifest(),200,noCache);
  let ac=p.match(new RegExp("^/([^/]+)/catalog/addon/recommended(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&ac)return json({addons:ADDONS});
