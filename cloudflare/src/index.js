@@ -691,8 +691,8 @@ async function getSubtitles(config,type,id,extra=""){
  const seg=SUBSENSE_INSTALL_PREFIX+encodeURIComponent(JSON.stringify({languages:langs,maxSubtitles:SUBSENSE_MAX_SUBTITLES}));
  const base=`${SUBSENSE_BASE_URL}/${seg}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
  const target=extra?`${base}/${String(extra).replace(/^[/]+/,"")}`:`${base}.json`;
- try{
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);const response=await fetch(target,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"PT-HUB/3.0.0"}});clearTimeout(timer);
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);try{
+  const response=await fetch(target,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"PT-HUB/3.0.0"}});
   if(!response.ok)return[];
   const data=await response.json(), seen=new Set(), out=[];
   for(const s of Array.isArray(data?.subtitles)?data.subtitles:[]){
@@ -701,7 +701,7 @@ async function getSubtitles(config,type,id,extra=""){
    const key=String(s?.url||`${s?.id||""}|${lang}`).toLowerCase(); if(seen.has(key))continue; seen.add(key); out.push(s);
   }
   return out.sort((a,b)=>subtitlePriority(a?.lang,langs)-subtitlePriority(b?.lang,langs)).slice(0,SUBSENSE_MAX_SUBTITLES);
- }catch{return[]}
+ }catch{return[]}finally{clearTimeout(timer)}
 }
 function renderLegacyConfigurePage(config = {}) {
   const initialConfigJson = JSON.stringify(config || {})
