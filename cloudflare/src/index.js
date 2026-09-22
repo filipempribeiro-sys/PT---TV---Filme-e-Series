@@ -3,7 +3,7 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { Buffer } from "node:buffer";
 
-const VERSION="4.0.0";
+const VERSION="3.1.5";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=10*1024*1024;
@@ -61,6 +61,443 @@ async function hlsProxy(request,url,profile,target){
 }
 
 
+const PT_HUB_LOGO="https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
+function normalizeLogoMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    // O sinal + faz parte da identidade de alguns canais (SPORT TV+, Canal+).
+    // Convertê-lo em "plus" antes de remover pontuação evita SPORT TV+ -> SPORTTV.
+    .replace(/\+/g, " plus ")
+    .replace(/\b(?:uhd|fhd|full\s*hd|fullhd|hd|sd|4k|8k|hevc|h265|h264|av1|50fps|60fps|backup|low\s*delay|lowdelay|vip|premium|raw)\b/gi, " ")
+    .replace(/^(?:pt|br|es|fr|de|it|uk|gb|us|usa|ca)\s*[|:\-]\s*/i, "")
+    .replace(/\.(?:pt|br|es|fr|de|it|uk|gb|us|ca)$/i, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+const TV_LOGO_KEY_ALIASES = {
+  // Portugal — nomes atuais/antigos e variantes frequentes de listas IPTV.
+  rtp3: ["rtpnoticias"],
+  tvificcao: ["vtvi"],
+  // BTV1/BTV1 Backup/BTV 1 são o mesmo canal BTV no catálogo Portugal.
+  btv1: ["btv"],
+  btv: ["btv1"],
+  // O repositório usa a designação histórica SPORT TV Mais.
+  sporttvplus: ["sporttvmais"],
+  sporttvmais: ["sporttvplus"],
+  foxmovies: ["starmovies"],
+  foxchannel: ["starchannel"],
+  foxlife: ["starlife"],
+  foxcrime: ["starcrime"],
+  foxcomedy: ["starcomedy"],
+
+  // Marcas internacionais que costumam aparecer sem sufixo de país.
+  mtvportugal: ["mtv"],
+  syfyportugal: ["syfy"],
+  tlcportugal: ["tlc"]
+};
+
+const TV_LOGO_GLOBAL_BRANDS = new Set([
+  "tlc", "mtv", "syfy", "dazn",
+  "dazn1", "dazn2", "dazn3", "dazn4", "dazn5", "dazn6",
+  "cartoonnetwork", "discoverychannel", "nationalgeographic",
+  "natgeowild", "history", "eurosport1", "eurosport2"
+]);
+
+function expandTvLogoAliases(keys) {
+  const out = new Set(keys || []);
+  for (const key of [...out]) {
+    for (const alias of TV_LOGO_KEY_ALIASES[key] || []) {
+      const normalized = normalizeLogoMatchText(alias);
+      if (normalized) out.add(normalized);
+    }
+  }
+  return [...out];
+}
+
+function getChannelLogoLookupKeys(...values) {
+  const keys = new Set();
+
+  for (const value of values.flat(Infinity)) {
+    const raw = String(value || "").trim();
+    if (!raw) continue;
+
+    const variants = [
+      raw,
+      raw.replace(/\[[^\]]*\]/g, " "),
+      raw.replace(/\([^)]*\)/g, " "),
+      raw.replace(/^(?:pt|br|es|fr|de|it|uk|gb|us|usa|ca)\s*[|:\-]\s*/i, ""),
+      raw.replace(/\.(?:pt|br|es|fr|de|it|uk|gb|us|ca)$/i, "")
+    ];
+
+    for (const variant of variants) {
+      const key = normalizeLogoMatchText(variant);
+      if (key) keys.add(key);
+    }
+  }
+
+  return expandTvLogoAliases([...keys]);
+}
+
+/* =========================================================
+   IPTV — LOGOS AUTOMÁTICOS tv-logo/tv-logos
+   =========================================================
+   Prioridade:
+   1. logo fornecido pelo M3U/Xtream/IPTV-org
+   2. catálogo local ../data/channel-logos.json
+   3. catálogo mundial tv-logo/tv-logos (GitHub RAW)
+   4. PT_HUB_LOGO no ponto onde o meta é devolvido
+
+   Posters dos canais: formato vertical 2:3, com logo centrado e reduzido.
+
+   O matching usa nome do canal + tvg-name + tvg-id quando disponíveis.
+   O índice mundial é obtido da árvore pública GitHub e fica em cache.
+   ========================================================= */
+
+const TV_LOGO_REPOSITORY = "tv-logo/tv-logos";
+const TV_LOGO_BRANCH = "main";
+const TV_LOGO_TREE_URL =
+  `https://api.github.com/repos/${TV_LOGO_REPOSITORY}/git/trees/${TV_LOGO_BRANCH}?recursive=1`;
+const TV_LOGO_RAW_BASE =
+  `https://raw.githubusercontent.com/${TV_LOGO_REPOSITORY}/${TV_LOGO_BRANCH}/`;
+const TV_LOGO_INDEX_TTL_MS = 24 * 60 * 60 * 1000;
+const TV_LOGO_FETCH_TIMEOUT_MS = 20000;
+
+const channelLogosIndex = [];
+
+let tvLogoWorldIndex = new Map();
+let tvLogoWorldKeys = [];
+let tvLogoWorldLoadedAt = 0;
+let tvLogoWorldLoadPromise = null;
+const tvLogoMatchCache = new Map();
+
+function getTvLogoFileKeys(fileName) {
+  const stem = String(fileName || "")
+    .replace(/\.(?:png|webp|jpe?g)$/i, "")
+    .toLowerCase();
+
+  const variants = new Set([stem]);
+
+  // Os ficheiros terminam normalmente no código do país:
+  // rtp-1-pt.png, bbc-one-uk.png, etc.
+  variants.add(stem.replace(/-[a-z]{2,3}$/i, ""));
+
+  for (const value of [...variants]) {
+    variants.add(value.replace(/-(?:uhd|fhd|full-hd|hd|sd|4k|8k)$/i, ""));
+    variants.add(value.replace(/-(?:uhd|fhd|full-hd|hd|sd|4k|8k)-[a-z]{2,3}$/i, ""));
+  }
+
+  return [...variants]
+    .map(normalizeLogoMatchText)
+    .filter(Boolean);
+}
+
+function addTvLogoCandidate(index, key, candidate) {
+  if (!key) return;
+  const current = index.get(key) || [];
+
+  if (!current.some((item) => item.path === candidate.path)) {
+    current.push(candidate);
+  }
+
+  index.set(key, current);
+}
+
+async function loadTvLogoWorldIndex() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TV_LOGO_FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(TV_LOGO_TREE_URL, {
+      signal: controller.signal,
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": `PT-HUB/${VERSION}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const tree = Array.isArray(data?.tree) ? data.tree : [];
+    const nextIndex = new Map();
+    let logoCount = 0;
+
+    for (const item of tree) {
+      const repoPath = String(item?.path || "");
+
+      if (
+        item?.type !== "blob" ||
+        !repoPath.startsWith("countries/") ||
+        !/\.(?:png|webp|jpe?g)$/i.test(repoPath)
+      ) {
+        continue;
+      }
+
+      const parts = repoPath.split("/");
+      if (parts.length < 3) continue;
+
+      const country = parts[1];
+      const fileName = parts[parts.length - 1];
+      if (/^0_/i.test(fileName)) continue;
+
+      const candidate = {
+        path: repoPath,
+        country,
+        logo: `${TV_LOGO_RAW_BASE}${repoPath}`,
+        hd: /(?:^|-)hd(?:-|\.)/i.test(fileName)
+      };
+
+      for (const key of getTvLogoFileKeys(fileName)) {
+        addTvLogoCandidate(nextIndex, key, candidate);
+      }
+
+      logoCount++;
+    }
+
+    if (!logoCount) {
+      throw new Error("O catálogo mundial não devolveu logos.");
+    }
+
+    tvLogoWorldIndex = nextIndex;
+    tvLogoWorldKeys = [...nextIndex.keys()];
+    tvLogoWorldLoadedAt = Date.now();
+    tvLogoMatchCache.clear();
+
+    console.log(
+      `PT•HUB Logos: catálogo mundial carregado — ${logoCount} logo(s), ${nextIndex.size} chave(s).`
+    );
+
+    return true;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function ensureTvLogoWorldIndex() {
+  if (
+    tvLogoWorldIndex.size > 0 &&
+    Date.now() - tvLogoWorldLoadedAt < TV_LOGO_INDEX_TTL_MS
+  ) {
+    return true;
+  }
+
+  if (tvLogoWorldLoadPromise) {
+    return tvLogoWorldLoadPromise;
+  }
+
+  tvLogoWorldLoadPromise = loadTvLogoWorldIndex()
+    .catch((error) => {
+      console.error(
+        "PT•HUB Logos: não foi possível atualizar catálogo mundial:",
+        error.message
+      );
+      return false;
+    })
+    .finally(() => {
+      tvLogoWorldLoadPromise = null;
+    });
+
+  return tvLogoWorldLoadPromise;
+}
+
+function getPreferredLogoCountry(config) {
+  const raw = String(
+    config?.catalogCountry ||
+    config?.iptvCountry ||
+    config?.iptvOrgCountry ||
+    config?.country ||
+    config?.countryCode ||
+    ""
+  ).trim().toLowerCase();
+
+  const aliases = {
+    pt: "portugal",
+    portugal: "portugal",
+    br: "brazil",
+    brazil: "brazil",
+    brasil: "brazil",
+    es: "spain",
+    spain: "spain",
+    espana: "spain",
+    fr: "france",
+    france: "france",
+    de: "germany",
+    germany: "germany",
+    it: "italy",
+    italy: "italy",
+    uk: "united-kingdom",
+    gb: "united-kingdom",
+    us: "united-states",
+    usa: "united-states",
+    ca: "canada"
+  };
+
+  return aliases[raw] || raw.replace(/\s+/g, "-");
+}
+
+function chooseWorldLogoCandidate(candidates, config = null, matchedKey = "") {
+  if (!Array.isArray(candidates) || !candidates.length) return "";
+
+  const preferredCountry = getPreferredLogoCountry(config);
+  const countries = [...new Set(candidates.map((item) => item.country).filter(Boolean))];
+
+  let pool = [...candidates];
+
+  // Se conhecemos o país, nunca escolhemos primeiro um homónimo estrangeiro.
+  if (preferredCountry) {
+    const sameCountry = pool.filter((item) => item.country === preferredCountry);
+    if (sameCountry.length) {
+      pool = sameCountry;
+    } else if (
+      countries.length > 1 &&
+      String(matchedKey || "").length <= 6 &&
+      !TV_LOGO_GLOBAL_BRANDS.has(String(matchedKey || ""))
+    ) {
+      // Nomes curtos como BTV/ONE/TV1 são demasiado ambíguos sem candidato local.
+      // Exceção apenas para marcas internacionais explicitamente conhecidas.
+      return "";
+    }
+  } else if (
+    countries.length > 1 &&
+    String(matchedKey || "").length <= 6 &&
+    !TV_LOGO_GLOBAL_BRANDS.has(String(matchedKey || ""))
+  ) {
+    // Sem país conhecido é melhor não mostrar um logo errado.
+    return "";
+  }
+
+  const sorted = pool.sort((a, b) => {
+    // Em empate, preferir a variante normal à variante explicitamente HD.
+    if (a.hd !== b.hd) return Number(a.hd) - Number(b.hd);
+    return a.path.length - b.path.length;
+  });
+
+  return sorted[0]?.logo || "";
+}
+
+function findWorldChannelLogo(channelIdentity, config = null) {
+  const keys = getChannelLogoLookupKeys(channelIdentity);
+  if (!keys.length || !tvLogoWorldIndex.size) return "";
+
+  const preferredCountry = getPreferredLogoCountry(config);
+  const cacheKey = `${preferredCountry}|${keys.join("|")}`;
+  if (tvLogoMatchCache.has(cacheKey)) {
+    return tvLogoMatchCache.get(cacheKey);
+  }
+
+  // 1) Correspondência exata — é sempre a opção mais segura.
+  for (const key of keys) {
+    const candidates = tvLogoWorldIndex.get(key) || [];
+    if (candidates.length) {
+      const logo = chooseWorldLogoCandidate(candidates, config, key);
+      tvLogoMatchCache.set(cacheKey, logo);
+      return logo;
+    }
+  }
+
+  // 2) Correspondência tolerante para nomes IPTV com lixo adicional.
+  // Apenas para chaves suficientemente específicas, reduzindo falsos positivos.
+  let best = null;
+
+  for (const query of keys) {
+    if (query.length < 5) continue;
+
+    for (const candidateKey of tvLogoWorldKeys) {
+      if (candidateKey.length < 5) continue;
+
+      const contains =
+        query.includes(candidateKey) ||
+        candidateKey.includes(query);
+
+      if (!contains) continue;
+
+      const diff = Math.abs(query.length - candidateKey.length);
+      if (diff > 10) continue;
+
+      const score = 100 - diff;
+      if (!best || score > best.score) {
+        best = { key: candidateKey, score };
+      }
+    }
+  }
+
+  if (best) {
+    const logo = chooseWorldLogoCandidate(
+      tvLogoWorldIndex.get(best.key) || [],
+      config,
+      best.key
+    );
+    tvLogoMatchCache.set(cacheKey, logo);
+    return logo;
+  }
+
+  tvLogoMatchCache.set(cacheKey, "");
+  return "";
+}
+
+function findChannelLogo(channelIdentity, config = null) {
+  const identityValues = (Array.isArray(channelIdentity) ? channelIdentity : [channelIdentity])
+    .flat(Infinity)
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (!identityValues.length) return "";
+
+  // O nome visível é a identidade principal. tvg-name/tvg-id servem apenas
+  // como apoio e nunca devem sobrepor um nome claramente diferente.
+  const primaryKeys = getChannelLogoLookupKeys(identityValues[0]);
+  const secondaryKeys = getChannelLogoLookupKeys(identityValues.slice(1));
+
+  const findLocal = (keys) => {
+    for (const normalizedName of keys) {
+      for (const entry of channelLogosIndex) {
+        const matched = entry.keywords.some((keyword) =>
+          keyword &&
+          (normalizedName === keyword ||
+           (keyword.length >= 5 && normalizedName.includes(keyword)))
+        );
+        if (matched && entry.logo) return entry.logo;
+      }
+    }
+    return "";
+  };
+
+  // 1) Catálogo local + mundial, sempre pelo nome principal primeiro.
+  const localPrimary = findLocal(primaryKeys);
+  if (localPrimary) return localPrimary;
+
+  const worldPrimary = findWorldChannelLogo(identityValues[0], config);
+  if (worldPrimary) return worldPrimary;
+
+  // 2) Identificadores secundários só entram se forem semanticamente
+  // próximos do nome principal. Isto impede, por exemplo, News NOW -> CMTV
+  // quando uma playlist traz um tvg-id/tvg-name antigo ou incorreto.
+  const relatedSecondary = secondaryKeys.filter((secondary) =>
+    primaryKeys.some((primary) =>
+      primary === secondary ||
+      (primary.length >= 4 && secondary.includes(primary)) ||
+      (secondary.length >= 4 && primary.includes(secondary))
+    )
+  );
+
+  if (relatedSecondary.length) {
+    const localSecondary = findLocal(relatedSecondary);
+    if (localSecondary) return localSecondary;
+
+    const worldSecondary = findWorldChannelLogo(relatedSecondary, config);
+    if (worldSecondary) return worldSecondary;
+  }
+
+  return "";
+}
+
+
 const SERVICES=[
 {id:"pttv:vodafone",name:"Vodafone TV",description:"Acesso oficial à Vodafone TV para clientes Vodafone TV.",url:"https://www.vodafone.pt/pacotes/televisao/em-todos-ecras.html",logo:"https://www.vodafone.pt/content/dam/digital/vodafone/images/logos/vodafone-logo-red.svg"},
 {id:"pttv:digi",name:"DIGI TV",description:"Acesso oficial à DIGI TV para clientes DIGI.",url:"https://www.digi.pt/tv/",logo:"https://www.digi.pt/favicon.ico"},
@@ -72,7 +509,7 @@ const ADDONS=[
 {name:"Torrentio",status:"reference",url:"https://torrentio.strem.fun/manifest.json"},
 {name:"TorrentsDB",status:"reference",url:"https://beta.stremio-addons.net/addons/torrentsdb/manifest.json"}];
 const CINEMETA_BASE="https://v3-cinemeta.strem.io";
-async function fetchJson(target){try{const r=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/4.0.0"}});return r.ok?await r.json():null}catch{return null}}
+async function fetchJson(target){try{const r=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/3.1.5"}});return r.ok?await r.json():null}catch{return null}}
 function serviceMeta(s){return{id:s.id,type:"channel",name:s.name,description:s.description,poster:s.logo,logo:s.logo,links:[{name:"Abrir serviço",category:"external",url:s.url}],behaviorHints:{defaultVideoId:s.id}}}
 async function catalog(type,id,extra=""){
  if(type==="channel"&&id==="pt-services")return SERVICES.map(serviceMeta);
@@ -96,7 +533,7 @@ async function parseM3U(content){
   if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo,group:info.group,tvgId:info.tvgId,url:line});info=null}
  }return out;
 }
-async function getM3UChannels(config){const r=await fetch(config.m3uUrl,{headers:{"User-Agent":"PT-HUB/4.0.0"}});if(!r.ok)throw new Error("M3U HTTP "+r.status);return parseM3U(await r.text())}
+async function getM3UChannels(config){const r=await fetch(config.m3uUrl,{headers:{"User-Agent":"PT-HUB/3.1.5"}});if(!r.ok)throw new Error("M3U HTTP "+r.status);return parseM3U(await r.text())}
 async function getXtreamChannels(config){
  const server=normalizeUrl(config.xtreamServer);if(!isHttp(server)||!config.username||!config.password)return[];
  const api=`${server}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_streams`;
@@ -133,7 +570,11 @@ async function getIPTVChannels(config,env){
  if(config.mode==="iptv-org")return getIPTVOrgChannels(config);
  return[];
 }
-function channelMeta(x){return{id:x.id,type:"channel",name:x.name,poster:x.logo||manifest().logo,logo:x.logo||manifest().logo,description:x.group||"TV"}}
+async function channelMeta(x,config){
+ await ensureTvLogoWorldIndex();
+ const resolvedLogo=String(x.logo||"").trim()||findChannelLogo([x.name,x.tvgName,x.tvgId],config)||PT_HUB_LOGO;
+ return {id:x.id,type:"channel",name:x.name,poster:resolvedLogo,logo:resolvedLogo,description:x.group||"TV"};
+}
 
 const SUBSENSE_BASE_URL="https://subsense.nepiraw.com";
 const SUBSENSE_INSTALL_PREFIX="bj6uhmdn-";
@@ -148,7 +589,7 @@ async function getSubtitles(config,type,id,extra=""){
  const base=`${SUBSENSE_BASE_URL}/${seg}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
  const target=extra?`${base}/${String(extra).replace(/^[/]+/,"")}`:`${base}.json`;
  try{
-  const response=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/4.0.0"}});
+  const response=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/3.1.5"}});
   if(!response.ok)return[];
   const data=await response.json(), seen=new Set(), out=[];
   for(const s of Array.isArray(data?.subtitles)?data.subtitles:[]){
