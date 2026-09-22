@@ -72,6 +72,33 @@ async function meta(type,id){
  return null;
 }
 
+
+function normalizeUrl(v){return String(v||"").trim().replace(/\/+$/,"")}
+async function hashId(v){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("").slice(0,24)}
+async function parseM3U(content){
+ const lines=String(content||"").replace(/\r/g,"").split("\n"),out=[];let info=null;
+ for(const raw of lines){const line=raw.trim();if(!line)continue;
+  if(line.startsWith("#EXTINF:")){const i=line.indexOf(","),a=i>=0?line.slice(0,i):"",name=i>=0?line.slice(i+1).trim():"Canal IPTV";const attr=n=>a.match(new RegExp(n+'=["\\\']([^"\\\']*)["\\\']',"i"))?.[1]||"";info={name:name||attr("tvg-name")||"Canal IPTV",tvgId:attr("tvg-id"),logo:attr("tvg-logo"),group:attr("group-title")||"TV"};continue}
+  if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo,group:info.group,tvgId:info.tvgId,url:line});info=null}
+ }return out;
+}
+async function getM3UChannels(config){const r=await fetch(config.m3uUrl,{headers:{"User-Agent":"PT-HUB/4.0.0"}});if(!r.ok)throw new Error("M3U HTTP "+r.status);return parseM3U(await r.text())}
+async function getXtreamChannels(config){
+ const server=normalizeUrl(config.xtreamServer);if(!isHttp(server)||!config.username||!config.password)return[];
+ const api=`${server}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_streams`;
+ const r=await fetch(api,{headers:{"User-Agent":"Mozilla/5.0","Accept":"application/json,*/*"}});if(!r.ok)throw new Error("Xtream HTTP "+r.status);
+ const data=await r.json();if(!Array.isArray(data))return[];
+ return data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||"",group:x.category_name||"TV",tvgId:x.epg_channel_id||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}});
+}
+async function getIPTVChannels(config){
+ if(!config||config?.features?.iptv===false)return[];
+ if(config.mode==="m3u"&&config.m3uSource!=="file"&&isHttp(config.m3uUrl))return getM3UChannels(config);
+ if(config.mode==="m3u"&&config.m3uFileData)return parseM3U(config.m3uFileData);
+ if(config.mode==="xtream")return getXtreamChannels(config);
+ return[];
+}
+function channelMeta(x){return{id:x.id,type:"channel",name:x.name,poster:x.logo||manifest().logo,logo:x.logo||manifest().logo,description:x.group||"TV"}}
+
 const SUBSENSE_BASE_URL="https://subsense.nepiraw.com";
 const SUBSENSE_INSTALL_PREFIX="bj6uhmdn-";
 const SUBSENSE_MAX_SUBTITLES=10;
@@ -108,7 +135,9 @@ export default {async fetch(request,env){
  let ac=p.match(/^\\/([^/]+)\\/catalog\\/addon\\/recommended(?:\\/([^/]+))?\\.json$/);
  if(request.method==="GET"&&ac)return json({addons:ADDONS});
  let cm=p.match(/^\\/([^/]+)\\/catalog\\/([^/]+)\\/([^/]+)(?:\\/([^/]+))?\\.json$/);
- if(request.method==="GET"&&cm)return json({metas:await catalog(decodeURIComponent(cm[2]),decodeURIComponent(cm[3]),cm[4]?decodeURIComponent(cm[4]):"")});
+ if(request.method==="GET"&&cm){const cfg=decodeConfig(cm[1]);const type=decodeURIComponent(cm[2]),id=decodeURIComponent(cm[3]);if(type==="channel"&&id==="m3u"){try{return json({metas:(await getIPTVChannels(cfg)).map(channelMeta)})}catch{return json({metas:[]})}}return json({metas:await catalog(type,id,cm[4]?decodeURIComponent(cm[4]):"")});}
+ let st=p.match(/^\\/([^/]+)\\/stream\\/([^/]+)\\/([^/]+)\\.json$/);
+ if(request.method==="GET"&&st&&decodeURIComponent(st[2])==="channel"){try{const cfg=decodeConfig(st[1]),id=decodeURIComponent(st[3]),ch=(await getIPTVChannels(cfg)).find(x=>x.id===id);if(!ch)return json({streams:[]});const streamUrl=/\\.m3u8(?:$|[?#])/i.test(ch.url)?`${url.origin}/hls-proxy/generic/${Buffer.from(ch.url,"utf8").toString("base64url")}`:ch.url;return json({streams:[{name:"PT•HUB",title:ch.name,url:streamUrl,behaviorHints:{notWebReady:true}}]})}catch{return json({streams:[]})}}
  let mm=p.match(/^\\/([^/]+)\\/meta\\/([^/]+)\\/([^/]+)\\.json$/);
  if(request.method==="GET"&&mm){const v=await meta(decodeURIComponent(mm[2]),decodeURIComponent(mm[3]));return json({meta:v||null});}
  let sm=p.match(/^\\/([^/]+)\\/subtitles\\/([^/]+)\\/([^/]+?)(?:\\/([^/]+))?\\.json$/);
