@@ -33,8 +33,11 @@ function decodeConfig(token){
  try{
   const v=String(token||"");
   if(!v)return null;
-  if(v.startsWith(CONFIG_TOKEN_PREFIX)) return JSON.parse(inflateRawSync(Buffer.from(v.slice(3),"base64url")).toString("utf8"));
-  return JSON.parse(Buffer.from(v.replace(/-/g,"+").replace(/_/g,"/"),"base64").toString("utf8"));
+  if(v.startsWith(CONFIG_TOKEN_PREFIX)) return JSON.parse(inflateRawSync(Buffer.from(v.slice(CONFIG_TOKEN_PREFIX.length),"base64url")).toString("utf8"));
+  if(v.startsWith("c_"))return null;
+  const payload=Buffer.from(v,"base64url");
+  try{return JSON.parse(inflateRawSync(payload).toString("utf8"))}
+  catch{return JSON.parse(payload.toString("utf8"))}
  }catch{return null}
 }
 const JUSTWATCH_URL="https://apis.justwatch.com/graphql";
