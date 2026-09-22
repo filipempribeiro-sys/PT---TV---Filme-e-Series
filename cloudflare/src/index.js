@@ -45,6 +45,31 @@ async function hlsProxy(request,url,profile,target){
  const rewritten=text.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`).split(/\r?\n/).map(l=>{const t=l.trim();return !t||t.startsWith("#")?l:proxify(t)}).join("\n");
  return new Response(rewritten,{headers:{...CORS,"content-type":"application/vnd.apple.mpegurl","Cache-Control":"no-store"}});
 }
+
+const SUBSENSE_BASE_URL="https://subsense.nepiraw.com";
+const SUBSENSE_INSTALL_PREFIX="bj6uhmdn-";
+const SUBSENSE_MAX_SUBTITLES=10;
+const SUBTITLE_LANGUAGES_BY_COUNTRY=Object.freeze({PT:["pt","pt-br","en"],BR:["pt-br","pt","en"],ES:["es","en"],FR:["fr","en"],DE:["de","en"],IT:["it","en"],GB:["en"],US:["en"],CA:["en","fr"]});
+function subtitleLanguages(country){return [...new Set(SUBTITLE_LANGUAGES_BY_COUNTRY[String(country||"PT").toUpperCase()]||["en"])]}
+function normalizeSubtitleLanguage(v){const l=String(v||"").trim().toLowerCase().replace(/_/g,"-");if(["pt-pt","por-pt","pt"].includes(l))return"pt";if(["pt-br","por-br","pob","por"].includes(l))return"pt-br";if(["eng","en-us","en-gb"].includes(l))return"en";if(["spa","es-es","es-mx"].includes(l))return"es";if(["fre","fra","fr-fr"].includes(l))return"fr";if(["ger","deu","de-de"].includes(l))return"de";if(["ita","it-it"].includes(l))return"it";return l}
+async function getSubtitles(config,type,id,extra=""){
+ if(config?.features?.subtitles===false)return[];
+ const langs=subtitleLanguages(config?.catalogCountry||"PT");
+ const seg=SUBSENSE_INSTALL_PREFIX+encodeURIComponent(JSON.stringify({languages:langs,maxSubtitles:SUBSENSE_MAX_SUBTITLES}));
+ const base=`${SUBSENSE_BASE_URL}/${seg}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+ const target=extra?`${base}/${String(extra).replace(/^\\/+ /,"")}`:`${base}.json`;
+ try{
+  const response=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/4.0.0"}});
+  if(!response.ok)return[];
+  const data=await response.json(), seen=new Set(), out=[];
+  for(const s of Array.isArray(data?.subtitles)?data.subtitles:[]){
+   const lang=normalizeSubtitleLanguage(s?.lang), baseLang=lang.split("-")[0];
+   if(!langs.some(x=>{const n=normalizeSubtitleLanguage(x);return n===lang||n.split("-")[0]===baseLang}))continue;
+   const key=String(s?.url||`${s?.id||""}|${lang}`).toLowerCase(); if(seen.has(key))continue; seen.add(key); out.push(s);
+  }
+  return out.slice(0,SUBSENSE_MAX_SUBTITLES);
+ }catch{return[]}
+}
 export default {async fetch(request,env){
  const url=new URL(request.url),p=url.pathname;
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
@@ -54,6 +79,8 @@ export default {async fetch(request,env){
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
  }
  if(request.method==="GET"&&p==="/manifest.json")return json(manifest(),200,noCache);
+ let sm=p.match(/^\\/([^/]+)\\/subtitles\\/([^/]+)\\/([^/]+?)(?:\\/([^/]+))?\\.json$/);
+ if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
  let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){decodeConfig(m[1]);return json(manifest(),200,noCache)}
  m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
  if(env.ASSETS&&(p==="/"||p==="/configure")){const target=new URL("/configure",url);return env.ASSETS.fetch(new Request(target,request))}
