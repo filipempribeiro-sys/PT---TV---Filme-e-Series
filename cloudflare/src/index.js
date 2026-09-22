@@ -579,20 +579,22 @@ async function meta(type,id){
 
 function normalizeUrl(v){return String(v||"").trim().replace(/\/+$/,"")}
 async function hashId(v){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("").slice(0,24)}
-async function parseM3U(content){
+function isIgnorableIptvChannelName(name){const v=String(name||"").trim();return /^(?:data|date)\s*[-:]\s*\d{4}-\d{2}-\d{2}$/i.test(v)||/^(?:expira|expires?|validade)\s*[-:]\s*\d{4}-\d{2}-\d{2}$/i.test(v)}
+function finalizeIPTVChannels(channels){return(Array.isArray(channels)?channels:[]).filter(ch=>!isIgnorableIptvChannelName(ch?.name))}
+async function parseM3U(content,config=null){
  const lines=String(content||"").replace(/\r/g,"").split("\n"),out=[];let info=null;
  for(const raw of lines){const line=raw.trim();if(!line)continue;
-  if(line.startsWith("#EXTINF:")){const i=line.indexOf(","),a=i>=0?line.slice(0,i):"",name=i>=0?line.slice(i+1).trim():"Canal IPTV";const attr=n=>a.match(new RegExp(n+'=["\\\']([^"\\\']*)["\\\']',"i"))?.[1]||"";info={name:name||attr("tvg-name")||"Canal IPTV",tvgId:attr("tvg-id"),logo:attr("tvg-logo"),group:attr("group-title")||"TV"};continue}
-  if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo,group:info.group,tvgId:info.tvgId,url:line});info=null}
- }return out;
+  if(line.startsWith("#EXTINF:")){const i=line.indexOf(","),a=i>=0?line.slice(0,i):"",name=i>=0?line.slice(i+1).trim():"Canal IPTV";const attr=n=>a.match(new RegExp(n+'=["\\\']([^"\\\']*)["\\\']',"i"))?.[1]||"";info={name:name||attr("tvg-name")||"Canal IPTV",tvgId:attr("tvg-id"),tvgName:attr("tvg-name"),logo:attr("tvg-logo"),group:attr("group-title")||"TV"};continue}
+  if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo||findChannelLogo([info.name,info.tvgName,info.tvgId],config),group:info.group,tvgId:info.tvgId,tvgName:info.tvgName,url:line});info=null}
+ }return finalizeIPTVChannels(out);
 }
-async function getM3UChannels(config){const r=await fetch(config.m3uUrl,{headers:{"User-Agent":"PT-HUB/3.1.5"}});if(!r.ok)throw new Error("M3U HTTP "+r.status);return parseM3U(await r.text())}
+async function getM3UChannels(config){const r=await fetch(config.m3uUrl,{headers:{"User-Agent":"PT-HUB/3.1.5"}});if(!r.ok)throw new Error("M3U HTTP "+r.status);return parseM3U(await r.text(),config)}
 async function getXtreamChannels(config){
  const server=normalizeUrl(config.xtreamServer);if(!isHttp(server)||!config.username||!config.password)return[];
  const api=`${server}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_streams`;
  const r=await fetch(api,{headers:{"User-Agent":"Mozilla/5.0","Accept":"application/json,*/*"}});if(!r.ok)throw new Error("Xtream HTTP "+r.status);
  const data=await r.json();if(!Array.isArray(data))return[];
- return data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||"",group:x.category_name||"TV",tvgId:x.epg_channel_id||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}});
+ return finalizeIPTVChannels(data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||"",group:x.category_name||"TV",tvgId:x.epg_channel_id||"",tvgName:x.name||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}}));
 }
 
 const IPTVORG_CHANNELS_URL="https://iptv-org.github.io/api/channels.json";
@@ -612,13 +614,13 @@ async function getIPTVOrgChannels(config){
 async function getStoredM3UChannels(config,env){
  if(!config?.m3uFileId||!env?.PT_HUB_M3U)return[];
  const raw=await env.PT_HUB_M3U.get(`m3u:${config.m3uFileId}`);
- return raw?parseM3U(raw):[];
+ return raw?parseM3U(raw,config):[];
 }
 async function getIPTVChannels(config,env){
  if(!config||config?.features?.iptv===false)return[];
  if(config.mode==="m3u"&&config.m3uSource!=="file"&&isHttp(config.m3uUrl))return getM3UChannels(config);
  if(config.mode==="m3u"&&config.m3uFileId)return getStoredM3UChannels(config,env);
- if(config.mode==="m3u"&&config.m3uFileData)return parseM3U(config.m3uFileData);
+ if(config.mode==="m3u"&&config.m3uFileData)return parseM3U(config.m3uFileData,config);
  if(config.mode==="xtream")return getXtreamChannels(config);
  if(config.mode==="iptv-org")return getIPTVOrgChannels(config);
  return[];
