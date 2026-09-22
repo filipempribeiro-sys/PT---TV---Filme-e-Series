@@ -53,7 +53,7 @@ async function getDiscoveryJw(type,mode,country){country=normalizeCountryCode(co
 
 const RTP_PLAY_CHANNELS=Object.freeze([
 {id:"rtpplay:rtp1",slug:"rtp1",name:"RTP1",logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/5-563718101410.png",group:"RTP Play • TV em direto",streamUrl:"https://streaming-live.rtp.pt/liverepeater/smil:rtp1HD.smil/playlist.m3u8"},
-{id:"rtpplay:rtp2",slug:"rtp2",name:"RTP2",logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/3-363718101410.png",group:"RTP Play • TV em direto",streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtp2HD.smil/playlist.m3u8"},
+{id:"rtpplay:rtp2",slug:"rtp2",name:"RTP2",logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/3-363718101410.png",group:"RTP Play • TV em direto",streamUrl:"https://streaming-live.rtp.pt/liverepeater/smil:rtp2HD.smil/playlist.m3u8"},
 {id:"rtpplay:rtp3",slug:"rtp3",name:"RTP Notícias",logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/64-393818101410.png",group:"RTP Play • TV em direto",streamUrl:"https://streaming-live.rtp.pt/livetvhlsDVR/rtpnHDdvr.smil/playlist.m3u8"},
 {id:"rtpplay:rtpmemoria",slug:"rtpmemoria",name:"RTP Memória",logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/80-584819141705.png",group:"RTP Play • TV em direto",streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpmem.smil/playlist.m3u8"},
 {id:"rtpplay:rtpinternacional",slug:"rtpinternacional",name:"RTP Internacional",logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/120-344318101410.png",group:"RTP Play • TV em direto",streamUrl:"https://streaming-live.rtp.pt/liverepeater/rtpi.smil/playlist.m3u8"},
