@@ -680,6 +680,7 @@ const SUBSENSE_MAX_SUBTITLES=10;
 const SUBTITLE_LANGUAGES_BY_COUNTRY=Object.freeze({PT:["pt","pt-br","en"],BR:["pt-br","pt","en"],ES:["es","en"],FR:["fr","en"],DE:["de","en"],IT:["it","en"],NL:["nl","en"],BE:["nl","fr","en"],CH:["de","fr","it","en"],AT:["de","en"],GB:["en"],IE:["en"],US:["en"],CA:["en","fr"],AU:["en"],NZ:["en"],MX:["es","en"],AR:["es","en"],CL:["es","en"],CO:["es","en"],PE:["es","en"],UY:["es","en"],PY:["es","en"],BO:["es","en"],EC:["es","en"],VE:["es","en"],PL:["pl","en"],CZ:["cs","en"],SK:["sk","en"],HU:["hu","en"],RO:["ro","en"],BG:["bg","en"],GR:["el","en"],TR:["tr","en"],SE:["sv","en"],NO:["no","en"],DK:["da","en"],FI:["fi","en"],IS:["is","en"],EE:["et","en"],LV:["lv","en"],LT:["lt","en"],SI:["sl","en"],HR:["hr","en"],RS:["sr","en"],BA:["bs","hr","sr","en"],ME:["sr","en"],MK:["mk","en"],AL:["sq","en"],UA:["uk","en"],RU:["ru","en"],JP:["ja","en"],KR:["ko","en"],CN:["zh","en"],TW:["zh","en"],HK:["zh","en"],IN:["hi","en"],ID:["id","en"],MY:["ms","en"],TH:["th","en"],VN:["vi","en"],PH:["tl","en"],IL:["he","en"],SA:["ar","en"],AE:["ar","en"],EG:["ar","en"],MA:["ar","fr","en"],ZA:["en"]});
 function subtitleLanguages(country){return [...new Set(SUBTITLE_LANGUAGES_BY_COUNTRY[String(country||"PT").toUpperCase()]||["en"])]}
 function normalizeSubtitleLanguage(v){const l=String(v||"").trim().toLowerCase().replace(/_/g,"-");if(["pt-pt","por-pt","pt"].includes(l))return"pt";if(["pt-br","por-br","pob","por"].includes(l))return"pt-br";if(["eng","en-us","en-gb"].includes(l))return"en";if(["spa","es-es","es-mx"].includes(l))return"es";if(["fre","fra","fr-fr"].includes(l))return"fr";if(["ger","deu","de-de"].includes(l))return"de";if(["ita","it-it"].includes(l))return"it";return l}
+function subtitlePriority(v,p){const l=normalizeSubtitleLanguage(v),a=Array.isArray(p)?p.map(normalizeSubtitleLanguage):["en"],x=a.indexOf(l);if(x>=0)return x;const b=l.split("-")[0],i=a.findIndex(z=>z===b||z.split("-")[0]===b);return i>=0?i:a.length+10}
 async function getSubtitles(config,type,id,extra=""){
  if(config?.features?.subtitles===false)return[];
  const langs=subtitleLanguages(config?.catalogCountry||"PT");
@@ -687,7 +688,7 @@ async function getSubtitles(config,type,id,extra=""){
  const base=`${SUBSENSE_BASE_URL}/${seg}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
  const target=extra?`${base}/${String(extra).replace(/^[/]+/,"")}`:`${base}.json`;
  try{
-  const response=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/3.1.5"}});
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);const response=await fetch(target,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"PT-HUB/3.0.0"}});clearTimeout(timer);
   if(!response.ok)return[];
   const data=await response.json(), seen=new Set(), out=[];
   for(const s of Array.isArray(data?.subtitles)?data.subtitles:[]){
@@ -695,7 +696,7 @@ async function getSubtitles(config,type,id,extra=""){
    if(!langs.some(x=>{const n=normalizeSubtitleLanguage(x);return n===lang||n.split("-")[0]===baseLang}))continue;
    const key=String(s?.url||`${s?.id||""}|${lang}`).toLowerCase(); if(seen.has(key))continue; seen.add(key); out.push(s);
   }
-  return out.slice(0,SUBSENSE_MAX_SUBTITLES);
+  return out.sort((a,b)=>subtitlePriority(a?.lang,langs)-subtitlePriority(b?.lang,langs)).slice(0,SUBSENSE_MAX_SUBTITLES);
  }catch{return[]}
 }
 function renderLegacyConfigurePage(config = {}) {
