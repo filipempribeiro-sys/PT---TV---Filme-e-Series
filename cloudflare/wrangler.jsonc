@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pt-hub",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-22",
+  "assets": { "directory": "../addon", "binding": "ASSETS", "run_worker_first": ["/api/*","/manifest.json","/*/manifest.json","/*/catalog/*","/*/meta/*","/*/stream/*","/*/subtitles/*","/hls-proxy/*","/upload-m3u","/config-store"] },
+  "observability": { "enabled": true }
+}
