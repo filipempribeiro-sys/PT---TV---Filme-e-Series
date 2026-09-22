@@ -666,6 +666,20 @@ function renderLegacyConfigurePage(config = {}) {
 }
 
 
+
+function validHttp(v){try{const u=new URL(String(v||""));return u.protocol==="http:"||u.protocol==="https:"}catch{return false}}
+function validateConfigParity(config){
+ if(config?.features&&!config.features.iptv)return null;
+ if(!config||typeof config!=="object"||Array.isArray(config))return "Configuração inválida.";
+ if(!["m3u","xtream","iptv-org"].includes(config.mode))return "Seleciona IPTV-org, M3U ou Xtream Codes.";
+ if(config.mode==="m3u"){
+  if(config.m3uSource==="file"){if(!config.m3uFileId&&!config.m3uFileData)return "Seleciona um ficheiro M3U ou M3U8."}
+  else if(!validHttp(config.m3uUrl))return "Indica um URL M3U válido.";
+ }
+ if(config.mode==="xtream"){if(!validHttp(config.xtreamServer))return "Indica um URL de servidor Xtream válido.";if(!config.username)return "Indica o username Xtream.";if(!config.password)return "Indica a password Xtream.";}
+ if(config.epgUrl&&!validHttp(config.epgUrl))return "O URL EPG não é válido.";
+ return null;
+}
 export default {async fetch(request,env){
  const url=new URL(request.url),p=url.pathname;
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
@@ -684,6 +698,14 @@ export default {async fetch(request,env){
    const id=await hashId(raw+":"+crypto.randomUUID());await env.PT_HUB_M3U.put(`m3u:${id}`,raw,{expirationTtl:M3U_KV_TTL_SECONDS});
    return json({success:true,m3uFileId:id,persistent:true,expiresInDays:30});
   }catch(e){return json({success:false,error:e?.message||"Não foi possível guardar a lista M3U."},500)}
+ }
+ if(request.method==="POST"&&p==="/test-iptv"){
+  try{const cfg=await request.json();const err=validateConfigParity(cfg);if(err)return json({success:false,error:err},400);
+   if(cfg.mode==="m3u"){const channels=await getIPTVChannels(cfg,env);return json({success:true,message:`Ligação M3U efetuada com sucesso. ${channels.length} canais encontrados.`,channels:channels.length})}
+   if(cfg.mode==="iptv-org"){const channels=await getIPTVOrgChannels(cfg);return json({success:true,message:`Ligação IPTV-org efetuada com sucesso. ${channels.length} canais encontrados.`,channels:channels.length})}
+   if(cfg.mode==="xtream"){const base=String(cfg.xtreamServer||"").replace(/\/$/,""),u=`${base}/player_api.php?username=${encodeURIComponent(cfg.username)}&password=${encodeURIComponent(cfg.password)}`;const r=await fetch(u,{headers:{"User-Agent":`PT-HUB/${VERSION}`}});const data=await r.json();if(!data?.user_info||Number(data.user_info.auth)!==1)return json({success:false,error:"Autenticação Xtream inválida."},400);return json({success:true,message:"Ligação Xtream efetuada com sucesso."})}
+   return json({success:false,error:"Modo IPTV inválido."},400)
+  }catch(e){return json({success:false,error:e?.message||"Não foi possível testar a ligação."},500)}
  }
  if(request.method==="GET"&&p==="/api/storage-health"){
   if(!env.PT_HUB_M3U)return json({ok:false,storage:"kv",binding:"PT_HUB_M3U",error:"Binding indisponível."},503);
