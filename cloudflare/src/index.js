@@ -148,15 +148,15 @@ export default {async fetch(request,env){
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
  }
  if(request.method==="GET"&&p==="/manifest.json")return json(manifest(),200,noCache);
- let ac=p.match(/^/([^/]+)\\/catalog\\/addon\\/recommended(?:/([^/]+))?\.json$/);
+ let ac=p.match(new RegExp("^/([^/]+)/catalog/addon/recommended(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&ac)return json({addons:ADDONS});
- let cm=p.match(/^/([^/]+)\\/catalog/([^/]+)/([^/]+)(?:/([^/]+))?\.json$/);
+ let cm=p.match(new RegExp("^/([^/]+)/catalog/([^/]+)/([^/]+)(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&cm){const cfg=decodeConfig(cm[1]);const type=decodeURIComponent(cm[2]),id=decodeURIComponent(cm[3]);if(type==="channel"&&id==="m3u"){try{return json({metas:(await getIPTVChannels(cfg)).map(channelMeta)})}catch{return json({metas:[]})}}return json({metas:await catalog(type,id,cm[4]?decodeURIComponent(cm[4]):"")});}
- let st=p.match(/^/([^/]+)\\/stream/([^/]+)/([^/]+)\.json$/);
+ let st=p.match(new RegExp("^/([^/]+)/stream/([^/]+)/([^/]+)\\.json$"));
  if(request.method==="GET"&&st&&decodeURIComponent(st[2])==="channel"){try{const cfg=decodeConfig(st[1]),id=decodeURIComponent(st[3]),ch=(await getIPTVChannels(cfg)).find(x=>x.id===id);if(!ch)return json({streams:[]});const streamUrl=/\\.m3u8(?:$|[?#])/i.test(ch.url)?`${url.origin}/hls-proxy/generic/${Buffer.from(ch.url,"utf8").toString("base64url")}`:ch.url;return json({streams:[{name:"PT•HUB",title:ch.name,url:streamUrl,behaviorHints:{notWebReady:true}}]})}catch{return json({streams:[]})}}
- let mm=p.match(/^/([^/]+)\\/meta/([^/]+)/([^/]+)\.json$/);
+ let mm=p.match(new RegExp("^/([^/]+)/meta/([^/]+)/([^/]+)\\.json$"));
  if(request.method==="GET"&&mm){const v=await meta(decodeURIComponent(mm[2]),decodeURIComponent(mm[3]));return json({meta:v||null});}
- let sm=p.match(/^/([^/]+)\\/subtitles/([^/]+)\\/([^/]+?)(?:/([^/]+))?\.json$/);
+ let sm=p.match(new RegExp("^/([^/]+)/subtitles/([^/]+)/([^/]+?)(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
  let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){decodeConfig(m[1]);return json(manifest(),200,noCache)}
  m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
