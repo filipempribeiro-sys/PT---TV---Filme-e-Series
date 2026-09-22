@@ -786,7 +786,8 @@ export default {async fetch(request,env){
  if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
  let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){const cfg=decodeConfig(m[1]);return json(await manifest(cfg),200,noCache)}
  m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
- if(p==="/"||p==="/configure"||p==="/configure/"||p==="/api/configure-probe")return new Response(renderLegacyConfigurePage({}),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store","X-PT-HUB-Route":"worker-configure"}});
+ if(request.method==="GET"&&p==="/")return new Response(null,{status:302,headers:{...CORS,Location:"/configure"}});
+ if(request.method==="GET"&&(p==="/configure"||p==="/configure/"))return new Response(renderLegacyConfigurePage({}),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}});
  let cp=p.match(/^\/([^/]+)\/configure\/?$/);if(request.method==="GET"&&cp){const cfg=decodeConfig(cp[1])||{};return new Response(renderLegacyConfigurePage(cfg),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}})}
- return json({error:"PT•HUB Cloudflare migration endpoint pending",version:VERSION,path:p},501);
+ return json({error:"Not Found",version:VERSION},404);
 }};
