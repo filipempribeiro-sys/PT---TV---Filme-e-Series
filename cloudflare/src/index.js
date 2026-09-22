@@ -6,7 +6,7 @@ import { Buffer } from "node:buffer";
 const VERSION="3.1.5";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
-const M3U_UPLOAD_MAX_BYTES=10*1024*1024;
+const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
 const M3U_KV_TTL_SECONDS=60*60*24*30;
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Methods":"GET,POST,OPTIONS","Access-Control-Allow-Headers":"Content-Type"};
 const json=(v,s=200,h={})=>new Response(JSON.stringify(v),{status:s,headers:{...CORS,"content-type":"application/json; charset=utf-8",...h}});
@@ -746,15 +746,15 @@ export default {async fetch(request,env){
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
  }
  if(request.method==="POST"&&p==="/upload-m3u"){
-  if(!env.PT_HUB_M3U)return json({success:false,error:"Armazenamento M3U indisponível."},503);
+  if(!env.PT_HUB_M3U)return json({error:"Armazenamento M3U indisponível."},503);
   try{
    const ct=request.headers.get("content-type")||"";let raw="";
-   if(ct.includes("multipart/form-data")){const form=await request.formData();const file=form.get("file");if(!file||typeof file==="string")return json({success:false,error:"Ficheiro M3U em falta."},400);if(file.size>M3U_UPLOAD_MAX_BYTES)return json({success:false,error:"Ficheiro M3U demasiado grande."},413);raw=await file.text()}
-   else{const len=Number(request.headers.get("content-length")||0);if(len>M3U_UPLOAD_MAX_BYTES)return json({success:false,error:"Ficheiro M3U demasiado grande."},413);raw=await request.text();if(new TextEncoder().encode(raw).byteLength>M3U_UPLOAD_MAX_BYTES)return json({success:false,error:"Ficheiro M3U demasiado grande."},413)}
-   if(!raw.includes("#EXTM3U")&&!raw.includes("#EXTINF:"))return json({success:false,error:"Conteúdo M3U inválido."},400);
+   if(ct.includes("multipart/form-data")){const form=await request.formData();const file=form.get("file");if(!file||typeof file==="string")return json({error:"Ficheiro M3U vazio ou inválido."},400);if(file.size>M3U_UPLOAD_MAX_BYTES)return json({error:"Ficheiro demasiado grande (máximo 8MB)."},400);raw=await file.text()}
+   else{const len=Number(request.headers.get("content-length")||0);if(len>M3U_UPLOAD_MAX_BYTES)return json({error:"Ficheiro demasiado grande (máximo 8MB)."},400);raw=await request.text();if(new TextEncoder().encode(raw).byteLength>M3U_UPLOAD_MAX_BYTES)return json({error:"Ficheiro demasiado grande (máximo 8MB)."},400)}
+   if(!raw.trim())return json({error:"Ficheiro M3U vazio ou inválido."},400);
    const id=await hashId(raw+":"+crypto.randomUUID());await env.PT_HUB_M3U.put(`m3u:${id}`,raw,{expirationTtl:M3U_KV_TTL_SECONDS});
-   return json({success:true,m3uFileId:id,persistent:true,expiresInDays:30});
-  }catch(e){return json({success:false,error:e?.message||"Não foi possível guardar a lista M3U."},500)}
+   return json({id});
+  }catch(e){return json({error:e?.message||"Não foi possível guardar a lista M3U."},500)}
  }
  if(request.method==="POST"&&p==="/test-iptv"){
   try{const cfg=await request.json();const err=validateConfigParity(cfg);if(err)return json({success:false,error:err},400);
