@@ -85,7 +85,11 @@ const BASE_CATALOGS=[
 {id:"featured",type:"movie",name:"⭐ Filmes em Destaque"},
 {id:"featured",type:"series",name:"⭐ Séries em Destaque"}
 ];
-const OPERATORS=[{id:"meo",name:"MEO"},{id:"nos",name:"NOS"},{id:"vodafone",name:"Vodafone"},{id:"digi",name:"DIGI"}];
+const OPERATORS=[
+{id:"meo",name:"MEO",poster:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/meo-poster.png",background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/meo-background.jpg",description:"Televisão MEO"},
+{id:"nos",name:"NOS",poster:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/nos-poster.png",background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/nos-background.jpg",description:"Televisão NOS"},
+{id:"vodafone",name:"Vodafone",poster:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/vodafone-poster.png",background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/vodafone-background.jpg",description:"Televisão Vodafone"},
+{id:"digi",name:"DIGI",poster:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/digi-poster.png",background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/assets/operators/digi-background.jpg",description:"Televisão DIGI"}];
 async function manifest(config=null){
  const features=config?.features||{}, hasConfig=!!config;
  const showFeatured=features.featured===true, featuredContent=features.featuredContent||{movies:true,series:true};
