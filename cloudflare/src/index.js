@@ -57,7 +57,7 @@ async function getSubtitles(config,type,id,extra=""){
  const langs=subtitleLanguages(config?.catalogCountry||"PT");
  const seg=SUBSENSE_INSTALL_PREFIX+encodeURIComponent(JSON.stringify({languages:langs,maxSubtitles:SUBSENSE_MAX_SUBTITLES}));
  const base=`${SUBSENSE_BASE_URL}/${seg}/subtitles/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
- const target=extra?`${base}/${String(extra).replace(/^\\/+ /,"")}`:`${base}.json`;
+ const target=extra?`${base}/${String(extra).replace(/^\\/+/,"")}`:`${base}.json`;
  try{
   const response=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/4.0.0"}});
   if(!response.ok)return[];
