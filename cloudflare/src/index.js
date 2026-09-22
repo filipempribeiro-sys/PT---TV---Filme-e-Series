@@ -6,6 +6,8 @@ import { Buffer } from "node:buffer";
 const VERSION="4.0.0";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
+const M3U_UPLOAD_MAX_BYTES=10*1024*1024;
+const M3U_KV_TTL_SECONDS=60*60*24*30;
 const CORS={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Methods":"GET,POST,OPTIONS","Access-Control-Allow-Headers":"Content-Type"};
 const json=(v,s=200,h={})=>new Response(JSON.stringify(v),{status:s,headers:{...CORS,"content-type":"application/json; charset=utf-8",...h}});
 const noCache={"Cache-Control":"no-cache, no-store, must-revalidate"};
@@ -105,9 +107,15 @@ async function getIPTVOrgChannels(config){
  const out=[];for(const ch of channels){if(country&&String(ch.country||"").toUpperCase()!==country)continue;if(category&&!(ch.categories||[]).map(x=>String(x).toLowerCase()).some(x=>x===category||x.includes(category)||category.includes(x)))continue;const ss=by.get(ch.id)||[];if(!ss.length)continue;out.push({id:`iptvorg:${ch.id}`,type:"channel",name:ch.name||ch.id,logo:ch.logo||logo.get(ch.id)||"",group:ch.categories?.[0]||"TV",tvgId:ch.id,url:ss[0].url})}return out;
 }
 
-async function getIPTVChannels(config){
+async function getStoredM3UChannels(config,env){
+ if(!config?.m3uFileId||!env?.PT_HUB_M3U)return[];
+ const raw=await env.PT_HUB_M3U.get(`m3u:${config.m3uFileId}`);
+ return raw?parseM3U(raw):[];
+}
+async function getIPTVChannels(config,env){
  if(!config||config?.features?.iptv===false)return[];
  if(config.mode==="m3u"&&config.m3uSource!=="file"&&isHttp(config.m3uUrl))return getM3UChannels(config);
+ if(config.mode==="m3u"&&config.m3uFileId)return getStoredM3UChannels(config,env);
  if(config.mode==="m3u"&&config.m3uFileData)return parseM3U(config.m3uFileData);
  if(config.mode==="xtream")return getXtreamChannels(config);
  if(config.mode==="iptv-org")return getIPTVOrgChannels(config);
@@ -147,13 +155,24 @@ export default {async fetch(request,env){
   try{const c=await request.json();if(!c||typeof c!=="object"||Array.isArray(c))return json({success:false,error:"Configuração inválida."},400);return json({success:true,token:encodeConfig(c),persistent:true})}
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
  }
+ if(request.method==="POST"&&p==="/upload-m3u"){
+  if(!env.PT_HUB_M3U)return json({success:false,error:"Armazenamento M3U indisponível."},503);
+  try{
+   const ct=request.headers.get("content-type")||"";let raw="";
+   if(ct.includes("multipart/form-data")){const form=await request.formData();const file=form.get("file");if(!file||typeof file==="string")return json({success:false,error:"Ficheiro M3U em falta."},400);if(file.size>M3U_UPLOAD_MAX_BYTES)return json({success:false,error:"Ficheiro M3U demasiado grande."},413);raw=await file.text()}
+   else{const len=Number(request.headers.get("content-length")||0);if(len>M3U_UPLOAD_MAX_BYTES)return json({success:false,error:"Ficheiro M3U demasiado grande."},413);raw=await request.text();if(new TextEncoder().encode(raw).byteLength>M3U_UPLOAD_MAX_BYTES)return json({success:false,error:"Ficheiro M3U demasiado grande."},413)}
+   if(!raw.includes("#EXTM3U")&&!raw.includes("#EXTINF:"))return json({success:false,error:"Conteúdo M3U inválido."},400);
+   const id=await hashId(raw+":"+crypto.randomUUID());await env.PT_HUB_M3U.put(`m3u:${id}`,raw,{expirationTtl:M3U_KV_TTL_SECONDS});
+   return json({success:true,m3uFileId:id,persistent:true,expiresInDays:30});
+  }catch(e){return json({success:false,error:e?.message||"Não foi possível guardar a lista M3U."},500)}
+ }
  if(request.method==="GET"&&p==="/manifest.json")return json(manifest(),200,noCache);
  let ac=p.match(new RegExp("^/([^/]+)/catalog/addon/recommended(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&ac)return json({addons:ADDONS});
  let cm=p.match(new RegExp("^/([^/]+)/catalog/([^/]+)/([^/]+)(?:/([^/]+))?\\.json$"));
- if(request.method==="GET"&&cm){const cfg=decodeConfig(cm[1]);const type=decodeURIComponent(cm[2]),id=decodeURIComponent(cm[3]);if(type==="channel"&&id==="m3u"){try{return json({metas:(await getIPTVChannels(cfg)).map(channelMeta)})}catch{return json({metas:[]})}}return json({metas:await catalog(type,id,cm[4]?decodeURIComponent(cm[4]):"")});}
+ if(request.method==="GET"&&cm){const cfg=decodeConfig(cm[1]);const type=decodeURIComponent(cm[2]),id=decodeURIComponent(cm[3]);if(type==="channel"&&id==="m3u"){try{return json({metas:(await getIPTVChannels(cfg,env)).map(channelMeta)})}catch{return json({metas:[]})}}return json({metas:await catalog(type,id,cm[4]?decodeURIComponent(cm[4]):"")});}
  let st=p.match(new RegExp("^/([^/]+)/stream/([^/]+)/([^/]+)\\.json$"));
- if(request.method==="GET"&&st&&decodeURIComponent(st[2])==="channel"){try{const cfg=decodeConfig(st[1]),id=decodeURIComponent(st[3]),ch=(await getIPTVChannels(cfg)).find(x=>x.id===id);if(!ch)return json({streams:[]});const streamUrl=/\\.m3u8(?:$|[?#])/i.test(ch.url)?`${url.origin}/hls-proxy/generic/${Buffer.from(ch.url,"utf8").toString("base64url")}`:ch.url;return json({streams:[{name:"PT•HUB",title:ch.name,url:streamUrl,behaviorHints:{notWebReady:true}}]})}catch{return json({streams:[]})}}
+ if(request.method==="GET"&&st&&decodeURIComponent(st[2])==="channel"){try{const cfg=decodeConfig(st[1]),id=decodeURIComponent(st[3]),ch=(await getIPTVChannels(cfg,env)).find(x=>x.id===id);if(!ch)return json({streams:[]});const streamUrl=/\\.m3u8(?:$|[?#])/i.test(ch.url)?`${url.origin}/hls-proxy/generic/${Buffer.from(ch.url,"utf8").toString("base64url")}`:ch.url;return json({streams:[{name:"PT•HUB",title:ch.name,url:streamUrl,behaviorHints:{notWebReady:true}}]})}catch{return json({streams:[]})}}
  let mm=p.match(new RegExp("^/([^/]+)/meta/([^/]+)/([^/]+)\\.json$"));
  if(request.method==="GET"&&mm){const v=await meta(decodeURIComponent(mm[2]),decodeURIComponent(mm[3]));return json({meta:v||null});}
  let sm=p.match(new RegExp("^/([^/]+)/subtitles/([^/]+)/([^/]+?)(?:/([^/]+))?\\.json$"));
