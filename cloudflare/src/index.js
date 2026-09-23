@@ -3,7 +3,7 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { Buffer } from "node:buffer";
 
-const VERSION="3.1.7";
+const VERSION="3.1.8";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
@@ -999,11 +999,26 @@ function validateConfigParity(config){
  if(String(config.globalUserAgent||"").length>512)return "O User-Agent personalizado não pode exceder 512 caracteres.";
  return null;
 }
+async function recordStreamTrace(env,entry){
+ try{
+  if(!env?.PT_HUB_M3U)return;
+  const payload=JSON.stringify({...entry,version:VERSION,at:new Date().toISOString()});
+  await env.PT_HUB_M3U.put("diag:last-stream-request",payload,{expirationTtl:3600});
+ }catch{}
+}
+async function readStreamTrace(env){
+ try{
+  if(!env?.PT_HUB_M3U)return null;
+  const raw=await env.PT_HUB_M3U.get("diag:last-stream-request");
+  return raw?JSON.parse(raw):null;
+ }catch{return null}
+}
 export default {async fetch(request,env,ctx){
  const url=new URL(request.url),p=url.pathname;
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
+ if(request.method==="GET"&&p==="/api/last-stream-request")return json({ok:true,last:await readStreamTrace(env)},200,noCache);
  if(request.method==="GET"&&p==="/api/torrent-diagnostics"){
   const type=String(url.searchParams.get("type")||"movie").toLowerCase();
   const id=String(url.searchParams.get("id")||"tt0133093").trim();
@@ -1059,10 +1074,15 @@ export default {async fetch(request,env,ctx){
  if(request.method==="GET"&&p==="/manifest.json")return json(await manifest(null),200,noCache);
  let rootStream=p.match(/^\/stream\/(movie|series)\/([^/]+)\.json$/);
  if(request.method==="GET"&&rootStream){
+  const started=Date.now(),type=decodeURIComponent(rootStream[1]),id=decodeURIComponent(rootStream[2]);
   try{
-   const type=decodeURIComponent(rootStream[1]),id=decodeURIComponent(rootStream[2]);
-   return json({streams:await externalStreams(null,type,id,url.hostname,ctx)});
+   const streams=await externalStreams(null,type,id,url.hostname,ctx);
+   const trace={route:"root",type,id,streams:streams.length,durationMs:Date.now()-started,ok:true};
+   if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
+   return json({streams});
   }catch(e){
+   const trace={route:"root",type,id,streams:0,durationMs:Date.now()-started,ok:false,error:String(e?.message||"unknown")};
+   if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
    console.log(`[PT-HUB][RootStream] falha ${e?.message||"desconhecida"}`);
    return json({streams:[]});
   }
@@ -1090,10 +1110,16 @@ export default {async fetch(request,env,ctx){
    }
    if(type==="movie"||type==="series"){
     if(id.startsWith("pthubptmeta:"))return json({streams:(await ptExternalStreams(cfg,type,id))||[]});
-    return json({streams:await externalStreams(cfg,type,id,url.hostname,ctx)});
+    const started=Date.now(),streams=await externalStreams(cfg,type,id,url.hostname,ctx),trace={route:"configured",type,id,streams:streams.length,durationMs:Date.now()-started,ok:true,configValid:!!cfg};
+    if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
+    return json({streams});
    }
    return json({streams:[]});
-  }catch{return json({streams:[]})}
+  }catch(e){
+   const trace={route:"configured",type:st?.[2]?decodeURIComponent(st[2]):"",id:st?.[3]?decodeURIComponent(st[3]):"",streams:0,durationMs:0,ok:false,error:String(e?.message||"unknown")};
+   if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
+   return json({streams:[]});
+  }
  }
  let mm=p.match(new RegExp("^/([^/]+)/meta/([^/]+)/([^/]+)\\.json$"));
  if(request.method==="GET"&&mm){const cfg=decodeConfig(mm[1]),type=decodeURIComponent(mm[2]),id=decodeURIComponent(mm[3]);if(type==="channel"&&id.startsWith("operator:")){const operatorId=id.split(":")[1],op=OPERATORS.find(x=>x.id===operatorId),channels=Array.isArray(op?.channels)?op.channels.map((ch,i)=>({id:`operator:${op.id}:${ch.id||i}`,name:ch.name||op.name,logo:ch.logo||op.logo||PT_HUB_LOGO,group:op.name})):[],ch=channels.find(x=>x.id===id);return json({meta:ch?{id:ch.id,type:"channel",name:ch.name,poster:buildPoster(url.origin,ch.logo),logo:ch.logo,description:ch.group?`Operador: ${ch.group}`:""}:null})}if(id.startsWith("rtpplay:")){const x=RTP_PLAY_CHANNELS.find(c=>c.id===id);return json({meta:x?{id:x.id,type:"channel",name:x.name,poster:buildPoster(url.origin,x.logo),logo:x.logo,description:x.group,website:`https://www.rtp.pt/play/direto/${encodeURIComponent(x.slug)}`}:null})}if(type==="channel"&&(id.startsWith("m3u:")||id.startsWith("xtream:")||id.startsWith("iptvorg:"))){try{if(!cfg)return json({meta:null});const ch=(await getIPTVChannels(cfg,env)).find(x=>x.id===id);if(!ch)return json({meta:null});const m=await channelMeta(ch,cfg);m.posterShape="poster";m.poster=buildPoster(url.origin,m.logo||PT_HUB_LOGO);return json({meta:m})}catch{return json({meta:null})}}if(id.startsWith("pthubptmeta:")){const d=await ptExternalMeta(cfg,type,id);return json(d||{meta:null})}const v=await meta(type,id);return json({meta:v||null});}
