@@ -103,9 +103,7 @@ const BUILT_IN_STREAM_SOURCES=Object.freeze([
 {id:"torrentsdb",name:"TorrentsDB",base:"https://torrentsdb.com",enabled:true,timeout:25000,retries:2,priority:11},
 {id:"thepiratebay-plus",name:"ThePirateBay+",base:"https://thepiratebay-plus.strem.fun",enabled:true,timeout:25000,retries:2,priority:12}
 ]);
-const FALLBACK_STREAM_SOURCES=Object.freeze([
-{id:"torrentsdb-legacy",name:"TorrentsDB Legacy Gateway",base:"https://beta.stremio-addons.net/addons/torrentsdb",enabled:true,timeout:25000,retries:2,priority:20}
-]);
+const FALLBACK_STREAM_SOURCES=Object.freeze([]);
 function streamQuality(s){const t=[s?.quality,s?.name,s?.title,s?.description,s?.behaviorHints?.filename].filter(Boolean).join(" ").toUpperCase();if(/4K|2160P|UHD/.test(t))return"4K";if(/1080P/.test(t))return"1080p";if(/720P/.test(t))return"720p";if(/480P|576P|\bSD\b/.test(t))return"480p";return"Outra"}
 function parseCountValue(v){if(typeof v==="number"&&Number.isFinite(v))return Math.max(0,Math.round(v));const raw=String(v??"").trim();if(!raw)return 0;const suffix=/[km]$/i.test(raw)?raw.slice(-1).toLowerCase():"",body=(suffix?raw.slice(0,-1):raw).trim();if(suffix){const n=Number(body.replace(/\s/g,"").replace(",","."));return Number.isFinite(n)?Math.max(0,Math.round(n*(suffix==="k"?1e3:1e6))):0}const digits=body.replace(/[^0-9]/g,"");return digits?Number(digits)||0:0}
 function streamSeeds(s){const t=[s?.name,s?.title,s?.description].filter(Boolean).join(" ");const m=t.match(/(?:👤|👥|🌱|seed(?:er)?s?|seeds?|peers?)\s*[:=]?\s*([0-9][0-9.,]*\s*[km]?)/i)||t.match(/([0-9][0-9.,]*\s*[km]?)\s*(?:seed(?:er)?s?|seeds?)/i);return m?parseCountValue(m[1]):parseCountValue(s?.seeders??s?.seeds??s?.behaviorHints?.seeders??s?.behaviorHints?.seeds)}
@@ -755,7 +753,9 @@ const ADDONS=[
 {name:"Streaming Catalogs",status:"reference",url:"https://github.com/markflaisz/stremio-catalog"},
 {name:"OpenSubtitles",status:"reference",url:"https://opensubtitles.strem.io/stremio/v1/manifest.json"},
 {name:"Torrentio",status:"reference",url:"https://torrentio.strem.fun/manifest.json"},
-{name:"TorrentsDB",status:"reference",url:"https://beta.stremio-addons.net/addons/torrentsdb/manifest.json"}];
+{name:"TorrentsDB",status:"reference",url:"https://torrentsdb.com/manifest.json"},
+{name:"Torrent Catalogs",status:"reference",url:"https://torrent-catalogs.strem.fun/manifest.json"},
+{name:"ThePirateBay+",status:"reference",url:"https://thepiratebay-plus.strem.fun/manifest.json"}];
 const CINEMETA_BASE="https://v3-cinemeta.strem.io";
 async function fetchJson(target){try{const r=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/3.1.5"}});return r.ok?await r.json():null}catch{return null}}
 function serviceMeta(s){return{id:s.id,type:"channel",name:s.name,description:s.description,poster:s.logo,logo:s.logo,links:[{name:"Abrir serviço",category:"external",url:s.url}],behaviorHints:{defaultVideoId:s.id}}}
