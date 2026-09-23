@@ -883,7 +883,7 @@ export default {async fetch(request,env){
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
  if(request.method==="POST"&&p==="/config-store"){
-  try{const c=await request.json();if(!c||typeof c!=="object"||Array.isArray(c))return json({success:false,error:"Configuração inválida."},400);return json({success:true,token:encodeConfig(c),persistent:true})}
+  try{const c=await request.json();if(!c||typeof c!=="object"||Array.isArray(c))return json({success:false,error:"Configuração inválida."},400);const max=Number(c.externalMaxPerQuality??2);if(!Number.isFinite(max)||max<1||max>10)return json({success:false,error:"O máximo de resultados por qualidade tem de estar entre 1 e 10."},400);if(c?.features?.iptv){const err=validateConfigParity(c);if(err)return json({success:false,error:err},400)}return json({success:true,token:encodeConfig(c),persistent:true})}
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
  }
  if(request.method==="POST"&&p==="/upload-m3u"){
