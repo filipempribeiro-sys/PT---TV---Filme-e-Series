@@ -147,22 +147,26 @@ async function hlsProxy(request,url,profile,target){
  if(!isHttp(target))return new Response("HLS target inválido.",{status:400,headers:CORS});
  const headers={"User-Agent":"Mozilla/5.0 (PT-HUB HLS Engine)"};
  if(profile==="rtp"){headers.Origin="https://www.rtp.pt";headers.Referer="https://www.rtp.pt/play/"}
- const range=request.headers.get("range"); if(range)headers.Range=range;
- const upstream=await fetch(target,{headers,redirect:"follow"});
- if(!upstream.ok)return new Response(`HLS upstream HTTP ${upstream.status}`,{status:upstream.status,headers:CORS});
- const ct=upstream.headers.get("content-type")||"";
- const playlist=ct.toLowerCase().includes("mpegurl")||/\.m3u8(?:$|[?#])/i.test(target);
- if(!playlist){
-  const out=new Headers(CORS); if(ct)out.set("Content-Type",ct);
-  for(const k of ["content-range","accept-ranges","content-length"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
-  return new Response(upstream.body,{status:upstream.status,headers:out});
- }
- const base=upstream.url||target; const text=await upstream.text();
- const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString();const enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}/hls-proxy/${encodeURIComponent(profile)}/${enc}`}catch{return ref}};
- const rewritten=text.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`).split(/\r?\n/).map(l=>{const t=l.trim();return !t||t.startsWith("#")?l:proxify(t)}).join("\n");
- return new Response(rewritten,{headers:{...CORS,"content-type":"application/vnd.apple.mpegurl","Cache-Control":"no-store"}});
+ const range=request.headers.get("range");if(range)headers.Range=range;
+ const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
+ try{
+  const upstream=await fetch(target,{headers,redirect:"follow",signal:controller.signal});
+  clearTimeout(timeout);
+  if(!upstream.ok)return new Response(`HLS upstream HTTP ${upstream.status}`,{status:upstream.status,headers:{...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"}});
+  const buffer=await upstream.arrayBuffer(),bytes=new Uint8Array(buffer),ct=upstream.headers.get("content-type")||"",prefix=new TextDecoder().decode(bytes.slice(0,64)).trimStart();
+  const playlist=ct.toLowerCase().includes("mpegurl")||/\.m3u8(?:$|[?#])/i.test(target)||prefix.startsWith("#EXTM3U");
+  const common={...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"};
+  if(!playlist){
+   const out=new Headers(common);if(ct)out.set("Content-Type",ct);
+   for(const k of ["content-range","accept-ranges"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
+   return new Response(buffer,{status:upstream.status,headers:out});
+  }
+  const base=upstream.url||target,text=new TextDecoder().decode(bytes);
+  const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}/hls-proxy/${encodeURIComponent(profile)}/${enc}`}catch{return ref}};
+  const rewritten=text.replace(/\r/g,"").split("\n").map(raw=>{const line=raw.trim();if(!line)return raw;if(line.startsWith("#"))return raw.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`);return proxify(line)}).join("\n");
+  return new Response(rewritten,{headers:{...common,"Content-Type":"application/vnd.apple.mpegurl"}});
+ }catch(e){clearTimeout(timeout);return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:{...CORS,"Cache-Control":"no-store"}})}
 }
-
 
 const PT_HUB_LOGO="https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
 function normalizeLogoMatchText(value) {
