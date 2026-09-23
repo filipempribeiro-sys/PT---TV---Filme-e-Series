@@ -11,7 +11,7 @@ Built-in stream sources are queried independently with short per-provider timeou
 - No Render wake-up, polling, Docker, Redis, child processes or permanent timers.
 - Static assets are bundled from `../addon`.
 - Uploaded M3U persistence uses the `PT_HUB_M3U` KV binding.
-- External stream responses prefer the Cloudflare Cache API; on `*.workers.dev`, `PT_HUB_M3U` KV is also used as a fallback because Cache API operations may have no effect there. Movies use a 45-minute TTL, episodes 20 minutes, and empty responses are not stored.
+- External stream responses use the Cloudflare Cache API. Movies use a 45-minute TTL, episodes 20 minutes, and empty responses are not stored. `PT_HUB_M3U` KV remains reserved for uploaded M3U persistence.
 - HLS media bodies are streamed instead of buffered.
 - Provider fan-out is bounded to six simultaneous outbound connections, while still consulting every enabled source in batches, matching the Workers connection limit and staying comfortably below the Free-plan subrequest limit.
 
