@@ -28,5 +28,10 @@
     "name": "ThePirateBay+",
     "status": "reference",
     "url": "https://thepiratebay-plus.strem.fun/manifest.json"
+  },
+  {
+    "name": "ThePirateBay Catalog",
+    "status": "reference",
+    "url": "https://5db836ec3ef8-thepiratebay-ctl.baby-beamup.club/manifest.json"
   }
 ]
