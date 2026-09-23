@@ -777,7 +777,7 @@ async function getIPTVChannels(config,env){
 async function channelMeta(x,config){
  await ensureTvLogoWorldIndex();
  const resolvedLogo=String(x.logo||"").trim()||findChannelLogo([x.name,x.tvgName,x.tvgId],config)||PT_HUB_LOGO;
- return {id:x.id,type:"channel",name:x.name,poster:resolvedLogo,logo:resolvedLogo,description:x.group||"TV"};
+ return {id:x.id,type:"channel",name:x.name,poster:resolvedLogo,logo:resolvedLogo,description:x.group?`Grupo: ${x.group}`:""};
 }
 
 const SUBSENSE_BASE_URL="https://subsense.nepiraw.com";
