@@ -3,7 +3,7 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { Buffer } from "node:buffer";
 
-const VERSION="3.1.8";
+const VERSION="3.1.9";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
@@ -1019,6 +1019,7 @@ export default {async fetch(request,env,ctx){
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
  if(request.method==="GET"&&p==="/api/last-stream-request")return json({ok:true,last:await readStreamTrace(env)},200,noCache);
+ if(request.method==="GET"&&p==="/api/trace-selftest"){const marker={route:"selftest",type:"movie",id:"tt0133093",streams:5,durationMs:1,ok:true};await recordStreamTrace(env,marker);return json({ok:true,wrote:marker,last:await readStreamTrace(env)},200,noCache);}
  if(request.method==="GET"&&p==="/api/torrent-diagnostics"){
   const type=String(url.searchParams.get("type")||"movie").toLowerCase();
   const id=String(url.searchParams.get("id")||"tt0133093").trim();
