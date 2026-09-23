@@ -1,15 +1,25 @@
 # PT•HUB 4.0 — Cloudflare Free
 
-Isolated migration target for the PT•HUB addon. The Render implementation remains untouched until endpoint parity is validated.
+PT•HUB runs directly on Cloudflare Workers. The Cloudflare runtime is self-contained for routing, catalogues, IPTV and external stream aggregation; the former Render Torrent Engine is no longer required by the Worker.
 
-## Target
-- Cloudflare Workers Free for routing/API.
-- Static assets bundled from ../addon.
-- No keep-alive requirement for the main addon.
-- Existing torrent engine remains a separate optional upstream during migration.
+## Architecture
+Stremio / Nuvio → PT•HUB Cloudflare Worker → independent stream providers → normalization → deduplication → quality/provider-aware ranking → Cloudflare Cache API → Stremio-compatible response.
 
-## Free-plan design constraints
-Keep each request within Workers Free CPU/subrequest limits. HLS must stream upstream bodies instead of buffering full media segments. Uploaded M3U persistence will use a free-tier Cloudflare storage binding only if required; URL-based M3U/Xtream requires no storage.
+Built-in stream sources are queried independently with short per-provider timeouts. A provider failure, timeout, 429 or 5xx does not fail the global response. Custom Stremio addon manifests remain supported and are kept separate from the built-in source list.
+
+## Cloudflare Free design
+- No Render wake-up, polling, Docker, Redis, child processes or permanent timers.
+- Static assets are bundled from `../addon`.
+- Uploaded M3U persistence uses the `PT_HUB_M3U` KV binding.
+- External stream responses use the Cloudflare Cache API with shorter TTLs for episodes than movies; empty responses are not stored.
+- HLS media bodies are streamed instead of buffered.
+- Provider fan-out is deliberately small to stay comfortably below Workers Free subrequest limits.
+
+## Content responsibility
+PT•HUB does not host, download or transmit P2P content. It aggregates interfaces, metadata and stream descriptors returned by independent providers. Provider availability, content and licensing remain the responsibility of those providers and the user must use sources they are entitled to access.
+
+## Legacy
+`PT-HUB-Torrent-Engine` is retained only as a rollback/legacy reference while the Cloudflare-only production path is validated. It is not required by the Cloudflare Worker.
 
 ## Deploy
-From this directory: npm install, then npx wrangler deploy. Authentication/account setup is intentionally not stored in GitHub.
+From this directory: `npm install`, then `npx wrangler deploy`. Authentication/account setup is intentionally not stored in GitHub.
