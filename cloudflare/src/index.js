@@ -904,7 +904,9 @@ export default {async fetch(request,env){
     if(id.startsWith("operator:")){const operatorId=id.split(":")[1],op=OPERATORS.find(x=>x.id===operatorId),channels=Array.isArray(op?.channels)?op.channels.map((ch,i)=>({id:`operator:${op.id}:${ch.id||i}`,name:ch.name||op.name,url:ch.url,logo:ch.logo||op.logo||PT_HUB_LOGO,group:op.name})):[],ch=channels.find(x=>x.id===id);if(!ch)return json({streams:[]});return json({streams:[{name:"PT•HUB",title:ch.name,url:ch.url,behaviorHints:{notWebReady:true}}]})}
     if(!cfg)return json({streams:[]});
     const ch=(await getIPTVChannels(cfg,env)).find(x=>x.id===id);if(!ch)return json({streams:[]});
-    const rawUrl=String(ch.url||"");\n     const channelHeaders=ch.headers||{};\n     const needsProxy=/\\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin);\n     const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:rawUrl;
+    const rawUrl=String(ch.url||"");
+     const channelHeaders=ch.headers||{};
+     const needsProxy=/\\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin);\n     const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:rawUrl;
     const epgTitle=ch.epg?.title?` • ${ch.epg.title}`:"";
     return json({streams:[{name:"PT•HUB",title:`${ch.name}${epgTitle}`,url:streamUrl,behaviorHints:{notWebReady:true}}]});
    }
