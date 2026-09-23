@@ -829,7 +829,7 @@ export default {async fetch(request,env){
  const url=new URL(request.url),p=url.pathname;
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
- if(p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
+ if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
  if(request.method==="POST"&&p==="/config-store"){
   try{const c=await request.json();if(!c||typeof c!=="object"||Array.isArray(c))return json({success:false,error:"Configuração inválida."},400);return json({success:true,token:encodeConfig(c),persistent:true})}
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
