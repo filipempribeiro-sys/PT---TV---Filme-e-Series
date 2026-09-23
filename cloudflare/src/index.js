@@ -1010,6 +1010,8 @@ export default {async fetch(request,env,ctx){
   if(!["movie","series"].includes(type)||!/^tt\d+(?::\d+:\d+)?$/i.test(id))return json({ok:false,error:"Use type=movie|series and an IMDb id such as tt0133093 or tt0903747:1:1"},400,noCache);
   const sources=[...CORE_TORRENT_SOURCES,...BUILT_IN_STREAM_SOURCES,...FALLBACK_STREAM_SOURCES];
   const results=await Promise.all(sources.map(source=>probeStreamSource(source,type,id)));
+  const tpbStarted=Date.now(),tpbCatalogStreams=await thePirateBayCatalogStreams(type,id);
+  results.push({id:"thepiratebay-catalog",name:"ThePirateBay Catalog",base:THEPIRATEBAY_CATALOG_BASE,target:"catalog-search",status:tpbCatalogStreams.length?200:0,ok:tpbCatalogStreams.length>0,streams:tpbCatalogStreams.length,durationMs:Date.now()-tpbStarted,contentType:"application/json",sample:tpbCatalogStreams.slice(0,2).map(s=>s.title||s.name).join(" | ")});
   const aggregated=await externalStreams(null,type,id,url.hostname,null);
   return json({
    ok:true,type,id,results,
