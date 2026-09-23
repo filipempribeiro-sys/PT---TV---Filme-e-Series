@@ -1,52 +1,98 @@
-# PT TV Hub — Nuvio / Stremio
+# PT•HUB — Nuvio / Stremio
 
-Projeto-base para centralizar serviços de TV portugueses e uma lista IPTV M3U que o utilizador tenha autorização para usar.
+PT•HUB é um hub configurável compatível com o ecossistema Stremio/Nuvio para reunir catálogos, IPTV autorizada, conteúdo português, streamers e fontes externas numa única instalação.
 
-## O que faz
+## Produção atual
 
-- Catálogo "TV Portugal" com Vodafone TV, DIGI TV, MEO Go e NOS TV.
-- Os serviços oficiais aparecem como `externalUrl`, para abrir o serviço oficial e fazer login normalmente.
-- Catálogo "Minha IPTV" lê `data/user.m3u` e expõe os canais como streams HTTP/HLS.
-- Não recolhe credenciais, não tenta descobrir URLs internas dos operadores e não contorna DRM.
-- Inclui um catálogo de referências de add-ons externos e um template de plugin Nuvio.
+A produção corre diretamente em **Cloudflare Workers**.
 
-## Instalar o add-on
+Arquitetura principal:
 
-1. `npm install`
-2. `npm start`
-3. Servir o diretório num HTTPS público (por exemplo num VPS/Cloudflare/Render).
-4. No Nuvio/Stremio: Addons -> Install from URL -> `https://SEU_HOST/manifest.json`
+```
+Stremio / Nuvio
+→ PT•HUB Cloudflare Worker
+→ catálogos / IPTV / conteúdo português
+→ agregador de streams externo nativo
+→ normalização
+→ deduplicação
+→ ranking
+→ Cache API
+→ resposta compatível com Stremio
+```
 
-## IPTV própria
+O runtime Cloudflare não depende de Render, Google Cloud, Docker, Magnetio, Redis Render nem de um servidor torrent próprio.
 
-Coloque a sua lista autorizada em `data/user.m3u` e reinicie o servidor.
+## Instalar
 
-Exemplo:
+O endpoint de produção é o Worker Cloudflare:
 
-#EXTM3U
-#EXTINF:-1 tvg-name="Canal Demo" group-title="Legal",Canal Demo
-https://exemplo.legal/stream.m3u8
+```
+https://pt---tv---filme-e-series.filipe-m-p-ribeiro.workers.dev
+```
 
-## Plugin Nuvio
+Abre `/configure`, escolhe os conteúdos e instala o manifest gerado no Stremio/Nuvio.
 
-O diretório `plugin/` contém um repositório Nuvio compatível com o formato atual de providers, mas o provider vem desativado. Os plugins Nuvio executam código localmente e o sistema atual não fornece uma configuração genérica de credenciais/listas dentro do plugin; por isso não é seguro ou prático embutir credenciais.
+## IPTV
 
-## Add-ons externos
+São suportados:
 
-O projeto não faz proxy nem copia código de add-ons de terceiros. Os manifests podem ser instalados/configurados separadamente no Nuvio/Stremio.
+- IPTV-org;
+- playlists M3U/M3U+ por URL;
+- ficheiros M3U/M3U8;
+- Xtream Codes;
+- EPG e offsets configuráveis;
+- headers por canal e User-Agent global;
+- proxy HLS quando necessário.
 
-Para fontes de torrent/índices de terceiros, usa apenas conteúdo para o qual tenhas autorização. Este projeto não automatiza fontes de conteúdo não autorizado.
+Ficheiros M3U enviados usam o binding Cloudflare KV `PT_HUB_M3U`. Credenciais não são gravadas no GitHub.
+
+## Fontes externas
+
+O Worker agrega diretamente fontes Stremio independentes. As fontes torrent integradas são configuráveis e ficam separadas dos addons personalizados.
+
+A resposta é normalizada, deduplicada por `infoHash + fileIdx`, ordenada por qualidade/seeders/diversidade e limitada por qualidade. O PT•HUB não descarrega nem faz streaming P2P do conteúdo; devolve apenas descritores de stream fornecidos pelas fontes independentes.
 
 ## Estrutura
 
-addon/
-  manifest.json
-  server.js
+```
+cloudflare/
+  src/index.js        <- runtime de produção
+  wrangler.jsonc
   package.json
-data/
-  services.json
-  addons.json
-  user.m3u       <- criar pelo utilizador
-plugin/
+  README.md
+
+addon/
+  logo.png
+  background.jpg
   manifest.json
-  providers/pt-iptv-template.js
+  logos/
+  server.js           <- legado / rollback, não publicado como asset Cloudflare
+  package.json        <- legado
+  pt-playmogo-guard.js
+  pt-external-player-resolver.js
+
+data/
+plugin/
+```
+
+`addon/.assetsignore` impede que os ficheiros server-side legados sejam publicados como assets do Worker.
+
+## Legado
+
+O antigo `addon/server.js` e o repositório `PT-HUB-Torrent-Engine` são mantidos apenas como referência/rollback enquanto a migração Cloudflare-only é validada em produção. Não fazem parte do runtime Cloudflare atual.
+
+## Desenvolvimento Cloudflare
+
+A partir de `cloudflare/`:
+
+```bash
+npm install
+npm run check
+npx wrangler deploy
+```
+
+O Wrangler está fixado na versão validada pelo projeto para tornar os builds reprodutíveis.
+
+## Responsabilidade de conteúdo
+
+PT•HUB é um projeto independente. Não aloja conteúdos de terceiros, não contorna DRM e não recolhe credenciais de serviços externos. Cada utilizador deve usar apenas fontes e conteúdos a que tenha direito de acesso.
