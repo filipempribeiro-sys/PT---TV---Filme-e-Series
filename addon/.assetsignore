@@ -1,1 +1,4 @@
 server.js
+package.json
+pt-playmogo-guard.js
+pt-external-player-resolver.js
