@@ -95,14 +95,14 @@ function isNovela(c){return /novela/.test(normText(`${c?.id||""} ${c?.name||""}`
 function selectPtCatalog(man,a){let cs=(man?.catalogs||[]).filter(c=>c?.id&&c.type===a.type);if(a.group==="portuguese"&&a.type==="series")cs=cs.filter(c=>a.kind==="novelas"?isNovela(c):!isNovela(c));return cs.map((c,i)=>{const t=normText(`${c?.id||""} ${c?.name||""}`);let s=0;if(/\b(todos?|all|principal|main|default|catalogo)\b/.test(t))s+=100;if(/\b(recentes?|new|rating|avaliacao|antigos?|old|a-z|az)\b/.test(t))s-=30;return{c,i,s}}).sort((x,y)=>y.s-x.s||x.i-y.i)[0]?.c||null}
 async function ptAggregate(config,type,id,extra=""){const a=PT_AGG.find(x=>x.id===id&&x.type===type);if(!a||!config?.features?.ptContent)return null;const ps=config.features.ptContentSources||{};if(a.group==="ptpt"&&ps.ptPt!==true)return{metas:[]};if(a.group==="portuguese"&&ps.portugueseProduction!==true)return{metas:[]};const q=new URLSearchParams(String(extra||"").replace(/:/g,"=")),search=String(q.get("search")||"").trim(),skip=Math.max(0,parseInt(q.get("skip")||"0")||0),all=[],seen=new Set();for(const base of ptSourceUrls(config,a.group)){const man=await ptSourceManifest(base),c=selectPtCatalog(man,a);if(!c)continue;const supports=(c.extra||[]).some(x=>(typeof x==="string"?x:x?.name)==="search"),suffix=search&&supports?"/search="+encodeURIComponent(search):"";try{const r=await fetch(`${base}/catalog/${encodeURIComponent(type)}/${encodeURIComponent(c.id)}${suffix}.json`);if(!r.ok)continue;let ms=(await r.json())?.metas||[];if(search&&!supports){const n=normText(search);ms=ms.filter(x=>normText(x?.name||x?.title).includes(n))}const hash=(await hashId(base)).slice(0,12);for(const m of ms){const nm=normalizePtMeta(m,a.group,base,type,hash);if(!nm)continue;const imdb=m.imdb_id||m.imdbId||m?.externalIds?.imdbId||(/^tt\d+$/i.test(String(m.id))?m.id:""),key=imdb?"imdb:"+String(imdb).toLowerCase():"title:"+normText(m.name||m.title).replace(/[^a-z0-9]+/g,"")+":"+(String(m.year||m.releaseInfo||m.released||"").match(/\b(19|20)\d{2}\b/)?.[0]||"");if(!seen.has(key)){seen.add(key);all.push(nm)}}}catch{}}return{metas:all.slice(skip,skip+100)}}
 const BUILT_IN_STREAM_SOURCES=Object.freeze([
-{id:"torrentio",name:"Torrentio",base:"https://torrentio.strem.fun",enabled:true,timeout:25000,priority:1},
-{id:"torrentsdb",name:"TorrentsDB",base:"https://torrentsdb.com",enabled:true,timeout:25000,priority:2},
-{id:"thepiratebay-plus",name:"ThePirateBay+",base:"https://thepiratebay-plus.strem.fun",enabled:true,timeout:25000,priority:3}
+{id:"torrentio",name:"Torrentio",base:"https://torrentio.strem.fun",enabled:true,timeout:25000,retries:2,priority:1},
+{id:"torrentsdb",name:"TorrentsDB",base:"https://torrentsdb.com",enabled:true,timeout:25000,retries:2,priority:2},
+{id:"thepiratebay-plus",name:"ThePirateBay+",base:"https://thepiratebay-plus.strem.fun",enabled:true,timeout:25000,retries:2,priority:3}
 ]);
 const FALLBACK_STREAM_SOURCES=Object.freeze([
-{id:"magnetio-public",name:"Magnetio Public",base:"https://magnetio.peterdsp.dev/providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents,limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads,therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt|sort=qualityseeders|limit=50",enabled:true,timeout:35000,priority:10},
-{id:"torrentsdb-legacy",name:"TorrentsDB Legacy Gateway",base:"https://beta.stremio-addons.net/addons/torrentsdb",enabled:true,timeout:25000,priority:11},
-{id:"ytztvio",name:"Ytztvio",base:"https://ytztvio.galacticcapsule.workers.dev",enabled:true,timeout:25000,priority:12}
+{id:"magnetio-public",name:"Magnetio Public",base:"https://magnetio.peterdsp.dev/providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents,limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads,therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt|sort=qualityseeders|limit=50",enabled:true,timeout:35000,retries:2,priority:10},
+{id:"torrentsdb-legacy",name:"TorrentsDB Legacy Gateway",base:"https://beta.stremio-addons.net/addons/torrentsdb",enabled:true,timeout:25000,retries:2,priority:11},
+{id:"ytztvio",name:"Ytztvio",base:"https://ytztvio.galacticcapsule.workers.dev",enabled:true,timeout:25000,retries:2,priority:12}
 ]);
 function streamQuality(s){const t=[s?.quality,s?.name,s?.title,s?.description,s?.behaviorHints?.filename].filter(Boolean).join(" ").toUpperCase();if(/4K|2160P|UHD/.test(t))return"4K";if(/1080P/.test(t))return"1080p";if(/720P/.test(t))return"720p";if(/480P|576P|\bSD\b/.test(t))return"480p";return"Outra"}
 function parseCountValue(v){if(typeof v==="number"&&Number.isFinite(v))return Math.max(0,Math.round(v));const raw=String(v??"").trim();if(!raw)return 0;const suffix=/[km]$/i.test(raw)?raw.slice(-1).toLowerCase():"",body=(suffix?raw.slice(0,-1):raw).trim();if(suffix){const n=Number(body.replace(/\s/g,"").replace(",","."));return Number.isFinite(n)?Math.max(0,Math.round(n*(suffix==="k"?1e3:1e6))):0}const digits=body.replace(/[^0-9]/g,"");return digits?Number(digits)||0:0}
@@ -114,14 +114,44 @@ function streamProviderHint(s,source){const explicit=String(s?.provider||"").tri
 function streamInfoScore(s){return [s?.infoHash,s?.url,s?.title,s?.quality,streamSeeds(s)>0,Number.isFinite(streamSize(s)),s?.provider,Array.isArray(s?.sources)&&s.sources.length>0,s?.behaviorHints?.filename].filter(Boolean).length}
 function mergeDuplicateStream(a,b){const sa=streamSeeds(a),sb=streamSeeds(b),za=streamSize(a),zb=streamSize(b);let best=a;if(sb>sa||(sb===sa&&zb<za)||(sb===sa&&zb===za&&streamInfoScore(b)>streamInfoScore(a)))best=b;const merged={...best,seeders:Math.max(sa,sb)};const sources=[...new Set([...(Array.isArray(a?.sources)?a.sources:[]),...(Array.isArray(b?.sources)?b.sources:[])].filter(Boolean))];if(sources.length)merged.sources=sources;return merged}
 function normalizeExternalStream(s,source){if(!s||typeof s!=="object")return null;const x={...s,_ptHubSource:String(source?.name||source?.base||source||"external")};if(x.infoHash)x.infoHash=String(x.infoHash).trim().toLowerCase();if(Number.isFinite(Number(x.fileIdx)))x.fileIdx=Number(x.fileIdx);x.seeders=streamSeeds(x);x.leechers=parseCountValue(x?.leechers??x?.behaviorHints?.leechers);const size=streamSize(x);if(Number.isFinite(size))x.size=size;x.quality=streamQuality(x);if(!x.provider)x.provider=streamProviderHint(x,source);if(!x.behaviorHints)x.behaviorHints={};if(!x.behaviorHints.filename&&x.title)x.behaviorHints.filename=String(x.title).split("\n")[0];return x}
-async function externalSourceStreams(source,type,id){const base=normalizeAddonBaseUrl(source?.base||source);if(!validHttp(base))return[];const ctl=new AbortController(),started=Date.now(),timer=setTimeout(()=>ctl.abort(),Math.max(1000,Number(source?.timeout)||6500));try{const r=await fetch(`${base}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`,{signal:ctl.signal,headers:{"User-Agent":"Stremio/4","Accept":"application/json"}});if(!r.ok){console.log(`[PT-HUB][${source?.name||base}] HTTP ${r.status} · ${Date.now()-started}ms`);return[]}const d=await r.json(),streams=(Array.isArray(d?.streams)?d.streams:[]).map(s=>normalizeExternalStream(s,source)).filter(Boolean);console.log(`[PT-HUB][${source?.name||base}] ${streams.length} streams · ${Date.now()-started}ms`);return streams}catch(e){console.log(`[PT-HUB][${source?.name||base}] ${e?.name==="AbortError"?"timeout":"falha"} · ${Date.now()-started}ms`);return[]}finally{clearTimeout(timer)}}
+async function externalSourceStreams(source,type,id){
+ const base=normalizeAddonBaseUrl(source?.base||source);if(!validHttp(base))return[];
+ const maxAttempts=Math.max(1,Math.min(2,Number(source?.retries)||1));
+ for(let attempt=1;attempt<=maxAttempts;attempt++){
+  const ctl=new AbortController(),started=Date.now(),timer=setTimeout(()=>ctl.abort(),Math.max(1000,Number(source?.timeout)||25000));
+  try{
+   const r=await fetch(`${base}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`,{
+    signal:ctl.signal,redirect:"follow",
+    headers:{
+     "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+     "Accept":"application/json,text/plain,*/*",
+     "Accept-Language":"pt-PT,pt;q=0.9,en;q=0.8",
+     "Cache-Control":"no-cache"
+    }
+   });
+   if(!r.ok){
+    console.log(`[PT-HUB][${source?.name||base}] HTTP ${r.status} · tentativa ${attempt}/${maxAttempts} · ${Date.now()-started}ms`);
+    if(attempt<maxAttempts&&(r.status===429||r.status>=500)){await new Promise(resolve=>setTimeout(resolve,900*attempt));continue}
+    return[];
+   }
+   const d=await r.json(),streams=(Array.isArray(d?.streams)?d.streams:[]).map(s=>normalizeExternalStream(s,source)).filter(Boolean);
+   console.log(`[PT-HUB][${source?.name||base}] ${streams.length} streams · tentativa ${attempt}/${maxAttempts} · ${Date.now()-started}ms`);
+   return streams;
+  }catch(e){
+   console.log(`[PT-HUB][${source?.name||base}] ${e?.name==="AbortError"?"timeout":"falha"} · tentativa ${attempt}/${maxAttempts} · ${Date.now()-started}ms`);
+   if(attempt<maxAttempts){await new Promise(resolve=>setTimeout(resolve,900*attempt));continue}
+   return[];
+  }finally{clearTimeout(timer)}
+ }
+ return[];
+}
 async function probeStreamSource(source,type,id){
  const base=normalizeAddonBaseUrl(source?.base||source);
  if(!validHttp(base))return{id:source?.id||"",name:source?.name||"Unknown",base,ok:false,error:"invalid-url",status:0,streams:0,durationMs:0};
  const ctl=new AbortController(),started=Date.now(),timeoutMs=Math.max(1000,Number(source?.timeout)||25000),timer=setTimeout(()=>ctl.abort(),timeoutMs);
  const target=`${base}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`;
  try{
-  const r=await fetch(target,{signal:ctl.signal,redirect:"follow",headers:{"User-Agent":"Stremio/4","Accept":"application/json"}});
+  const r=await fetch(target,{signal:ctl.signal,redirect:"follow",headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36","Accept":"application/json,text/plain,*/*","Accept-Language":"pt-PT,pt;q=0.9,en;q=0.8","Cache-Control":"no-cache"}});
   const text=await r.text();
   let data=null;try{data=JSON.parse(text)}catch{}
   const streams=Array.isArray(data?.streams)?data.streams.length:0;
