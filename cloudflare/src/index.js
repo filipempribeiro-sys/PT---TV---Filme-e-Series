@@ -919,7 +919,8 @@ export default {async fetch(request,env){
     const rawUrl=String(ch.url||"");
      const channelHeaders=ch.headers||{};
      const needsProxy=isHttp(rawUrl)&&(/\\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin));
-     if(!isHttp(rawUrl))return json({streams:[]});\n     const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:rawUrl;
+     if(!isHttp(rawUrl))return json({streams:[]});
+     const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:rawUrl;
     const epgTitle=ch.epg?.title?` • ${ch.epg.title}`:"";
     return json({streams:[{name:"PT•HUB",title:`${ch.name}${epgTitle}`,url:streamUrl,behaviorHints:{notWebReady:true}}]});
    }
