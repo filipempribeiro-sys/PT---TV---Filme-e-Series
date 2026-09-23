@@ -117,20 +117,19 @@ function customStreamSourceBases(config){return [...new Set((Array.isArray(confi
 const MAX_PARALLEL_STREAM_SOURCES=6;
 async function settleStreamSources(sources,type,id){const settled=[];for(let i=0;i<sources.length;i+=MAX_PARALLEL_STREAM_SOURCES){const batch=sources.slice(i,i+MAX_PARALLEL_STREAM_SOURCES);settled.push(...await Promise.allSettled(batch.map(x=>externalSourceStreams(x,type,id))))}return settled}
 async function externalCacheKey(type,id,config,hostname=""){const built=enabledBuiltIns(config).map(x=>x.id).sort(),custom=customStreamSourceBases(config).slice(0,MAX_CUSTOM_STREAM_SOURCES).sort(),max=maxPerQuality(config),sig=await hashId(JSON.stringify({built,custom,max})),host=String(hostname||"").trim().toLowerCase()||"pt-hub.invalid";return `https://${host}/__pt_hub_cache/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}?v=${sig}`}
-async function externalStreams(config,type,id,env=null,hostname="",ctx=null){
+async function externalStreams(config,type,id,hostname="",ctx=null){
  if(config?.features?.externalSources===false)return[];
  const builtins=enabledBuiltIns(config),allCustom=customStreamSourceBases(config),custom=allCustom.slice(0,MAX_CUSTOM_STREAM_SOURCES).map((base,i)=>({id:`custom-${i}`,name:`Custom ${i+1}`,base,enabled:true,timeout:6500,priority:100+i})),sources=[...builtins,...custom];if(allCustom.length>MAX_CUSTOM_STREAM_SOURCES)console.log(`[PT-HUB][Aggregator] custom sources limited to ${MAX_CUSTOM_STREAM_SOURCES} of ${allCustom.length}`);
  if(!sources.length)return[];
- const key=await externalCacheKey(type,id,config,hostname),cache=typeof caches!=="undefined"?caches.default:null,useKv=String(hostname||"").toLowerCase().endsWith(".workers.dev")&&!!env?.PT_HUB_M3U,kvKey=useKv?`streamcache:${await hashId(key)}`:"";
- if(cache){try{const hit=await cache.match(key);if(hit){const data=await hit.json();if(Array.isArray(data?.streams)){console.log(`[PT-HUB][Cache] HIT ${type}:${id} · cache-api`);return data.streams}}}catch{}}
- if(useKv){try{const raw=await env.PT_HUB_M3U.get(kvKey);if(raw){const data=JSON.parse(raw);if(Array.isArray(data?.streams)){console.log(`[PT-HUB][Cache] HIT ${type}:${id} · kv`);return data.streams}}}catch{}}
+ const key=await externalCacheKey(type,id,config,hostname),cache=typeof caches!=="undefined"?caches.default:null;
+ if(cache){try{const hit=await cache.match(key);if(hit){const data=await hit.json();if(Array.isArray(data?.streams)){console.log(`[PT-HUB][Cache] HIT ${type}:${id}`);return data.streams}}}catch{}}
  const settled=await settleStreamSources(sources,type,id),allRaw=settled.flatMap(x=>x.status==="fulfilled"?x.value:[]),unique=new Map();
  for(const s of allRaw){const k=streamKey(s);if(!unique.has(k))unique.set(k,s);else unique.set(k,mergeDuplicateStream(unique.get(k),s))}const all=[...unique.values()];
  const out=[],limit=maxPerQuality(config);
  for(const q of["4K","1080p","720p","480p","Outra"]){const rest=all.filter(s=>streamQuality(s)===q).sort((a,b)=>streamSeeds(b)-streamSeeds(a)||streamSize(a)-streamSize(b)),pick=[],used=new Set();if(rest.length){const x=rest.shift();pick.push(x);used.add(streamSource(x))}while(pick.length<limit&&rest.length){const best=streamSeeds(rest[0]),di=rest.findIndex(s=>!used.has(streamSource(s))&&streamSeeds(s)>=best*.8),[x]=rest.splice(di>=0?di:0,1);pick.push(x);used.add(streamSource(x))}out.push(...pick)}
  const clean=out.map(s=>{const x={...s};delete x._ptHubSource;return x});
  console.log(`[PT-HUB][Aggregator] ${allRaw.length} raw → ${all.length} unique → ${clean.length} selected`);
- if(clean.length){const ttl=type==="movie"?2700:1200,payload=JSON.stringify({streams:clean}),writes=[];if(cache)writes.push(cache.put(key,new Response(payload,{headers:{"Content-Type":"application/json","Cache-Control":`public, max-age=${ttl}`}})));if(useKv)writes.push(env.PT_HUB_M3U.put(kvKey,payload,{expirationTtl:ttl}));if(writes.length){const job=Promise.allSettled(writes);if(ctx?.waitUntil)ctx.waitUntil(job);else await job;console.log(`[PT-HUB][Cache] MISS ${type}:${id} · stored ${ttl}s${useKv?" · cache-api+kv":" · cache-api"}`)}}
+ if(cache&&clean.length){const ttl=type==="movie"?2700:1200,payload=JSON.stringify({streams:clean}),job=cache.put(key,new Response(payload,{headers:{"Content-Type":"application/json","Cache-Control":`public, max-age=${ttl}`}}));if(ctx?.waitUntil)ctx.waitUntil(job);else await job;console.log(`[PT-HUB][Cache] MISS ${type}:${id} · stored ${ttl}s`)}
  return clean;
 }
 const STREAMERS=[
@@ -958,7 +957,7 @@ export default {async fetch(request,env,ctx){
    }
    if(type==="movie"||type==="series"){
     if(id.startsWith("pthubptmeta:"))return json({streams:(await ptExternalStreams(cfg,type,id))||[]});
-    return json({streams:await externalStreams(cfg,type,id,env,url.hostname,ctx)});
+    return json({streams:await externalStreams(cfg,type,id,url.hostname,ctx)});
    }
    return json({streams:[]});
   }catch{return json({streams:[]})}
