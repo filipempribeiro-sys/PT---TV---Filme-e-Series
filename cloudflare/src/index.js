@@ -95,9 +95,14 @@ function isNovela(c){return /novela/.test(normText(`${c?.id||""} ${c?.name||""}`
 function selectPtCatalog(man,a){let cs=(man?.catalogs||[]).filter(c=>c?.id&&c.type===a.type);if(a.group==="portuguese"&&a.type==="series")cs=cs.filter(c=>a.kind==="novelas"?isNovela(c):!isNovela(c));return cs.map((c,i)=>{const t=normText(`${c?.id||""} ${c?.name||""}`);let s=0;if(/\b(todos?|all|principal|main|default|catalogo)\b/.test(t))s+=100;if(/\b(recentes?|new|rating|avaliacao|antigos?|old|a-z|az)\b/.test(t))s-=30;return{c,i,s}}).sort((x,y)=>y.s-x.s||x.i-y.i)[0]?.c||null}
 async function ptAggregate(config,type,id,extra=""){const a=PT_AGG.find(x=>x.id===id&&x.type===type);if(!a||!config?.features?.ptContent)return null;const ps=config.features.ptContentSources||{};if(a.group==="ptpt"&&ps.ptPt!==true)return{metas:[]};if(a.group==="portuguese"&&ps.portugueseProduction!==true)return{metas:[]};const q=new URLSearchParams(String(extra||"").replace(/:/g,"=")),search=String(q.get("search")||"").trim(),skip=Math.max(0,parseInt(q.get("skip")||"0")||0),all=[],seen=new Set();for(const base of ptSourceUrls(config,a.group)){const man=await ptSourceManifest(base),c=selectPtCatalog(man,a);if(!c)continue;const supports=(c.extra||[]).some(x=>(typeof x==="string"?x:x?.name)==="search"),suffix=search&&supports?"/search="+encodeURIComponent(search):"";try{const r=await fetch(`${base}/catalog/${encodeURIComponent(type)}/${encodeURIComponent(c.id)}${suffix}.json`);if(!r.ok)continue;let ms=(await r.json())?.metas||[];if(search&&!supports){const n=normText(search);ms=ms.filter(x=>normText(x?.name||x?.title).includes(n))}const hash=(await hashId(base)).slice(0,12);for(const m of ms){const nm=normalizePtMeta(m,a.group,base,type,hash);if(!nm)continue;const imdb=m.imdb_id||m.imdbId||m?.externalIds?.imdbId||(/^tt\d+$/i.test(String(m.id))?m.id:""),key=imdb?"imdb:"+String(imdb).toLowerCase():"title:"+normText(m.name||m.title).replace(/[^a-z0-9]+/g,"")+":"+(String(m.year||m.releaseInfo||m.released||"").match(/\b(19|20)\d{2}\b/)?.[0]||"");if(!seen.has(key)){seen.add(key);all.push(nm)}}}catch{}}return{metas:all.slice(skip,skip+100)}}
 const BUILT_IN_STREAM_SOURCES=Object.freeze([
-{id:"torrentio",name:"Torrentio",base:"https://torrentio.strem.fun",enabled:true,timeout:6500,priority:1},
-{id:"torrentsdb",name:"TorrentsDB",base:"https://torrentsdb.com",enabled:true,timeout:6500,priority:2},
-{id:"thepiratebay-plus",name:"ThePirateBay+",base:"https://thepiratebay-plus.strem.fun",enabled:true,timeout:6500,priority:3}
+{id:"torrentio",name:"Torrentio",base:"https://torrentio.strem.fun",enabled:true,timeout:25000,priority:1},
+{id:"torrentsdb",name:"TorrentsDB",base:"https://torrentsdb.com",enabled:true,timeout:25000,priority:2},
+{id:"thepiratebay-plus",name:"ThePirateBay+",base:"https://thepiratebay-plus.strem.fun",enabled:true,timeout:25000,priority:3}
+]);
+const FALLBACK_STREAM_SOURCES=Object.freeze([
+{id:"magnetio-public",name:"Magnetio Public",base:"https://magnetio.peterdsp.dev/providers=yts,eztv,thepiratebay,leetx,torrentgalaxy,kickasstorrents,limetorrents,bitsearch,bt4g,btdig,glotorrents,torlock,torrentdownloads,therarbg,rutor,rutracker,nyaa,animesaturn,subsplease,animetosho,nekobt|sort=qualityseeders|limit=50",enabled:true,timeout:35000,priority:10},
+{id:"torrentsdb-legacy",name:"TorrentsDB Legacy Gateway",base:"https://beta.stremio-addons.net/addons/torrentsdb",enabled:true,timeout:25000,priority:11},
+{id:"ytztvio",name:"Ytztvio",base:"https://ytztvio.galacticcapsule.workers.dev",enabled:true,timeout:25000,priority:12}
 ]);
 function streamQuality(s){const t=[s?.quality,s?.name,s?.title,s?.description,s?.behaviorHints?.filename].filter(Boolean).join(" ").toUpperCase();if(/4K|2160P|UHD/.test(t))return"4K";if(/1080P/.test(t))return"1080p";if(/720P/.test(t))return"720p";if(/480P|576P|\bSD\b/.test(t))return"480p";return"Outra"}
 function parseCountValue(v){if(typeof v==="number"&&Number.isFinite(v))return Math.max(0,Math.round(v));const raw=String(v??"").trim();if(!raw)return 0;const suffix=/[km]$/i.test(raw)?raw.slice(-1).toLowerCase():"",body=(suffix?raw.slice(0,-1):raw).trim();if(suffix){const n=Number(body.replace(/\s/g,"").replace(",","."));return Number.isFinite(n)?Math.max(0,Math.round(n*(suffix==="k"?1e3:1e6))):0}const digits=body.replace(/[^0-9]/g,"");return digits?Number(digits)||0:0}
@@ -118,11 +123,18 @@ const MAX_PARALLEL_STREAM_SOURCES=6;
 async function settleStreamSources(sources,type,id){const settled=[];for(let i=0;i<sources.length;i+=MAX_PARALLEL_STREAM_SOURCES){const batch=sources.slice(i,i+MAX_PARALLEL_STREAM_SOURCES);settled.push(...await Promise.allSettled(batch.map(x=>externalSourceStreams(x,type,id))))}return settled}
 async function externalCacheKey(type,id,config,hostname=""){const built=enabledBuiltIns(config).map(x=>x.id).sort(),custom=customStreamSourceBases(config).slice(0,MAX_CUSTOM_STREAM_SOURCES).sort(),max=maxPerQuality(config),sig=await hashId(JSON.stringify({built,custom,max})),host=String(hostname||"").trim().toLowerCase()||"pt-hub.invalid";return `https://${host}/__pt_hub_cache/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}?v=${sig}`}
 async function externalStreams(config,type,id,hostname="",ctx=null){
- const builtins=enabledBuiltIns(config),allCustom=customStreamSourceBases(config),custom=allCustom.slice(0,MAX_CUSTOM_STREAM_SOURCES).map((base,i)=>({id:`custom-${i}`,name:`Custom ${i+1}`,base,enabled:true,timeout:6500,priority:100+i})),sources=[...builtins,...custom];if(allCustom.length>MAX_CUSTOM_STREAM_SOURCES)console.log(`[PT-HUB][Aggregator] custom sources limited to ${MAX_CUSTOM_STREAM_SOURCES} of ${allCustom.length}`);
+ const builtins=enabledBuiltIns(config),allCustom=customStreamSourceBases(config),custom=allCustom.slice(0,MAX_CUSTOM_STREAM_SOURCES).map((base,i)=>({id:`custom-${i}`,name:`Custom ${i+1}`,base,enabled:true,timeout:25000,priority:100+i})),sources=[...builtins,...custom];if(allCustom.length>MAX_CUSTOM_STREAM_SOURCES)console.log(`[PT-HUB][Aggregator] custom sources limited to ${MAX_CUSTOM_STREAM_SOURCES} of ${allCustom.length}`);
  if(!sources.length)return[];
  const key=await externalCacheKey(type,id,config,hostname),cache=typeof caches!=="undefined"?caches.default:null;
  if(cache){try{const hit=await cache.match(key);if(hit){const data=await hit.json();if(Array.isArray(data?.streams)){console.log(`[PT-HUB][Cache] HIT ${type}:${id}`);return data.streams}}}catch{}}
- const settled=await settleStreamSources(sources,type,id),allRaw=settled.flatMap(x=>x.status==="fulfilled"?x.value:[]),unique=new Map();
+ const settled=await settleStreamSources(sources,type,id);
+ let allRaw=settled.flatMap(x=>x.status==="fulfilled"?x.value:[]);
+ if(!allRaw.length&&builtins.length){
+  console.log(`[PT-HUB][Aggregator] primary sources returned zero; trying historical fallbacks`);
+  const fallbackSettled=await settleStreamSources(FALLBACK_STREAM_SOURCES,type,id);
+  allRaw=fallbackSettled.flatMap(x=>x.status==="fulfilled"?x.value:[]);
+ }
+ const unique=new Map();
  for(const s of allRaw){const k=streamKey(s);if(!unique.has(k))unique.set(k,s);else unique.set(k,mergeDuplicateStream(unique.get(k),s))}const all=[...unique.values()];
  const out=[],limit=maxPerQuality(config);
  for(const q of["4K","1080p","720p","480p","Outra"]){const rest=all.filter(s=>streamQuality(s)===q).sort((a,b)=>streamSeeds(b)-streamSeeds(a)||streamSize(a)-streamSize(b)),pick=[],used=new Set();if(rest.length){const x=rest.shift();pick.push(x);used.add(streamSource(x))}while(pick.length<limit&&rest.length){const best=streamSeeds(rest[0]),di=rest.findIndex(s=>!used.has(streamSource(s))&&streamSeeds(s)>=best*.8),[x]=rest.splice(di>=0?di:0,1);pick.push(x);used.add(streamSource(x))}out.push(...pick)}
