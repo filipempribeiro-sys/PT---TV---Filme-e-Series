@@ -114,6 +114,21 @@ function streamProviderHint(s,source){const explicit=String(s?.provider||"").tri
 function streamInfoScore(s){return [s?.infoHash,s?.url,s?.title,s?.quality,streamSeeds(s)>0,Number.isFinite(streamSize(s)),s?.provider,Array.isArray(s?.sources)&&s.sources.length>0,s?.behaviorHints?.filename].filter(Boolean).length}
 function mergeDuplicateStream(a,b){const sa=streamSeeds(a),sb=streamSeeds(b),za=streamSize(a),zb=streamSize(b);let best=a;if(sb>sa||(sb===sa&&zb<za)||(sb===sa&&zb===za&&streamInfoScore(b)>streamInfoScore(a)))best=b;const merged={...best,seeders:Math.max(sa,sb)};const sources=[...new Set([...(Array.isArray(a?.sources)?a.sources:[]),...(Array.isArray(b?.sources)?b.sources:[])].filter(Boolean))];if(sources.length)merged.sources=sources;return merged}
 function normalizeExternalStream(s,source){if(!s||typeof s!=="object")return null;const x={...s,_ptHubSource:String(source?.name||source?.base||source||"external")};if(x.infoHash)x.infoHash=String(x.infoHash).trim().toLowerCase();if(Number.isFinite(Number(x.fileIdx)))x.fileIdx=Number(x.fileIdx);x.seeders=streamSeeds(x);x.leechers=parseCountValue(x?.leechers??x?.behaviorHints?.leechers);const size=streamSize(x);if(Number.isFinite(size))x.size=size;x.quality=streamQuality(x);if(!x.provider)x.provider=streamProviderHint(x,source);if(!x.behaviorHints)x.behaviorHints={};if(!x.behaviorHints.filename&&x.title)x.behaviorHints.filename=String(x.title).split("\n")[0];return x}
+const THEPIRATEBAY_CATALOG_BASE="https://5db836ec3ef8-thepiratebay-ctl.baby-beamup.club";
+function decodeTpbCatalogMetaId(metaId){try{const raw=String(metaId||"");if(!raw.startsWith("tpb-ctl:"))return null;const data=JSON.parse(Buffer.from(raw.slice(raw.indexOf(":")+1),"base64").toString("utf8")),infoHash=String(data&&data.infoHash||"").trim().toLowerCase();if(!/^[a-f0-9]{40}$/i.test(infoHash))return null;return{infoHash,parsedName:String(data&&data.parsedName||"").trim(),seeders:parseCountValue(data&&data.seeders),size:Number(data&&data.size)||0,index:Number.isFinite(Number(data&&data.index))?Number(data.index):null}}catch{return null}}
+function tpbEpisodeMatches(name,season,episode){if(!Number.isFinite(season))return true;const text=String(name||""),s=String(season),e=Number.isFinite(episode)?String(episode):"";if(Number.isFinite(episode))return new RegExp("(?:s0*"+s+"\\s*e0*"+e+"\\b|\\b"+s+"x0*"+e+"\\b)","i").test(text);return new RegExp("(?:s0*"+s+"\\b|season\\s*0*"+s+"\\b)","i").test(text)}
+async function thePirateBayCatalogStreams(type,id){
+ if(type!=="movie"&&type!=="series")return[];
+ const parts=String(id||"").split(":"),imdbId=parts[0];if(!/^tt\\d+$/i.test(imdbId))return[];
+ const season=parts[1]!=null&&parts[1]!==""?Number(parts[1]):NaN,episode=parts[2]!=null&&parts[2]!==""?Number(parts[2]):NaN;
+ const cm=await fetchJson(CINEMETA_BASE+"/meta/"+type+"/"+encodeURIComponent(imdbId)+".json"),title=String(cm&&cm.meta&&cm.meta.name||"").trim();if(!title)return[];
+ const catalogId=type==="movie"?"Movies":"TV shows",queries=[];
+ if(type==="series"&&Number.isFinite(season)&&Number.isFinite(episode))queries.push(title+" S"+String(season).padStart(2,"0")+"E"+String(episode).padStart(2,"0"));
+ queries.push(title);let metas=[];
+ for(const query of [...new Set(queries)]){const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),20000);try{const target=THEPIRATEBAY_CATALOG_BASE+"/catalog/"+type+"/"+encodeURIComponent(catalogId)+"/search="+encodeURIComponent(query)+".json",r=await fetch(target,{signal:ctl.signal,redirect:"follow",headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36","Accept":"application/json"}});if(r.ok){const d=await r.json();if(Array.isArray(d&&d.metas)&&d.metas.length){metas=d.metas;break}}}catch{}finally{clearTimeout(timer)}}
+ const streams=[];for(const metaItem of metas.slice(0,40)){const decoded=decodeTpbCatalogMetaId(metaItem&&metaItem.id);if(!decoded)continue;const displayName=decoded.parsedName||String(metaItem&&metaItem.name||"ThePirateBay torrent").trim();if(type==="series"&&!tpbEpisodeMatches(displayName,season,episode))continue;const stream={infoHash:decoded.infoHash,name:"PT•HUB • ThePirateBay Catalog",title:displayName+(decoded.seeders?"\n🌱 "+decoded.seeders+" seeders":""),seeders:decoded.seeders,size:decoded.size,provider:"ThePirateBay Catalog",_ptHubSource:"ThePirateBay Catalog",behaviorHints:{filename:displayName}};if(decoded.index!==null)stream.fileIdx=decoded.index;streams.push(normalizeExternalStream(stream,{name:"ThePirateBay Catalog",base:THEPIRATEBAY_CATALOG_BASE}))}
+ console.log("[PT-HUB][ThePirateBay Catalog] "+streams.length+" streams · "+type+" "+id);return streams.filter(Boolean);
+}
 async function externalSourceStreams(source,type,id){
  const base=normalizeAddonBaseUrl(source?.base||source);if(!validHttp(base))return[];
  const maxAttempts=Math.max(1,Math.min(2,Number(source?.retries)||1));
@@ -166,7 +181,7 @@ const MAX_CUSTOM_STREAM_SOURCES=20;
 function customStreamSourceBases(config){return [...new Set((Array.isArray(config?.externalStreamSources)?config.externalStreamSources:[]).map(normalizeAddonBaseUrl).filter(validHttp))]}
 const MAX_PARALLEL_STREAM_SOURCES=6;
 async function settleStreamSources(sources,type,id){const settled=[];for(let i=0;i<sources.length;i+=MAX_PARALLEL_STREAM_SOURCES){const batch=sources.slice(i,i+MAX_PARALLEL_STREAM_SOURCES);settled.push(...await Promise.allSettled(batch.map(x=>externalSourceStreams(x,type,id))))}return settled}
-async function externalCacheKey(type,id,config,hostname=""){const built=enabledBuiltIns(config).map(x=>x.id).sort(),custom=customStreamSourceBases(config).slice(0,MAX_CUSTOM_STREAM_SOURCES).sort(),max=maxPerQuality(config),sig=await hashId(JSON.stringify({engine:"magnetio-public+ytztvio-v1",built,custom,max})),host=String(hostname||"").trim().toLowerCase()||"pt-hub.invalid";return `https://${host}/__pt_hub_cache/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}?v=${sig}`}
+async function externalCacheKey(type,id,config,hostname=""){const built=enabledBuiltIns(config).map(x=>x.id).sort(),custom=customStreamSourceBases(config).slice(0,MAX_CUSTOM_STREAM_SOURCES).sort(),max=maxPerQuality(config),sig=await hashId(JSON.stringify({engine:"magnetio-public+ytztvio+tpb-catalog-v2",built,custom,max})),host=String(hostname||"").trim().toLowerCase()||"pt-hub.invalid";return `https://${host}/__pt_hub_cache/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}?v=${sig}`}
 async function externalStreams(config,type,id,hostname="",ctx=null){
  const builtins=enabledBuiltIns(config),allCustom=customStreamSourceBases(config),custom=allCustom.slice(0,MAX_CUSTOM_STREAM_SOURCES).map((base,i)=>({id:`custom-${i}`,name:`Custom ${i+1}`,base,enabled:true,timeout:25000,priority:100+i}));
  if(allCustom.length>MAX_CUSTOM_STREAM_SOURCES)console.log(`[PT-HUB][Aggregator] custom sources limited to ${MAX_CUSTOM_STREAM_SOURCES} of ${allCustom.length}`);
@@ -176,8 +191,14 @@ async function externalStreams(config,type,id,hostname="",ctx=null){
  // Engine-equivalent core: Magnetio + Ytztvio are always queried first.
  // This mirrors the old Render architecture where the torrent engine existed
  // independently from the optional external-addon toggle.
- const coreSettled=await settleStreamSources(CORE_TORRENT_SOURCES,type,id);
- let allRaw=coreSettled.flatMap(x=>x.status==="fulfilled"?x.value:[]);
+ const [coreSettled,tpbCatalogSettled]=await Promise.all([
+  settleStreamSources(CORE_TORRENT_SOURCES,type,id),
+  Promise.allSettled([thePirateBayCatalogStreams(type,id)])
+ ]);
+ let allRaw=[
+  ...coreSettled.flatMap(x=>x.status==="fulfilled"?x.value:[]),
+  ...tpbCatalogSettled.flatMap(x=>x.status==="fulfilled"?x.value:[])
+ ];
 
  // Optional bridges are only consulted when the core engine returns nothing.
  // Known 403/429 bridges therefore cannot delay successful normal playback.
@@ -755,7 +776,8 @@ const ADDONS=[
 {name:"Torrentio",status:"reference",url:"https://torrentio.strem.fun/manifest.json"},
 {name:"TorrentsDB",status:"reference",url:"https://torrentsdb.com/manifest.json"},
 {name:"Torrent Catalogs",status:"reference",url:"https://torrent-catalogs.strem.fun/manifest.json"},
-{name:"ThePirateBay+",status:"reference",url:"https://thepiratebay-plus.strem.fun/manifest.json"}];
+{name:"ThePirateBay+",status:"reference",url:"https://thepiratebay-plus.strem.fun/manifest.json"},
+{name:"ThePirateBay Catalog",status:"reference",url:"https://5db836ec3ef8-thepiratebay-ctl.baby-beamup.club/manifest.json"}];
 const CINEMETA_BASE="https://v3-cinemeta.strem.io";
 async function fetchJson(target){try{const r=await fetch(target,{headers:{Accept:"application/json","User-Agent":"PT-HUB/3.1.5"}});return r.ok?await r.json():null}catch{return null}}
 function serviceMeta(s){return{id:s.id,type:"channel",name:s.name,description:s.description,poster:s.logo,logo:s.logo,links:[{name:"Abrir serviço",category:"external",url:s.url}],behaviorHints:{defaultVideoId:s.id}}}
