@@ -168,7 +168,7 @@ async function manifest(config=null){
  if(showPt&&features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
  return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta","stream","addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
-async function hlsProxy(request,url,profile,target,customUserAgent=""){
+async function hlsProxy(request,url,profile,target,customUserAgent="",configToken=""){
  if(!isHttp(target))return new Response("HLS target inválido.",{status:400,headers:CORS});
  const headers={"User-Agent":String(customUserAgent||"").trim()||"Mozilla/5.0 (PT-HUB HLS Engine)"};
  if(profile==="rtp"){headers.Origin="https://www.rtp.pt";headers.Referer="https://www.rtp.pt/play/"}
@@ -187,7 +187,7 @@ async function hlsProxy(request,url,profile,target,customUserAgent=""){
    return new Response(buffer,{status:upstream.status,headers:out});
   }
   const base=upstream.url||target,text=new TextDecoder().decode(bytes);
-  const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}/hls-proxy/${encodeURIComponent(profile)}/${enc}`}catch{return ref}};
+  const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}${configToken?`/${configToken}`:""}/hls-proxy/${encodeURIComponent(profile)}/${enc}`}catch{return ref}};
   const rewritten=text.replace(/\r/g,"").split("\n").map(raw=>{const line=raw.trim();if(!line)return raw;if(line.startsWith("#"))return raw.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`);return proxify(line)}).join("\n");
   return new Response(rewritten,{headers:{...common,"Content-Type":"application/vnd.apple.mpegurl"}});
  }catch(e){clearTimeout(timeout);return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:{...CORS,"Cache-Control":"no-store"}})}
@@ -789,7 +789,9 @@ async function getIPTVChannels(config,env){
 async function channelMeta(x,config){
  await ensureTvLogoWorldIndex();
  const resolvedLogo=String(x.logo||"").trim()||findChannelLogo([x.name,x.tvgName,x.tvgId],config)||PT_HUB_LOGO;
- return {id:x.id,type:"channel",name:x.name,poster:resolvedLogo,logo:resolvedLogo,description:x.group?`Grupo: ${x.group}`:""};
+ const epg=x.epg||null, epgLine=epg?.title?`Agora: ${epg.title}${epg.start?` • ${new Date(epg.start).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit",timeZone:"UTC"})}`:""}`:"";
+ const group=x.group?`Grupo: ${x.group}`:"";
+ return {id:x.id,type:"channel",name:x.name,poster:resolvedLogo,logo:resolvedLogo,description:[group,epgLine,epg?.description||""].filter(Boolean).join("\n"),epg};
 }
 
 const SUBSENSE_BASE_URL="https://subsense.nepiraw.com";
@@ -847,6 +849,7 @@ function validateConfigParity(config){
  }
  if(config.mode==="xtream"){if(!validHttp(config.xtreamServer))return "Indica um URL de servidor Xtream válido.";if(!config.username)return "Indica o username Xtream.";if(!config.password)return "Indica a password Xtream.";}
  if(config.epgUrl&&!validHttp(config.epgUrl))return "O URL EPG não é válido.";
+ if(config.xtreamEpgUrl&&!validHttp(config.xtreamEpgUrl))return "O URL EPG Xtream não é válido.";
  return null;
 }
 export default {async fetch(request,env){
@@ -913,7 +916,7 @@ export default {async fetch(request,env){
  let sm=p.match(new RegExp("^/([^/]+)/subtitles/([^/]+)/([^/]+?)(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
  let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){const cfg=decodeConfig(m[1]);return json(await manifest(cfg),200,noCache)}
- m=p.match(/^\/([^/]+)\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{const cfg=decodeConfig(m[1]);return await hlsProxy(request,url,decodeURIComponent(m[2]),Buffer.from(m[3],"base64url").toString("utf8"),cfg?.globalUserAgent||"")}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}\n m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
+ m=p.match(/^\/([^/]+)\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{const cfg=decodeConfig(m[1]);return await hlsProxy(request,url,decodeURIComponent(m[2]),Buffer.from(m[3],"base64url").toString("utf8"),cfg?.globalUserAgent||"",m[1])}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}\n m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
  if(request.method==="GET"&&p==="/")return new Response(null,{status:302,headers:{...CORS,Location:"/configure"}});
  if(request.method==="GET"&&(p==="/configure"||p==="/configure/"))return new Response(renderLegacyConfigurePage({}),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}});
  let cp=p.match(/^\/([^/]+)\/configure\/?$/);if(request.method==="GET"&&cp){const cfg=decodeConfig(cp[1])||{};return new Response(renderLegacyConfigurePage(cfg),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}})}
