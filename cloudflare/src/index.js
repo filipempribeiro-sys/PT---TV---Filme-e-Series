@@ -657,12 +657,34 @@ async function getM3UChannels(config){
  }
  throw lastError;
 }
+async function xtreamRequest(config,action){
+ const server=normalizeUrl(config?.xtreamServer);
+ if(!server||!isHttp(server))throw new Error("Servidor Xtream não definido.");
+ if(!config?.username||!config?.password)throw new Error("Username ou password Xtream em falta.");
+ let api=`${server}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}`;
+ if(action)api+=`&action=${encodeURIComponent(action)}`;
+ let lastError=null;
+ for(let attempt=1;attempt<=2;attempt++){
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
+  try{
+   const r=await fetch(api,{signal:controller.signal,redirect:"follow",headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64)","Accept":"application/json,*/*","Connection":"close"}});
+   clearTimeout(timeout);
+   if(!r.ok)throw new Error(`Xtream respondeu HTTP ${r.status}`);
+   return await r.json();
+  }catch(e){
+   clearTimeout(timeout);lastError=e;
+   const network=e?.name==="AbortError"||e instanceof TypeError||/network|fetch|timeout|timed out/i.test(String(e?.message||""));
+   if(attempt<2&&network){await new Promise(resolve=>setTimeout(resolve,1000*attempt));continue}
+   if(attempt>=2||!network)break;
+  }
+ }
+ throw new Error(`Falha ao contactar servidor Xtream (${lastError?.message||"erro de rede"}). O servidor pode estar a bloquear ligações a partir da Cloudflare ou usar TLS incompatível.`);
+}
 async function getXtreamChannels(config){
- const server=normalizeUrl(config.xtreamServer);if(!isHttp(server)||!config.username||!config.password)return[];
- const api=`${server}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_streams`;
- const r=await fetch(api,{headers:{"User-Agent":"Mozilla/5.0","Accept":"application/json,*/*"}});if(!r.ok)throw new Error("Xtream HTTP "+r.status);
- const data=await r.json();if(!Array.isArray(data))return[];
- return finalizeIPTVChannels(data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||"",group:x.category_name||"TV",tvgId:x.epg_channel_id||"",tvgName:x.name||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}}));
+ const data=await xtreamRequest(config,"get_live_streams");
+ if(!Array.isArray(data))return[];
+ const server=normalizeUrl(config.xtreamServer);
+ return finalizeIPTVChannels(data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||findChannelLogo([x.name||x.stream_display_name||"",x.epg_channel_id||""],config),group:x.category_name||"TV",tvgId:x.epg_channel_id||"",tvgName:x.name||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}}));
 }
 
 const IPTVORG_CHANNELS_URL="https://iptv-org.github.io/api/channels.json";
@@ -783,7 +805,7 @@ export default {async fetch(request,env){
   try{const cfg=await request.json();const err=validateConfigParity(cfg);if(err)return json({success:false,error:err},400);
    if(cfg.mode==="m3u"){const channels=await getIPTVChannels(cfg,env);return json({success:true,message:`Ligação M3U efetuada com sucesso. ${channels.length} canais encontrados.`,channels:channels.length})}
    if(cfg.mode==="iptv-org"){const channels=await getIPTVOrgChannels(cfg);return json({success:true,message:`Ligação IPTV-org efetuada com sucesso. ${channels.length} canais encontrados.`,channels:channels.length})}
-   if(cfg.mode==="xtream"){const base=String(cfg.xtreamServer||"").replace(/\/$/,""),u=`${base}/player_api.php?username=${encodeURIComponent(cfg.username)}&password=${encodeURIComponent(cfg.password)}`;const r=await fetch(u,{headers:{"User-Agent":`PT-HUB/${VERSION}`}});const data=await r.json();if(!data?.user_info||Number(data.user_info.auth)!==1)return json({success:false,error:"Autenticação Xtream inválida."},400);return json({success:true,message:"Ligação Xtream efetuada com sucesso."})}
+   if(cfg.mode==="xtream"){const data=await xtreamRequest(cfg,null);if(!data?.user_info||Number(data.user_info.auth)!==1)return json({success:false,error:"Autenticação Xtream inválida."},400);return json({success:true,message:"Ligação Xtream efetuada com sucesso."})}
    return json({success:false,error:"Modo IPTV inválido."},400)
   }catch(e){return json({success:false,error:e?.message||"Não foi possível testar a ligação."},500)}
  }
