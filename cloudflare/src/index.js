@@ -168,9 +168,9 @@ async function manifest(config=null){
  if(showPt&&features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
  return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta","stream","addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
-async function hlsProxy(request,url,profile,target){
+async function hlsProxy(request,url,profile,target,customUserAgent=""){
  if(!isHttp(target))return new Response("HLS target inválido.",{status:400,headers:CORS});
- const headers={"User-Agent":"Mozilla/5.0 (PT-HUB HLS Engine)"};
+ const headers={"User-Agent":String(customUserAgent||"").trim()||"Mozilla/5.0 (PT-HUB HLS Engine)"};
  if(profile==="rtp"){headers.Origin="https://www.rtp.pt";headers.Referer="https://www.rtp.pt/play/"}
  const range=request.headers.get("range");if(range)headers.Range=range;
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
@@ -769,7 +769,7 @@ async function getStoredM3UChannels(config,env){
  if(!env?.PT_HUB_M3U)throw new Error("Armazenamento M3U indisponível.");
  const raw=await env.PT_HUB_M3U.get(`m3u:${config.m3uFileId}`);
  if(!raw)throw new Error("O ficheiro M3U expirou ou não foi encontrado. Volta a carregar o ficheiro na página de configuração e gera um novo link de instalação.");
- return finalizeIPTVChannels(parseM3U(raw,config));
+ return finalizeIPTVChannels(await applyM3UEpg(await parseM3U(raw,config),raw,config));
 }
 async function getIPTVChannels(config,env){
  if(!config||config?.features?.iptv===false)return[];
@@ -777,7 +777,7 @@ async function getIPTVChannels(config,env){
  if(config.mode==="m3u"){
   if(config.m3uSource==="file"){
    if(config.m3uFileId)return getStoredM3UChannels(config,env);
-   if(config.m3uFileData)return finalizeIPTVChannels(parseM3U(config.m3uFileData,config));
+   if(config.m3uFileData)return finalizeIPTVChannels(await applyM3UEpg(await parseM3U(config.m3uFileData,config),config.m3uFileData,config));
    throw new Error("Nenhum ficheiro M3U associado a esta configuração.");
   }
   return getM3UChannels(config);
@@ -897,8 +897,9 @@ export default {async fetch(request,env){
     if(id.startsWith("operator:")){const operatorId=id.split(":")[1],op=OPERATORS.find(x=>x.id===operatorId),channels=Array.isArray(op?.channels)?op.channels.map((ch,i)=>({id:`operator:${op.id}:${ch.id||i}`,name:ch.name||op.name,url:ch.url,logo:ch.logo||op.logo||PT_HUB_LOGO,group:op.name})):[],ch=channels.find(x=>x.id===id);if(!ch)return json({streams:[]});return json({streams:[{name:"PT•HUB",title:ch.name,url:ch.url,behaviorHints:{notWebReady:true}}]})}
     if(!cfg)return json({streams:[]});
     const ch=(await getIPTVChannels(cfg,env)).find(x=>x.id===id);if(!ch)return json({streams:[]});
-    const streamUrl=/\\.m3u8(?:$|[?#])/i.test(String(ch.url||""))?`${url.origin}/hls-proxy/generic/${Buffer.from(ch.url,"utf8").toString("base64url")}`:ch.url;
-    return json({streams:[{name:"PT•HUB",title:ch.name,url:streamUrl,behaviorHints:{notWebReady:true}}]});
+    const streamUrl=/\\.m3u8(?:$|[?#])/i.test(String(ch.url||""))?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(ch.url,"utf8").toString("base64url")}`:ch.url;
+    const epgTitle=ch.epg?.title?` • ${ch.epg.title}`:"";
+    return json({streams:[{name:"PT•HUB",title:`${ch.name}${epgTitle}`,url:streamUrl,behaviorHints:{notWebReady:true}}]});
    }
    if(type==="movie"||type==="series"){
     if(id.startsWith("pthubptmeta:"))return json({streams:(await ptExternalStreams(cfg,type,id))||[]});
@@ -912,7 +913,7 @@ export default {async fetch(request,env){
  let sm=p.match(new RegExp("^/([^/]+)/subtitles/([^/]+)/([^/]+?)(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
  let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){const cfg=decodeConfig(m[1]);return json(await manifest(cfg),200,noCache)}
- m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
+ m=p.match(/^\/([^/]+)\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{const cfg=decodeConfig(m[1]);return await hlsProxy(request,url,decodeURIComponent(m[2]),Buffer.from(m[3],"base64url").toString("utf8"),cfg?.globalUserAgent||"")}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}\n m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
  if(request.method==="GET"&&p==="/")return new Response(null,{status:302,headers:{...CORS,Location:"/configure"}});
  if(request.method==="GET"&&(p==="/configure"||p==="/configure/"))return new Response(renderLegacyConfigurePage({}),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}});
  let cp=p.match(/^\/([^/]+)\/configure\/?$/);if(request.method==="GET"&&cp){const cfg=decodeConfig(cp[1])||{};return new Response(renderLegacyConfigurePage(cfg),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}})}
