@@ -934,6 +934,16 @@ export default {async fetch(request,env,ctx){
  }
  if(request.method==="GET"&&p.startsWith("/provider-logo/")){const providerId=decodeURIComponent(p.slice("/provider-logo/".length));const logo=await getPtProviderLogo(providerId);if(!logo)return new Response("Logo indisponível.",{status:404,headers:CORS});return new Response(null,{status:302,headers:{...CORS,Location:logo,"Cache-Control":"public, max-age=21600"}});}
  if(request.method==="GET"&&p==="/manifest.json")return json(await manifest(null),200,noCache);
+ let rootStream=p.match(/^\/stream\/(movie|series)\/([^/]+)\.json$/);
+ if(request.method==="GET"&&rootStream){
+  try{
+   const type=decodeURIComponent(rootStream[1]),id=decodeURIComponent(rootStream[2]);
+   return json({streams:await externalStreams(null,type,id,url.hostname,ctx)});
+  }catch(e){
+   console.log(`[PT-HUB][RootStream] falha ${e?.message||"desconhecida"}`);
+   return json({streams:[]});
+  }
+ }
  let ac=p.match(new RegExp("^/([^/]+)/catalog/addon/recommended(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&ac)return json({metas:ADDONS.map((addon,index)=>({id:addon.id||`addon:${index}`,type:"addon",name:addon.name||"Add-on",poster:addon.logo||addon.poster||PT_HUB_LOGO,description:addon.description||"",website:addon.url||addon.website||""}))});
  let cm=p.match(new RegExp("^/([^/]+)/catalog/([^/]+)/([^/]+)(?:/([^/]+))?\\.json$"));
