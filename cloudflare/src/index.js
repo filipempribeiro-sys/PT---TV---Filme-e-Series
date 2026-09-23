@@ -168,9 +168,11 @@ async function manifest(config=null){
  if(showPt&&features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
  return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta","stream","addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
-async function hlsProxy(request,url,profile,target,customUserAgent="",configToken=""){
+async function hlsProxy(request,url,profile,target,customUserAgent="",configToken="",channelHeaders={}){
  if(!isHttp(target))return new Response("HLS target inválido.",{status:400,headers:CORS});
- const headers={"User-Agent":String(customUserAgent||"").trim()||"Mozilla/5.0 (PT-HUB HLS Engine)"};
+ const headers={"User-Agent":String(channelHeaders?.userAgent||customUserAgent||"").trim()||"Mozilla/5.0 (PT-HUB HLS Engine)"};
+ if(channelHeaders?.referrer)headers.Referer=String(channelHeaders.referrer);
+ if(channelHeaders?.origin)headers.Origin=String(channelHeaders.origin);
  if(profile==="rtp"){headers.Origin="https://www.rtp.pt";headers.Referer="https://www.rtp.pt/play/"}
  const range=request.headers.get("range");if(range)headers.Range=range;
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
@@ -187,7 +189,7 @@ async function hlsProxy(request,url,profile,target,customUserAgent="",configToke
    return new Response(buffer,{status:upstream.status,headers:out});
   }
   const base=upstream.url||target,text=new TextDecoder().decode(bytes);
-  const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}${configToken?`/${configToken}`:""}/hls-proxy/${encodeURIComponent(profile)}/${enc}`}catch{return ref}};
+  const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}${configToken?`/${configToken}`:""}/hls-proxy/${encodeURIComponent(profile)}/${enc}${Object.keys(channelHeaders||{}).length?`?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:""}`}catch{return ref}};
   const rewritten=text.replace(/\r/g,"").split("\n").map(raw=>{const line=raw.trim();if(!line)return raw;if(line.startsWith("#"))return raw.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`);return proxify(line)}).join("\n");
   return new Response(rewritten,{headers:{...common,"Content-Type":"application/vnd.apple.mpegurl"}});
  }catch(e){clearTimeout(timeout);return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:{...CORS,"Cache-Control":"no-store"}})}
@@ -683,10 +685,12 @@ function attachEpg(channels,guide){if(!(guide instanceof Map)||!guide.size)retur
 async function applyM3UEpg(channels,content,config){if(config?.m3uEpgMode==="none")return channels;const epgUrl=config?.m3uEpgMode==="url"?config?.epgUrl:(config?.m3uEpgMode==="playlist"?m3uPlaylistEpgUrl(content):"");if(!epgUrl)return channels;try{return attachEpg(channels,await fetchEpg(epgUrl,config,config?.m3uEpgOffset))}catch{return channels}}
 async function applyXtreamEpg(channels,config){if(config?.xtreamEpgMode==="none")return channels;let epgUrl=config?.xtreamEpgMode==="url"?config?.xtreamEpgUrl:"";if(!epgUrl&&config?.xtreamEpgMode==="auto"){const server=normalizeUrl(config?.xtreamServer);epgUrl=`${server}/xmltv.php?username=${encodeURIComponent(config?.username||"")}&password=${encodeURIComponent(config?.password||"")}`}if(!epgUrl)return channels;try{return attachEpg(channels,await fetchEpg(epgUrl,config,config?.xtreamEpgOffset))}catch{return channels}}
 async function parseM3U(content,config=null){
- const lines=String(content||"").replace(/\r/g,"").split("\n"),out=[];let info=null;
+ const lines=String(content||"").replace(/\r/g,"").split("\n"),out=[];let info=null,opts={};
  for(const raw of lines){const line=raw.trim();if(!line)continue;
-  if(line.startsWith("#EXTINF:")){const i=line.indexOf(","),a=i>=0?line.slice(0,i):"",name=i>=0?line.slice(i+1).trim():"Canal IPTV";const attr=n=>a.match(new RegExp(n+'=["\\\']([^"\\\']*)["\\\']',"i"))?.[1]||"";info={name:name||attr("tvg-name")||"Canal IPTV",tvgId:attr("tvg-id"),tvgName:attr("tvg-name"),logo:attr("tvg-logo"),group:attr("group-title")||"TV"};continue}
-  if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo||findChannelLogo([info.name,info.tvgName,info.tvgId],config),group:info.group,tvgId:info.tvgId,tvgName:info.tvgName,url:line});info=null}
+  if(line.startsWith("#EXTINF:")){const i=line.indexOf(","),a=i>=0?line.slice(0,i):"",name=i>=0?line.slice(i+1).trim():"Canal IPTV";const attr=n=>a.match(new RegExp(n+'=["\\\']([^"\\\']*)["\\\']',"i"))?.[1]||"";info={name:name||attr("tvg-name")||"Canal IPTV",tvgId:attr("tvg-id"),tvgName:attr("tvg-name"),logo:attr("tvg-logo"),group:attr("group-title")||"TV"};opts={};continue}
+  if(info&&line.startsWith("#EXTVLCOPT:")){const kv=line.slice(11),p=kv.indexOf("="),k=(p>=0?kv.slice(0,p):kv).trim().toLowerCase(),v=p>=0?kv.slice(p+1).trim():"";if(k==="http-user-agent"&&v)opts.userAgent=v;else if((k==="http-referrer"||k==="http-referer")&&v)opts.referrer=v;else if(k==="http-origin"&&v)opts.origin=v;continue}
+  if(info&&line.startsWith("#KODIPROP:")){const kv=line.slice(10),p=kv.indexOf("="),k=(p>=0?kv.slice(0,p):kv).trim().toLowerCase(),v=p>=0?kv.slice(p+1).trim():"";if(k.includes("user-agent")&&v)opts.userAgent=v;else if((k.includes("referrer")||k.includes("referer"))&&v)opts.referrer=v;else if(k.includes("origin")&&v)opts.origin=v;continue}
+  if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo||findChannelLogo([info.name,info.tvgName,info.tvgId],config),group:info.group,tvgId:info.tvgId,tvgName:info.tvgName,url:line,headers:{...opts}});info=null;opts={}}
  }return finalizeIPTVChannels(out);
 }
 async function getM3UChannels(config){
@@ -900,7 +904,7 @@ export default {async fetch(request,env){
     if(id.startsWith("operator:")){const operatorId=id.split(":")[1],op=OPERATORS.find(x=>x.id===operatorId),channels=Array.isArray(op?.channels)?op.channels.map((ch,i)=>({id:`operator:${op.id}:${ch.id||i}`,name:ch.name||op.name,url:ch.url,logo:ch.logo||op.logo||PT_HUB_LOGO,group:op.name})):[],ch=channels.find(x=>x.id===id);if(!ch)return json({streams:[]});return json({streams:[{name:"PT•HUB",title:ch.name,url:ch.url,behaviorHints:{notWebReady:true}}]})}
     if(!cfg)return json({streams:[]});
     const ch=(await getIPTVChannels(cfg,env)).find(x=>x.id===id);if(!ch)return json({streams:[]});
-    const rawUrl=String(ch.url||"");\n     const needsProxy=/\\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent);\n     const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}`:rawUrl;
+    const rawUrl=String(ch.url||"");\n     const channelHeaders=ch.headers||{};\n     const needsProxy=/\\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin);\n     const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:rawUrl;
     const epgTitle=ch.epg?.title?` • ${ch.epg.title}`:"";
     return json({streams:[{name:"PT•HUB",title:`${ch.name}${epgTitle}`,url:streamUrl,behaviorHints:{notWebReady:true}}]});
    }
@@ -916,7 +920,7 @@ export default {async fetch(request,env){
  let sm=p.match(new RegExp("^/([^/]+)/subtitles/([^/]+)/([^/]+?)(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
  let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){const cfg=decodeConfig(m[1]);return json(await manifest(cfg),200,noCache)}
- m=p.match(/^\/([^/]+)\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{const cfg=decodeConfig(m[1]);return await hlsProxy(request,url,decodeURIComponent(m[2]),Buffer.from(m[3],"base64url").toString("utf8"),cfg?.globalUserAgent||"",m[1])}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
+ m=p.match(/^\/([^/]+)\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{const cfg=decodeConfig(m[1]);let channelHeaders={};try{channelHeaders=JSON.parse(Buffer.from(url.searchParams.get("ch")||"","base64url").toString("utf8")||"{}")}catch{}return await hlsProxy(request,url,decodeURIComponent(m[2]),Buffer.from(m[3],"base64url").toString("utf8"),cfg?.globalUserAgent||"",m[1],channelHeaders)}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
  m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
  if(request.method==="GET"&&p==="/")return new Response(null,{status:302,headers:{...CORS,Location:"/configure"}});
  if(request.method==="GET"&&(p==="/configure"||p==="/configure/"))return new Response(renderLegacyConfigurePage({}),{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}});
