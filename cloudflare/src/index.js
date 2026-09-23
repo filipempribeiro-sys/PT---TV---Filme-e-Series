@@ -714,7 +714,7 @@ async function xtreamRequest(config,action){
  for(let attempt=1;attempt<=2;attempt++){
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
   try{
-   const r=await fetch(api,{signal:controller.signal,redirect:"follow",headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64)","Accept":"application/json,*/*","Connection":"close"}});
+   const r=await fetch(api,{signal:controller.signal,redirect:"follow",headers:{"User-Agent":iptvUserAgent(config)||"Mozilla/5.0 (Windows NT 10.0; Win64; x64)","Accept":"application/json,*/*","Connection":"close"}});
    clearTimeout(timeout);
    if(!r.ok)throw new Error(`Xtream respondeu HTTP ${r.status}`);
    return await r.json();
@@ -740,9 +740,9 @@ const IPTVORG_LOGOS_URL="https://iptv-org.github.io/api/logos.json";
 const COUNTRY_MAP={PORTUGAL:"PT",BRASIL:"BR",BRAZIL:"BR",ESPANHA:"ES",SPAIN:"ES","REINO UNIDO":"GB","UNITED KINGDOM":"GB",FRANCA:"FR","FRANÇA":"FR",FRANCE:"FR",ALEMANHA:"DE",GERMANY:"DE",ITALIA:"IT","ITÁLIA":"IT",ITALY:"IT","ESTADOS UNIDOS":"US",USA:"US","UNITED STATES":"US"};
 let iptvOrgCache=null,iptvOrgCacheTime=0;
 function countryCode(v){const s=String(v||"").trim().toUpperCase();if(!s)return"";return s.length===2?s:(COUNTRY_MAP[s]||s)}
-async function getIPTVOrgData(){
+async function getIPTVOrgData(config={}){
  const now=Date.now();if(iptvOrgCache&&now-iptvOrgCacheTime<6*60*60*1000)return iptvOrgCache;
- const headers={"User-Agent":`PT-HUB/${VERSION}`};
+ const headers={"User-Agent":iptvUserAgent(config)};
  const [cr,sr,lr]=await Promise.all([fetch(IPTVORG_CHANNELS_URL,{headers}),fetch(IPTVORG_STREAMS_URL,{headers}),fetch(IPTVORG_LOGOS_URL,{headers}).catch(()=>null)]);
  if(!cr.ok||!sr.ok)throw new Error("Não foi possível obter a base de dados IPTV-org.");
  const channels=await cr.json(),streams=await sr.json();let logos=[];
@@ -754,7 +754,7 @@ async function getIPTVOrgData(){
 }
 async function getIPTVOrgChannels(config){
  const opt=config?.iptvOrg||{},rawCountry=String(opt.country||"").trim(),category=String(opt.category||"").trim().toLowerCase(),country=rawCountry||category?countryCode(rawCountry):"PT";
- const data=await getIPTVOrgData(),out=[];
+ const data=await getIPTVOrgData(config),out=[];
  for(const ch of data.channels){
   if(country&&String(ch.country||"").toUpperCase()!==country)continue;
   if(category&&!(ch.categories||[]).map(x=>String(x).toLowerCase()).some(x=>x===category||x.includes(category)||category.includes(x)))continue;
