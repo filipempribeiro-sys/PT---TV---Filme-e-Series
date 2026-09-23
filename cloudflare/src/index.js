@@ -799,7 +799,6 @@ function validateConfigParity(config){
 export default {async fetch(request,env){
  const url=new URL(request.url),p=url.pathname;
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
- if(request.method==="GET"&&p.startsWith("/provider-logo/")){const id=decodeURIComponent(p.slice("/provider-logo/".length)),logo=await getPtProviderLogo(id);if(!logo)return new Response("Logo indisponível.",{status:404});return new Response(null,{status:302,headers:{Location:logo,"Cache-Control":"public, max-age=21600"}})}
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
  if(request.method==="POST"&&p==="/config-store"){
@@ -821,7 +820,7 @@ export default {async fetch(request,env){
   try{const cfg=await request.json();const err=validateConfigParity(cfg);if(err)return json({success:false,error:err},400);
    if(cfg.mode==="m3u"){const channels=await getIPTVChannels(cfg,env);return json({success:true,message:`Ligação M3U efetuada com sucesso. ${channels.length} canais encontrados.`,channels:channels.length})}
    if(cfg.mode==="iptv-org"){const channels=await getIPTVOrgChannels(cfg);return json({success:true,message:`Ligação IPTV-org efetuada com sucesso. ${channels.length} canais encontrados.`,channels:channels.length})}
-   if(cfg.mode==="xtream"){const data=await xtreamRequest(cfg,null);if(!data?.user_info||Number(data.user_info.auth)!==1)return json({success:false,error:"Autenticação Xtream inválida."},400);return json({success:true,message:"Ligação Xtream efetuada com sucesso."})}
+   if(cfg.mode==="xtream"){const data=await xtreamRequest(cfg,null);if(!data?.user_info||data.user_info.auth!==1)return json({success:false,error:"Autenticação Xtream inválida."},400);return json({success:true,message:"Ligação Xtream efetuada com sucesso."})}
    return json({success:false,error:"Modo IPTV inválido."},400)
   }catch(e){return json({success:false,error:e?.message||"Não foi possível testar a ligação."},500)}
  }
