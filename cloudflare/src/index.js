@@ -19,7 +19,7 @@ const configurePage=()=>new Response(`<!doctype html><html lang="pt"><head><meta
 <div id="iptv-org" class="row"><label>País</label><input id="country" value="PT" maxlength="2"><label>Categoria (opcional)</label><input id="category" placeholder="news, sports…"></div>
 <button id="save">Criar configuração PT•HUB</button><div id="msg" class="msg"></div><p class="small">As credenciais não são gravadas no GitHub. Ficheiros M3U enviados são guardados temporariamente no Workers KV.</p></section></main><script>
 const $=id=>document.getElementById(id),mode=$("mode"),msg=$("msg");function show(){document.querySelectorAll(".row").forEach(x=>x.classList.remove("on"));$(mode.value).classList.add("on")}mode.onchange=show;show();
-$("save").onclick=async()=>{msg.className="msg";msg.textContent="A preparar…";try{let cfg={features:{iptv:true}};if(mode.value==="m3u-url"){if(!$("m3uUrl").value.trim())throw Error("Indica o URL M3U.");cfg={...cfg,mode:"m3u",m3uSource:"url",m3uUrl:$("m3uUrl").value.trim()}}else if(mode.value==="m3u-file"){const f=$("m3uFile").files[0];if(!f)throw Error("Seleciona um ficheiro M3U.");const fd=new FormData();fd.append("file",f);const r=await fetch("/upload-m3u",{method:"POST",body:fd});const d=await r.json();if(!r.ok||!d.success)throw Error(d.error||"Falha no upload.");cfg={...cfg,mode:"m3u",m3uSource:"file",m3uFileId:d.m3uFileId}}else if(mode.value==="xtream"){cfg={...cfg,mode:"xtream",xtreamServer:$("xtreamServer").value.trim(),username:$("username").value.trim(),password:$("password").value};if(!cfg.xtreamServer||!cfg.username||!cfg.password)throw Error("Preenche servidor, utilizador e palavra-passe.")}else{cfg={...cfg,mode:"iptv-org",iptvOrg:{country:$("country").value.trim()||"PT",category:$("category").value.trim()}}}
+$("save").onclick=async()=>{msg.className="msg";msg.textContent="A preparar…";try{let cfg={features:{iptv:true}};if(mode.value==="m3u-url"){if(!$("m3uUrl").value.trim())throw Error("Indica o URL M3U.");cfg={...cfg,mode:"m3u",m3uSource:"url",m3uUrl:$("m3uUrl").value.trim()}}else if(mode.value==="m3u-file"){const f=$("m3uFile").files[0];if(!f)throw Error("Seleciona um ficheiro M3U.");const fd=new FormData();fd.append("file",f);const r=await fetch("/upload-m3u",{method:"POST",body:fd});const d=await r.json();if(!r.ok||!d.id)throw Error(d.error||"Falha no upload.");cfg={...cfg,mode:"m3u",m3uSource:"file",m3uFileId:d.id}}else if(mode.value==="xtream"){cfg={...cfg,mode:"xtream",xtreamServer:$("xtreamServer").value.trim(),username:$("username").value.trim(),password:$("password").value};if(!cfg.xtreamServer||!cfg.username||!cfg.password)throw Error("Preenche servidor, utilizador e palavra-passe.")}else{cfg={...cfg,mode:"iptv-org",iptvOrg:{country:$("country").value.trim()||"PT",category:$("category").value.trim()}}}
 const r=await fetch("/config-store",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(cfg)}),d=await r.json();if(!r.ok||!d.success)throw Error(d.error||"Falha ao criar configuração.");const install=location.origin+"/"+d.token+"/manifest.json";msg.className="msg ok";msg.innerHTML="Configuração criada.<br><br><strong>Manifest:</strong><br><span id='manifestOut'></span><br><br><button id='copyBtn' type='button'>Copiar URL do manifest</button>";$("manifestOut").textContent=install;$("copyBtn").onclick=()=>navigator.clipboard.writeText(install)}catch(e){msg.className="msg err";msg.textContent=e.message||"Erro de configuração."}};
 </script></body></html>`,{headers:{...CORS,"content-type":"text/html; charset=utf-8","Cache-Control":"no-store"}});
 
@@ -749,11 +749,17 @@ async function getStoredM3UChannels(config,env){
 }
 async function getIPTVChannels(config,env){
  if(!config||config?.features?.iptv===false)return[];
- if(config.mode==="m3u"&&config.m3uSource!=="file"&&isHttp(config.m3uUrl))return getM3UChannels(config);
- if(config.mode==="m3u"&&config.m3uFileId)return getStoredM3UChannels(config,env);
- if(config.mode==="m3u"&&config.m3uFileData)return parseM3U(config.m3uFileData,config);
+ await ensureTvLogoWorldIndex();
+ if(config.mode==="m3u"){
+  if(config.m3uSource==="file"){
+   if(config.m3uFileId)return getStoredM3UChannels(config,env);
+   if(config.m3uFileData)return finalizeIPTVChannels(parseM3U(config.m3uFileData,config));
+   throw new Error("Nenhum ficheiro M3U associado a esta configuração.");
+  }
+  return getM3UChannels(config);
+ }
  if(config.mode==="xtream")return getXtreamChannels(config);
- if(config.mode==="iptv-org")return getIPTVOrgChannels(config);
+ if(config.mode==="iptv-org")return finalizeIPTVChannels(await getIPTVOrgChannels(config));
  return[];
 }
 async function channelMeta(x,config){
