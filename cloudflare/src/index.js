@@ -115,6 +115,21 @@ function streamInfoScore(s){return [s?.infoHash,s?.url,s?.title,s?.quality,strea
 function mergeDuplicateStream(a,b){const sa=streamSeeds(a),sb=streamSeeds(b),za=streamSize(a),zb=streamSize(b);let best=a;if(sb>sa||(sb===sa&&zb<za)||(sb===sa&&zb===za&&streamInfoScore(b)>streamInfoScore(a)))best=b;const merged={...best,seeders:Math.max(sa,sb)};const sources=[...new Set([...(Array.isArray(a?.sources)?a.sources:[]),...(Array.isArray(b?.sources)?b.sources:[])].filter(Boolean))];if(sources.length)merged.sources=sources;return merged}
 function normalizeExternalStream(s,source){if(!s||typeof s!=="object")return null;const x={...s,_ptHubSource:String(source?.name||source?.base||source||"external")};if(x.infoHash)x.infoHash=String(x.infoHash).trim().toLowerCase();if(Number.isFinite(Number(x.fileIdx)))x.fileIdx=Number(x.fileIdx);x.seeders=streamSeeds(x);x.leechers=parseCountValue(x?.leechers??x?.behaviorHints?.leechers);const size=streamSize(x);if(Number.isFinite(size))x.size=size;x.quality=streamQuality(x);if(!x.provider)x.provider=streamProviderHint(x,source);if(!x.behaviorHints)x.behaviorHints={};if(!x.behaviorHints.filename&&x.title)x.behaviorHints.filename=String(x.title).split("\n")[0];return x}
 async function externalSourceStreams(source,type,id){const base=normalizeAddonBaseUrl(source?.base||source);if(!validHttp(base))return[];const ctl=new AbortController(),started=Date.now(),timer=setTimeout(()=>ctl.abort(),Math.max(1000,Number(source?.timeout)||6500));try{const r=await fetch(`${base}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`,{signal:ctl.signal,headers:{"User-Agent":"Stremio/4","Accept":"application/json"}});if(!r.ok){console.log(`[PT-HUB][${source?.name||base}] HTTP ${r.status} · ${Date.now()-started}ms`);return[]}const d=await r.json(),streams=(Array.isArray(d?.streams)?d.streams:[]).map(s=>normalizeExternalStream(s,source)).filter(Boolean);console.log(`[PT-HUB][${source?.name||base}] ${streams.length} streams · ${Date.now()-started}ms`);return streams}catch(e){console.log(`[PT-HUB][${source?.name||base}] ${e?.name==="AbortError"?"timeout":"falha"} · ${Date.now()-started}ms`);return[]}finally{clearTimeout(timer)}}
+async function probeStreamSource(source,type,id){
+ const base=normalizeAddonBaseUrl(source?.base||source);
+ if(!validHttp(base))return{id:source?.id||"",name:source?.name||"Unknown",base,ok:false,error:"invalid-url",status:0,streams:0,durationMs:0};
+ const ctl=new AbortController(),started=Date.now(),timeoutMs=Math.max(1000,Number(source?.timeout)||25000),timer=setTimeout(()=>ctl.abort(),timeoutMs);
+ const target=`${base}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`;
+ try{
+  const r=await fetch(target,{signal:ctl.signal,redirect:"follow",headers:{"User-Agent":"Stremio/4","Accept":"application/json"}});
+  const text=await r.text();
+  let data=null;try{data=JSON.parse(text)}catch{}
+  const streams=Array.isArray(data?.streams)?data.streams.length:0;
+  return{id:source?.id||"",name:source?.name||base,base,target,status:r.status,ok:r.ok,streams,durationMs:Date.now()-started,contentType:r.headers.get("content-type")||"",sample:text.slice(0,160)};
+ }catch(e){
+  return{id:source?.id||"",name:source?.name||base,base,target,status:0,ok:false,streams:0,durationMs:Date.now()-started,error:e?.name==="AbortError"?"timeout":String(e?.message||"fetch-failed")};
+ }finally{clearTimeout(timer)}
+}
 function enabledBuiltIns(config){const saved=Array.isArray(config?.builtinStreamSources)?config.builtinStreamSources:null,engineParityDefault=config?.features?.externalSources===false;return BUILT_IN_STREAM_SOURCES.filter(s=>s.enabled&&(saved===null||engineParityDefault||saved.includes(s.id)))}
 function maxPerQuality(config){const n=Number(config?.externalMaxPerQuality);return Number.isFinite(n)?Math.max(1,Math.min(10,Math.trunc(n))):2}
 const MAX_CUSTOM_STREAM_SOURCES=20;
@@ -915,6 +930,14 @@ export default {async fetch(request,env,ctx){
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
+ if(request.method==="GET"&&p==="/api/torrent-diagnostics"){
+  const type=String(url.searchParams.get("type")||"movie").toLowerCase();
+  const id=String(url.searchParams.get("id")||"tt0133093").trim();
+  if(!["movie","series"].includes(type)||!/^tt\d+(?::\d+:\d+)?$/i.test(id))return json({ok:false,error:"Use type=movie|series and an IMDb id such as tt0133093 or tt0903747:1:1"},400,noCache);
+  const sources=[...BUILT_IN_STREAM_SOURCES,...FALLBACK_STREAM_SOURCES];
+  const results=await Promise.all(sources.map(source=>probeStreamSource(source,type,id)));
+  return json({ok:true,type,id,results,summary:Object.fromEntries(results.map(x=>[x.name,{status:x.status,streams:x.streams,durationMs:x.durationMs,error:x.error||null}]))},200,noCache);
+ }
  if(request.method==="POST"&&p==="/config-store"){
   try{const c=await request.json();if(!c||typeof c!=="object"||Array.isArray(c))return json({success:false,error:"Configuração inválida."},400);const max=Number(c.externalMaxPerQuality??2);if(!Number.isFinite(max)||max<1||max>10)return json({success:false,error:"O máximo de resultados por qualidade tem de estar entre 1 e 10."},400);if(customStreamSourceBases(c).length>MAX_CUSTOM_STREAM_SOURCES)return json({success:false,error:`Podes configurar no máximo ${MAX_CUSTOM_STREAM_SOURCES} addons de streams externos.`},400);if(c?.features?.iptv){const err=validateConfigParity(c);if(err)return json({success:false,error:err},400)}return json({success:true,token:encodeConfig(c),persistent:true})}
   catch(e){return json({success:false,error:e.message||"Não foi possível criar a configuração."},e.message==="Configuração demasiado grande."?413:500)}
