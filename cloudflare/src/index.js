@@ -180,12 +180,17 @@ async function hlsProxy(request,url,profile,target,customUserAgent="",configToke
   const upstream=await fetch(target,{headers,redirect:"follow",signal:controller.signal});
   clearTimeout(timeout);
   if(!upstream.ok)return new Response(`HLS upstream HTTP ${upstream.status}`,{status:upstream.status,headers:{...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"}});
-  const buffer=await upstream.arrayBuffer(),bytes=new Uint8Array(buffer),ct=upstream.headers.get("content-type")||"",prefix=new TextDecoder().decode(bytes.slice(0,64)).trimStart();
-  const playlist=ct.toLowerCase().includes("mpegurl")||/\.m3u8(?:$|[?#])/i.test(target)||prefix.startsWith("#EXTM3U");
+  const ct=upstream.headers.get("content-type")||"",ctl=ct.toLowerCase(),playlistByUrl=/\.m3u8(?:$|[?#])/i.test(target),playlistByType=ctl.includes("mpegurl")||ctl.includes("application/vnd.apple"),maybePlaylist=playlistByUrl||playlistByType||ctl.includes("text/plain")||ctl.includes("text/");
   const common={...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"};
+  if(!maybePlaylist){
+   const out=new Headers(common);
+   for(const k of ["content-type","content-length","content-range","accept-ranges","etag","last-modified"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
+   return new Response(upstream.body,{status:upstream.status,headers:out});
+  }
+  const buffer=await upstream.arrayBuffer(),bytes=new Uint8Array(buffer),prefix=new TextDecoder().decode(bytes.slice(0,64)).trimStart(),playlist=playlistByUrl||playlistByType||prefix.startsWith("#EXTM3U");
   if(!playlist){
-   const out=new Headers(common);if(ct)out.set("Content-Type",ct);
-   for(const k of ["content-range","accept-ranges"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
+   const out=new Headers(common);
+   for(const k of ["content-type","content-length","content-range","accept-ranges","etag","last-modified"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
    return new Response(buffer,{status:upstream.status,headers:out});
   }
   const base=upstream.url||target,text=new TextDecoder().decode(bytes);
