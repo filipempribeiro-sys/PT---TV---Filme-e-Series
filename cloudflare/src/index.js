@@ -3,7 +3,7 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { Buffer } from "node:buffer";
 
-const VERSION="3.1.10";
+const VERSION="3.1.11";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
@@ -1032,7 +1032,13 @@ export default {async fetch(request,env,ctx){
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
  if(request.method==="GET"&&p==="/api/last-stream-request")return json({ok:true,last:await readStreamTrace(env)},200,noCache);
- if(request.method==="GET"&&p==="/api/client-trace")return json({ok:true,events:await readClientTrace(env)},200,noCache);
+ if(request.method==="GET"&&p==="/api/client-trace"){
+  let storageRoundtrip=false;
+  try{
+   if(env?.PT_HUB_M3U){const k="diag:roundtrip:"+crypto.randomUUID();await env.PT_HUB_M3U.put(k,"ok",{expirationTtl:60});storageRoundtrip=(await env.PT_HUB_M3U.get(k))==="ok";await env.PT_HUB_M3U.delete(k);}
+  }catch{}
+  return json({ok:true,storageRoundtrip,events:await readClientTrace(env)},200,noCache);
+ }
  if(request.method==="GET"&&p==="/api/client-trace-clear"){if(env?.PT_HUB_M3U){await env.PT_HUB_M3U.delete("diag:client-trace");await env.PT_HUB_M3U.delete("diag:last-stream-request");}return json({ok:true,events:[]},200,noCache);}
  if(request.method==="GET"&&p==="/api/trace-selftest"){const marker={route:"selftest",type:"movie",id:"tt0133093",streams:5,durationMs:1,ok:true};await recordClientTrace(env,{kind:"stream",...marker});return json({ok:true,wrote:marker,last:await readStreamTrace(env)},200,noCache);}
  if(request.method==="GET"&&p==="/api/torrent-diagnostics"){
@@ -1087,6 +1093,34 @@ export default {async fetch(request,env,ctx){
   catch(e){return json({ok:false,storage:"kv",binding:"PT_HUB_M3U",error:e?.message||"Falha KV."},500)}
  }
  if(request.method==="GET"&&p.startsWith("/provider-logo/")){const providerId=decodeURIComponent(p.slice("/provider-logo/".length));const logo=await getPtProviderLogo(providerId);if(!logo)return new Response("Logo indisponível.",{status:404,headers:CORS});return new Response(null,{status:302,headers:{...CORS,Location:logo,"Cache-Control":"public, max-age=21600"}});}
+ if(request.method==="GET"&&p==="/diag/manifest.json"){
+  const event={kind:"manifest",route:"diagnostic",ua:String(request.headers.get("user-agent")||"").slice(0,160)};
+  if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,event));else await recordClientTrace(env,event);
+  return json({
+   id:"pt.filipe.nuvio.tvhub.diag",
+   version:VERSION,
+   name:"PT•HUB DIAG",
+   description:"PT•HUB diagnostic stream transport",
+   resources:[{name:"stream",types:["movie","series"],idPrefixes:["tt"]}],
+   types:["movie","series"],
+   idPrefixes:["tt"],
+   catalogs:[],
+   behaviorHints:{configurable:false,configurationRequired:false,p2p:true}
+  },200,noCache);
+ }
+ let diagStream=p.match(/^\/diag\/stream\/(movie|series)\/([^/]+)\.json$/);
+ if(request.method==="GET"&&diagStream){
+  const started=Date.now(),type=decodeURIComponent(diagStream[1]),id=decodeURIComponent(diagStream[2]);
+  try{
+   const streams=await externalStreams(null,type,id,url.hostname,ctx),trace={route:"diagnostic",type,id,streams:streams.length,durationMs:Date.now()-started,ok:true};
+   if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,{kind:"stream",...trace}));else await recordClientTrace(env,{kind:"stream",...trace});
+   return json({streams},200,noCache);
+  }catch(e){
+   const trace={route:"diagnostic",type,id,streams:0,durationMs:Date.now()-started,ok:false,error:String(e?.message||"unknown")};
+   if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,{kind:"stream",...trace}));else await recordClientTrace(env,{kind:"stream",...trace});
+   return json({streams:[]},200,noCache);
+  }
+ }
  if(request.method==="GET"&&p==="/manifest.json"){
   const event={kind:"manifest",route:"root",ua:String(request.headers.get("user-agent")||"").slice(0,160)};
   if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,event));else await recordClientTrace(env,event);
