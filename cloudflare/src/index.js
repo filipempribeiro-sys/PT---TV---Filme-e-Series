@@ -3,7 +3,7 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { Buffer } from "node:buffer";
 
-const VERSION="3.1.9";
+const VERSION="3.1.10";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
@@ -999,11 +999,16 @@ function validateConfigParity(config){
  if(String(config.globalUserAgent||"").length>512)return "O User-Agent personalizado não pode exceder 512 caracteres.";
  return null;
 }
-async function recordStreamTrace(env,entry){
+async function recordClientTrace(env,entry){
  try{
   if(!env?.PT_HUB_M3U)return;
-  const payload=JSON.stringify({...entry,version:VERSION,at:new Date().toISOString()});
-  await env.PT_HUB_M3U.put("diag:last-stream-request",payload,{expirationTtl:3600});
+  const event={...entry,version:VERSION,at:new Date().toISOString()};
+  const oldRaw=await env.PT_HUB_M3U.get("diag:client-trace");
+  let events=[];try{events=oldRaw?JSON.parse(oldRaw):[]}catch{}
+  if(!Array.isArray(events))events=[];
+  events.push(event);events=events.slice(-20);
+  await env.PT_HUB_M3U.put("diag:client-trace",JSON.stringify(events),{expirationTtl:3600});
+  if(entry.kind==="stream")await env.PT_HUB_M3U.put("diag:last-stream-request",JSON.stringify(event),{expirationTtl:3600});
  }catch{}
 }
 async function readStreamTrace(env){
@@ -1013,13 +1018,23 @@ async function readStreamTrace(env){
   return raw?JSON.parse(raw):null;
  }catch{return null}
 }
+async function readClientTrace(env){
+ try{
+  if(!env?.PT_HUB_M3U)return[];
+  const raw=await env.PT_HUB_M3U.get("diag:client-trace");
+  const events=raw?JSON.parse(raw):[];
+  return Array.isArray(events)?events:[];
+ }catch{return[]}
+}
 export default {async fetch(request,env,ctx){
  const url=new URL(request.url),p=url.pathname;
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
  if(request.method==="GET"&&p==="/api/last-stream-request")return json({ok:true,last:await readStreamTrace(env)},200,noCache);
- if(request.method==="GET"&&p==="/api/trace-selftest"){const marker={route:"selftest",type:"movie",id:"tt0133093",streams:5,durationMs:1,ok:true};await recordStreamTrace(env,marker);return json({ok:true,wrote:marker,last:await readStreamTrace(env)},200,noCache);}
+ if(request.method==="GET"&&p==="/api/client-trace")return json({ok:true,events:await readClientTrace(env)},200,noCache);
+ if(request.method==="GET"&&p==="/api/client-trace-clear"){if(env?.PT_HUB_M3U){await env.PT_HUB_M3U.delete("diag:client-trace");await env.PT_HUB_M3U.delete("diag:last-stream-request");}return json({ok:true,events:[]},200,noCache);}
+ if(request.method==="GET"&&p==="/api/trace-selftest"){const marker={route:"selftest",type:"movie",id:"tt0133093",streams:5,durationMs:1,ok:true};await recordClientTrace(env,{kind:"stream",...marker});return json({ok:true,wrote:marker,last:await readStreamTrace(env)},200,noCache);}
  if(request.method==="GET"&&p==="/api/torrent-diagnostics"){
   const type=String(url.searchParams.get("type")||"movie").toLowerCase();
   const id=String(url.searchParams.get("id")||"tt0133093").trim();
@@ -1072,18 +1087,22 @@ export default {async fetch(request,env,ctx){
   catch(e){return json({ok:false,storage:"kv",binding:"PT_HUB_M3U",error:e?.message||"Falha KV."},500)}
  }
  if(request.method==="GET"&&p.startsWith("/provider-logo/")){const providerId=decodeURIComponent(p.slice("/provider-logo/".length));const logo=await getPtProviderLogo(providerId);if(!logo)return new Response("Logo indisponível.",{status:404,headers:CORS});return new Response(null,{status:302,headers:{...CORS,Location:logo,"Cache-Control":"public, max-age=21600"}});}
- if(request.method==="GET"&&p==="/manifest.json")return json(await manifest(null),200,noCache);
+ if(request.method==="GET"&&p==="/manifest.json"){
+  const event={kind:"manifest",route:"root",ua:String(request.headers.get("user-agent")||"").slice(0,160)};
+  if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,event));else await recordClientTrace(env,event);
+  return json(await manifest(null),200,noCache);
+ }
  let rootStream=p.match(/^\/stream\/(movie|series)\/([^/]+)\.json$/);
  if(request.method==="GET"&&rootStream){
   const started=Date.now(),type=decodeURIComponent(rootStream[1]),id=decodeURIComponent(rootStream[2]);
   try{
    const streams=await externalStreams(null,type,id,url.hostname,ctx);
    const trace={route:"root",type,id,streams:streams.length,durationMs:Date.now()-started,ok:true};
-   if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
+   if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,{kind:"stream",...trace}));else await recordClientTrace(env,{kind:"stream",...trace});
    return json({streams});
   }catch(e){
    const trace={route:"root",type,id,streams:0,durationMs:Date.now()-started,ok:false,error:String(e?.message||"unknown")};
-   if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
+   if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,{kind:"stream",...trace}));else await recordClientTrace(env,{kind:"stream",...trace});
    console.log(`[PT-HUB][RootStream] falha ${e?.message||"desconhecida"}`);
    return json({streams:[]});
   }
@@ -1112,13 +1131,13 @@ export default {async fetch(request,env,ctx){
    if(type==="movie"||type==="series"){
     if(id.startsWith("pthubptmeta:"))return json({streams:(await ptExternalStreams(cfg,type,id))||[]});
     const started=Date.now(),streams=await externalStreams(cfg,type,id,url.hostname,ctx),trace={route:"configured",type,id,streams:streams.length,durationMs:Date.now()-started,ok:true,configValid:!!cfg};
-    if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
+    if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,{kind:"stream",...trace}));else await recordClientTrace(env,{kind:"stream",...trace});
     return json({streams});
    }
    return json({streams:[]});
   }catch(e){
    const trace={route:"configured",type:st?.[2]?decodeURIComponent(st[2]):"",id:st?.[3]?decodeURIComponent(st[3]):"",streams:0,durationMs:0,ok:false,error:String(e?.message||"unknown")};
-   if(ctx?.waitUntil)ctx.waitUntil(recordStreamTrace(env,trace));else await recordStreamTrace(env,trace);
+   if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,{kind:"stream",...trace}));else await recordClientTrace(env,{kind:"stream",...trace});
    return json({streams:[]});
   }
  }
@@ -1126,7 +1145,11 @@ export default {async fetch(request,env,ctx){
  if(request.method==="GET"&&mm){const cfg=decodeConfig(mm[1]),type=decodeURIComponent(mm[2]),id=decodeURIComponent(mm[3]);if(type==="channel"&&id.startsWith("operator:")){const operatorId=id.split(":")[1],op=OPERATORS.find(x=>x.id===operatorId),channels=Array.isArray(op?.channels)?op.channels.map((ch,i)=>({id:`operator:${op.id}:${ch.id||i}`,name:ch.name||op.name,logo:ch.logo||op.logo||PT_HUB_LOGO,group:op.name})):[],ch=channels.find(x=>x.id===id);return json({meta:ch?{id:ch.id,type:"channel",name:ch.name,poster:buildPoster(url.origin,ch.logo),logo:ch.logo,description:ch.group?`Operador: ${ch.group}`:""}:null})}if(id.startsWith("rtpplay:")){const x=RTP_PLAY_CHANNELS.find(c=>c.id===id);return json({meta:x?{id:x.id,type:"channel",name:x.name,poster:buildPoster(url.origin,x.logo),logo:x.logo,description:x.group,website:`https://www.rtp.pt/play/direto/${encodeURIComponent(x.slug)}`}:null})}if(type==="channel"&&(id.startsWith("m3u:")||id.startsWith("xtream:")||id.startsWith("iptvorg:"))){try{if(!cfg)return json({meta:null});const ch=(await getIPTVChannels(cfg,env)).find(x=>x.id===id);if(!ch)return json({meta:null});const m=await channelMeta(ch,cfg);m.posterShape="poster";m.poster=buildPoster(url.origin,m.logo||PT_HUB_LOGO);return json({meta:m})}catch{return json({meta:null})}}if(id.startsWith("pthubptmeta:")){const d=await ptExternalMeta(cfg,type,id);return json(d||{meta:null})}const v=await meta(type,id);return json({meta:v||null});}
  let sm=p.match(new RegExp("^/([^/]+)/subtitles/([^/]+)/([^/]+?)(?:/([^/]+))?\\.json$"));
  if(request.method==="GET"&&sm){const cfg=decodeConfig(sm[1]);return json({subtitles:await getSubtitles(cfg,decodeURIComponent(sm[2]),decodeURIComponent(sm[3]),sm[4]?decodeURIComponent(sm[4]):"")});}
- let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){const cfg=decodeConfig(m[1]);return json(await manifest(cfg),200,noCache)}
+ let m=p.match(/^\/([^/]+)\/manifest\.json$/); if(request.method==="GET"&&m){
+  const cfg=decodeConfig(m[1]),event={kind:"manifest",route:"configured",configValid:!!cfg,ua:String(request.headers.get("user-agent")||"").slice(0,160)};
+  if(ctx?.waitUntil)ctx.waitUntil(recordClientTrace(env,event));else await recordClientTrace(env,event);
+  return json(await manifest(cfg),200,noCache)
+ }
  m=p.match(/^\/([^/]+)\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{const cfg=decodeConfig(m[1]);let channelHeaders={};try{channelHeaders=JSON.parse(Buffer.from(url.searchParams.get("ch")||"","base64url").toString("utf8")||"{}")}catch{}return await hlsProxy(request,url,decodeURIComponent(m[2]),Buffer.from(m[3],"base64url").toString("utf8"),cfg?.globalUserAgent||"",m[1],channelHeaders)}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
  m=p.match(/^\/hls-proxy\/([^/]+)\/([^/]+)$/); if(request.method==="GET"&&m){try{return await hlsProxy(request,url,decodeURIComponent(m[1]),Buffer.from(m[2],"base64url").toString("utf8"))}catch(e){return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:CORS})}}
  if(request.method==="GET"&&p==="/")return new Response(null,{status:302,headers:{...CORS,Location:"/configure"}});
