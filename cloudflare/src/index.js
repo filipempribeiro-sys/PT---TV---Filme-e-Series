@@ -118,7 +118,8 @@ const MAX_PARALLEL_STREAM_SOURCES=6;
 async function settleStreamSources(sources,type,id){const settled=[];for(let i=0;i<sources.length;i+=MAX_PARALLEL_STREAM_SOURCES){const batch=sources.slice(i,i+MAX_PARALLEL_STREAM_SOURCES);settled.push(...await Promise.allSettled(batch.map(x=>externalSourceStreams(x,type,id))))}return settled}
 async function externalCacheKey(type,id,config,hostname=""){const built=enabledBuiltIns(config).map(x=>x.id).sort(),custom=customStreamSourceBases(config).slice(0,MAX_CUSTOM_STREAM_SOURCES).sort(),max=maxPerQuality(config),sig=await hashId(JSON.stringify({built,custom,max})),host=String(hostname||"").trim().toLowerCase()||"pt-hub.invalid";return `https://${host}/__pt_hub_cache/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}?v=${sig}`}
 async function externalStreams(config,type,id,hostname="",ctx=null){
- if(config?.features?.externalSources===false)return[];
+ const hasExplicitBuiltInSelection=Array.isArray(config?.builtinStreamSources);
+ if(config?.features?.externalSources===false&&hasExplicitBuiltInSelection)return[];
  const builtins=enabledBuiltIns(config),allCustom=customStreamSourceBases(config),custom=allCustom.slice(0,MAX_CUSTOM_STREAM_SOURCES).map((base,i)=>({id:`custom-${i}`,name:`Custom ${i+1}`,base,enabled:true,timeout:6500,priority:100+i})),sources=[...builtins,...custom];if(allCustom.length>MAX_CUSTOM_STREAM_SOURCES)console.log(`[PT-HUB][Aggregator] custom sources limited to ${MAX_CUSTOM_STREAM_SOURCES} of ${allCustom.length}`);
  if(!sources.length)return[];
  const key=await externalCacheKey(type,id,config,hostname),cache=typeof caches!=="undefined"?caches.default:null;
