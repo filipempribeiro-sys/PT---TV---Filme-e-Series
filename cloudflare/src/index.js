@@ -670,6 +670,18 @@ function normalizeUrl(v){return String(v||"").trim().replace(/\/+$/,"")}
 async function hashId(v){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("").slice(0,24)}
 function isIgnorableIptvChannelName(name){const v=String(name||"").trim();return /^(?:data|date)\s*[-:]\s*\d{4}-\d{2}-\d{2}$/i.test(v)||/^(?:expira|expires?|validade)\s*[-:]\s*\d{4}-\d{2}-\d{2}$/i.test(v)}
 function finalizeIPTVChannels(channels){return(Array.isArray(channels)?channels:[]).filter(ch=>!isIgnorableIptvChannelName(ch?.name))}
+function iptvUserAgent(config){return String(config?.globalUserAgent||"").trim()||`PT-HUB/${VERSION}`}
+function xmlDecode(v){return String(v||"").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&")}
+function xmlTag(block,name){const m=String(block||"").match(new RegExp("<"+name+"(?:\\s[^>]*)?>([\\s\\S]*?)<\\/"+name+">","i"));return m?xmlDecode(m[1].replace(/<[^>]+>/g,"").trim()):""}
+function xmlAttr(tag,name){return xmlDecode(String(tag||"").match(new RegExp(name+'=["\\\']([^"\\\']*)["\\\']',"i"))?.[1]||"")}
+function parseXmltvTime(v){const m=String(v||"").trim().match(/^(\\d{4})(\\d{2})(\\d{2})(\\d{2})(\\d{2})(\\d{2})(?:\\s*([+-])(\\d{2})(\\d{2}))?/);if(!m)return null;let t=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]);if(m[7]){const off=(+m[8]*60 + +m[9])*60000;t+=m[7]==="+"?-off:off}return t}
+function parseXmltv(xml,offsetHours=0){const by=new Map(),off=(Number(offsetHours)||0)*3600000;for(const hit of String(xml||"").matchAll(/<programme\\b([^>]*)>([\\s\\S]*?)<\\/programme>/gi)){const ch=xmlAttr(hit[1],"channel"),start=parseXmltvTime(xmlAttr(hit[1],"start")),stop=parseXmltvTime(xmlAttr(hit[1],"stop"));if(!ch||start==null)continue;const item={start:start+off,stop:stop==null?null:stop+off,title:xmlTag(hit[2],"title"),desc:xmlTag(hit[2],"desc")};const a=by.get(ch)||[];a.push(item);by.set(ch,a)}for(const a of by.values())a.sort((x,y)=>x.start-y.start);return by}
+function m3uPlaylistEpgUrl(content){const head=String(content||"").split(/\\r?\\n/,1)[0]||"";return xmlAttr(head,"url-tvg")||xmlAttr(head,"x-tvg-url")}
+const epgCache=new Map();
+async function fetchEpg(url,config,offset=0){if(!isHttp(url))return new Map();const key=url+"|"+offset,old=epgCache.get(key);if(old&&Date.now()-old.t<15*60*1000)return old.v;const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),20000);try{const r=await fetch(url,{signal:ctl.signal,redirect:"follow",headers:{"User-Agent":iptvUserAgent(config),"Accept":"application/xml,text/xml,*/*"}});if(!r.ok)throw new Error("EPG HTTP "+r.status);const v=parseXmltv(await r.text(),offset);epgCache.set(key,{t:Date.now(),v});return v}finally{clearTimeout(timer)}}
+function attachEpg(channels,guide){if(!(guide instanceof Map)||!guide.size)return channels;const now=Date.now();return channels.map(ch=>{const keys=[ch.tvgId,ch.tvgName,ch.name].map(x=>String(x||"").trim()).filter(Boolean);let items=[];for(const k of keys){items=guide.get(k)||items;if(items.length)break}const current=items.find(x=>x.start<=now&&(x.stop==null||x.stop>now))||items.find(x=>x.start>now);return current?{...ch,epg:{title:current.title||"",description:current.desc||"",start:new Date(current.start).toISOString(),stop:current.stop==null?null:new Date(current.stop).toISOString()}}:ch})}
+async function applyM3UEpg(channels,content,config){if(config?.m3uEpgMode==="none")return channels;const epgUrl=config?.m3uEpgMode==="url"?config?.epgUrl:(config?.m3uEpgMode==="playlist"?m3uPlaylistEpgUrl(content):"");if(!epgUrl)return channels;try{return attachEpg(channels,await fetchEpg(epgUrl,config,config?.m3uEpgOffset))}catch{return channels}}
+async function applyXtreamEpg(channels,config){if(config?.xtreamEpgMode==="none")return channels;let epgUrl=config?.xtreamEpgMode==="url"?config?.xtreamEpgUrl:"";if(!epgUrl&&config?.xtreamEpgMode==="auto"){const server=normalizeUrl(config?.xtreamServer);epgUrl=`${server}/xmltv.php?username=${encodeURIComponent(config?.username||"")}&password=${encodeURIComponent(config?.password||"")}`}if(!epgUrl)return channels;try{return attachEpg(channels,await fetchEpg(epgUrl,config,config?.xtreamEpgOffset))}catch{return channels}}
 async function parseM3U(content,config=null){
  const lines=String(content||"").replace(/\r/g,"").split("\n"),out=[];let info=null;
  for(const raw of lines){const line=raw.trim();if(!line)continue;
@@ -683,11 +695,11 @@ async function getM3UChannels(config){
  for(let attempt=1;attempt<=2;attempt++){
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),25000);
   try{
-   const r=await fetch(config.m3uUrl,{signal:controller.signal,headers:{"User-Agent":`PT-HUB/${VERSION}`}});
+   const r=await fetch(config.m3uUrl,{signal:controller.signal,headers:{"User-Agent":iptvUserAgent(config)}});
    clearTimeout(timeout);
    if(!r.ok)throw new Error(`Não foi possível obter a lista M3U. HTTP ${r.status}`);
    const text=await r.text();if(!text.trim())throw new Error("A lista M3U está vazia.");
-   return finalizeIPTVChannels(parseM3U(text,config));
+   return finalizeIPTVChannels(await applyM3UEpg(await parseM3U(text,config),text,config));
   }catch(e){clearTimeout(timeout);lastError=e;if(attempt<2)await new Promise(resolve=>setTimeout(resolve,1500))}
  }
  throw lastError;
@@ -719,7 +731,7 @@ async function getXtreamChannels(config){
  const data=await xtreamRequest(config,"get_live_streams");
  if(!Array.isArray(data))return[];
  const server=normalizeUrl(config.xtreamServer);
- return finalizeIPTVChannels(data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||findChannelLogo([x.name||x.stream_display_name||"",x.epg_channel_id||""],config),group:x.category_name||"TV",tvgId:x.epg_channel_id||"",tvgName:x.name||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}}));
+ return finalizeIPTVChannels(await applyXtreamEpg(data.map(x=>{const id=String(x.stream_id||x.id||"");return{id:`xtream:${id}`,type:"channel",name:x.name||x.stream_display_name||"Canal Xtream",logo:x.stream_icon||x.logo||findChannelLogo([x.name||x.stream_display_name||"",x.epg_channel_id||""],config),group:x.category_name||"TV",tvgId:x.epg_channel_id||"",tvgName:x.name||"",url:`${server}/live/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(id)}.ts`}}),config));
 }
 
 const IPTVORG_CHANNELS_URL="https://iptv-org.github.io/api/channels.json";
