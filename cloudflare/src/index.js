@@ -642,7 +642,21 @@ async function parseM3U(content,config=null){
   if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo||findChannelLogo([info.name,info.tvgName,info.tvgId],config),group:info.group,tvgId:info.tvgId,tvgName:info.tvgName,url:line});info=null}
  }return finalizeIPTVChannels(out);
 }
-async function getM3UChannels(config){const r=await fetch(config.m3uUrl,{headers:{"User-Agent":"PT-HUB/3.1.5"}});if(!r.ok)throw new Error("M3U HTTP "+r.status);return parseM3U(await r.text(),config)}
+async function getM3UChannels(config){
+ if(!isHttp(config?.m3uUrl))throw new Error("URL M3U inválido.");
+ let lastError=null;
+ for(let attempt=1;attempt<=2;attempt++){
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),25000);
+  try{
+   const r=await fetch(config.m3uUrl,{signal:controller.signal,headers:{"User-Agent":`PT-HUB/${VERSION}`}});
+   clearTimeout(timeout);
+   if(!r.ok)throw new Error(`Não foi possível obter a lista M3U. HTTP ${r.status}`);
+   const text=await r.text();if(!text.trim())throw new Error("A lista M3U está vazia.");
+   return finalizeIPTVChannels(parseM3U(text,config));
+  }catch(e){clearTimeout(timeout);lastError=e;if(attempt<2)await new Promise(resolve=>setTimeout(resolve,1500))}
+ }
+ throw lastError;
+}
 async function getXtreamChannels(config){
  const server=normalizeUrl(config.xtreamServer);if(!isHttp(server)||!config.username||!config.password)return[];
  const api=`${server}/player_api.php?username=${encodeURIComponent(config.username)}&password=${encodeURIComponent(config.password)}&action=get_live_streams`;
@@ -666,9 +680,11 @@ async function getIPTVOrgChannels(config){
 }
 
 async function getStoredM3UChannels(config,env){
- if(!config?.m3uFileId||!env?.PT_HUB_M3U)return[];
+ if(!config?.m3uFileId)throw new Error("Nenhum ficheiro M3U associado a esta configuração.");
+ if(!env?.PT_HUB_M3U)throw new Error("Armazenamento M3U indisponível.");
  const raw=await env.PT_HUB_M3U.get(`m3u:${config.m3uFileId}`);
- return raw?parseM3U(raw,config):[];
+ if(!raw)throw new Error("O ficheiro M3U expirou ou não foi encontrado. Volta a carregar o ficheiro na página de configuração e gera um novo link de instalação.");
+ return finalizeIPTVChannels(parseM3U(raw,config));
 }
 async function getIPTVChannels(config,env){
  if(!config||config?.features?.iptv===false)return[];
