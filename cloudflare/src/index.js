@@ -691,14 +691,30 @@ const IPTVORG_CHANNELS_URL="https://iptv-org.github.io/api/channels.json";
 const IPTVORG_STREAMS_URL="https://iptv-org.github.io/api/streams.json";
 const IPTVORG_LOGOS_URL="https://iptv-org.github.io/api/logos.json";
 const COUNTRY_MAP={PORTUGAL:"PT",BRASIL:"BR",BRAZIL:"BR",ESPANHA:"ES",SPAIN:"ES","REINO UNIDO":"GB","UNITED KINGDOM":"GB",FRANCA:"FR","FRANÇA":"FR",FRANCE:"FR",ALEMANHA:"DE",GERMANY:"DE",ITALIA:"IT","ITÁLIA":"IT",ITALY:"IT","ESTADOS UNIDOS":"US",USA:"US","UNITED STATES":"US"};
-function countryCode(v){const s=String(v||"").trim().toUpperCase();return s.length===2?s:(COUNTRY_MAP[s]||s)}
+let iptvOrgCache=null,iptvOrgCacheTime=0;
+function countryCode(v){const s=String(v||"").trim().toUpperCase();if(!s)return"";return s.length===2?s:(COUNTRY_MAP[s]||s)}
+async function getIPTVOrgData(){
+ const now=Date.now();if(iptvOrgCache&&now-iptvOrgCacheTime<6*60*60*1000)return iptvOrgCache;
+ const headers={"User-Agent":`PT-HUB/${VERSION}`};
+ const [cr,sr,lr]=await Promise.all([fetch(IPTVORG_CHANNELS_URL,{headers}),fetch(IPTVORG_STREAMS_URL,{headers}),fetch(IPTVORG_LOGOS_URL,{headers}).catch(()=>null)]);
+ if(!cr.ok||!sr.ok)throw new Error("Não foi possível obter a base de dados IPTV-org.");
+ const channels=await cr.json(),streams=await sr.json();let logos=[];
+ try{if(lr?.ok)logos=await lr.json()}catch{logos=[]}
+ const by=new Map(),logo=new Map();
+ for(const s of streams){if(s.channel&&s.url){const a=by.get(s.channel)||[];a.push(s);by.set(s.channel,a)}}
+ for(const x of logos)if(x.channel&&!logo.has(x.channel))logo.set(x.channel,x.url);
+ iptvOrgCache={channels,streamsByChannel:by,logoByChannel:logo};iptvOrgCacheTime=now;return iptvOrgCache;
+}
 async function getIPTVOrgChannels(config){
- const opt=config?.iptvOrg||{}, rawCountry=String(opt.country||"").trim(), category=String(opt.category||"").trim().toLowerCase(), country=rawCountry||category?countryCode(rawCountry):"PT";
- const [cr,sr,lr]=await Promise.all([fetch(IPTVORG_CHANNELS_URL),fetch(IPTVORG_STREAMS_URL),fetch(IPTVORG_LOGOS_URL).catch(()=>null)]);
- if(!cr.ok||!sr.ok)throw new Error("IPTV-org indisponível");
- const channels=await cr.json(),streams=await sr.json(),logos=lr?.ok?await lr.json():[];
- const by=new Map(),logo=new Map();for(const s of streams){if(s.channel&&s.url){const a=by.get(s.channel)||[];a.push(s);by.set(s.channel,a)}}for(const x of logos)if(x.channel&&!logo.has(x.channel))logo.set(x.channel,x.url);
- const out=[];for(const ch of channels){if(country&&String(ch.country||"").toUpperCase()!==country)continue;if(category&&!(ch.categories||[]).map(x=>String(x).toLowerCase()).some(x=>x===category||x.includes(category)||category.includes(x)))continue;const ss=by.get(ch.id)||[];if(!ss.length)continue;out.push({id:`iptvorg:${ch.id}`,type:"channel",name:ch.name||ch.id,logo:ch.logo||logo.get(ch.id)||"",group:ch.categories?.[0]||"TV",tvgId:ch.id,url:ss[0].url})}return out;
+ const opt=config?.iptvOrg||{},rawCountry=String(opt.country||"").trim(),category=String(opt.category||"").trim().toLowerCase(),country=rawCountry||category?countryCode(rawCountry):"PT";
+ const data=await getIPTVOrgData(),out=[];
+ for(const ch of data.channels){
+  if(country&&String(ch.country||"").toUpperCase()!==country)continue;
+  if(category&&!(ch.categories||[]).map(x=>String(x).toLowerCase()).some(x=>x===category||x.includes(category)||category.includes(x)))continue;
+  const ss=data.streamsByChannel.get(ch.id)||[];if(!ss.length)continue;
+  out.push({id:`iptvorg:${ch.id}`,type:"channel",name:ch.name||ch.id,logo:ch.logo||data.logoByChannel.get(ch.id)||"",group:ch.categories?.[0]||"TV",tvgId:ch.id,url:ss[0].url});
+ }
+ return out;
 }
 
 async function getStoredM3UChannels(config,env){
