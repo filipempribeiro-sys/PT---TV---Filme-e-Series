@@ -139,7 +139,20 @@ async function manifest(config=null){
    const selected=Array.isArray(features.selectedOperators)?features.selectedOperators:[];
    for(const op of OPERATORS) if(!hasConfig||selected.includes(op.id)) add("channel",op.id,op.name);
  }
- if(showPt){const ps=features.ptContentSources||{};for(const a of PT_AGG)if((a.group==="ptpt"&&ps.ptPt===true&&ptSourceUrls(config,"ptpt").length)||(a.group==="portuguese"&&ps.portugueseProduction===true&&ptSourceUrls(config,"portuguese").length))catalogs.push({type:a.type,id:a.id,name:a.name,extra:[{name:"search",isRequired:false}]});try{for(const c of await ptExternalIdentityCatalogs(config))catalogs.push(c)}catch{}}
+ if(showPt){
+  const fixed=PT_AGG.map(a=>({type:a.type,id:a.id,name:a.name,extra:[{name:"search",isRequired:false}]}));
+  let external=[];try{external=await ptExternalIdentityCatalogs(config)}catch{}
+  const ptptExternal=external.filter(x=>String(x?.id||"").startsWith("pthubpt:ptpt:"));
+  const portugueseExternal=external.filter(x=>String(x?.id||"").startsWith("pthubpt:portuguese:"));
+  const ptptFixed=fixed.filter(x=>String(x.id).startsWith("pthub-ptpt-"));
+  const portugueseFixed=fixed.filter(x=>String(x.id).startsWith("pthub-portuguese-"));
+  catalogs.push(...(ptptExternal.length?ptptExternal:ptptFixed));
+  const portuguese=[...portugueseExternal],norm=v=>normText(v),isNovela=x=>/novela/.test(norm(`${x?.id||""} ${x?.name||""}`));
+  if(!portuguese.some(x=>x?.type==="movie")){const x=portugueseFixed.find(x=>x.id==="pthub-portuguese-movies");if(x)portuguese.push(x)}
+  if(!portuguese.some(x=>x?.type==="series"&&!isNovela(x))){const x=portugueseFixed.find(x=>x.id==="pthub-portuguese-series");if(x)portuguese.push(x)}
+  if(!portuguese.some(x=>x?.type==="series"&&isNovela(x))){const x=portugueseFixed.find(x=>x.id==="pthub-portuguese-novelas");if(x)portuguese.push(x)}
+  catalogs.push(...portuguese);
+ }
  if(showPt&&features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
  return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta","stream","addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
