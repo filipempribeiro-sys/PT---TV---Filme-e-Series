@@ -672,6 +672,8 @@ function normalizeUrl(v){return String(v||"").trim().replace(/\/+$/,"")}
 async function hashId(v){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("").slice(0,24)}
 function isIgnorableIptvChannelName(name){const v=String(name||"").trim();return /^(?:data|date)\s*[-:]\s*\d{4}-\d{2}-\d{2}$/i.test(v)||/^(?:expira|expires?|validade)\s*[-:]\s*\d{4}-\d{2}-\d{2}$/i.test(v)}
 function finalizeIPTVChannels(channels){return(Array.isArray(channels)?channels:[]).filter(ch=>!isIgnorableIptvChannelName(ch?.name))}
+function splitM3UStreamUrl(value){const raw=String(value||"").trim(),i=raw.indexOf("|");if(i<0)return{url:raw,headers:{}};const url=raw.slice(0,i).trim(),headers={},params=new URLSearchParams(raw.slice(i+1).replace(/;/g,"&"));for(const [k,v] of params){const key=String(k||"").trim().toLowerCase(),val=String(v||"").trim();if(!val)continue;if(key==="user-agent"||key==="http-user-agent")headers.userAgent=val;else if(key==="referer"||key==="referrer"||key==="http-referrer"||key==="http-referer")headers.referrer=val;else if(key==="origin"||key==="http-origin")headers.origin=val}return{url,headers}}
+
 function iptvUserAgent(config){return String(config?.globalUserAgent||"").trim()||`PT-HUB/${VERSION}`}
 function xmlDecode(v){return String(v||"").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&")}
 function xmlTag(block,name){const m=String(block||"").match(new RegExp("<"+name+"(?:\\s[^>]*)?>([\\s\\S]*?)<\\/"+name+">","i"));return m?xmlDecode(m[1].replace(/<[^>]+>/g,"").trim()):""}
@@ -690,7 +692,7 @@ async function parseM3U(content,config=null){
   if(line.startsWith("#EXTINF:")){const i=line.indexOf(","),a=i>=0?line.slice(0,i):"",name=i>=0?line.slice(i+1).trim():"Canal IPTV";const attr=n=>a.match(new RegExp(n+'=["\\\']([^"\\\']*)["\\\']',"i"))?.[1]||"";info={name:name||attr("tvg-name")||"Canal IPTV",tvgId:attr("tvg-id"),tvgName:attr("tvg-name"),logo:attr("tvg-logo"),group:attr("group-title")||"TV"};opts={};continue}
   if(info&&line.startsWith("#EXTVLCOPT:")){const kv=line.slice(11),p=kv.indexOf("="),k=(p>=0?kv.slice(0,p):kv).trim().toLowerCase(),v=p>=0?kv.slice(p+1).trim():"";if(k==="http-user-agent"&&v)opts.userAgent=v;else if((k==="http-referrer"||k==="http-referer")&&v)opts.referrer=v;else if(k==="http-origin"&&v)opts.origin=v;continue}
   if(info&&line.startsWith("#KODIPROP:")){const kv=line.slice(10),p=kv.indexOf("="),k=(p>=0?kv.slice(0,p):kv).trim().toLowerCase(),v=p>=0?kv.slice(p+1).trim():"";if(k.includes("user-agent")&&v)opts.userAgent=v;else if((k.includes("referrer")||k.includes("referer"))&&v)opts.referrer=v;else if(k.includes("origin")&&v)opts.origin=v;continue}
-  if(!line.startsWith("#")&&isHttp(line)&&info){out.push({id:"m3u:"+(await hashId(line)),type:"channel",name:info.name,logo:info.logo||findChannelLogo([info.name,info.tvgName,info.tvgId],config),group:info.group,tvgId:info.tvgId,tvgName:info.tvgName,url:line,headers:{...opts}});info=null;opts={}}
+  if(!line.startsWith("#")&&info){const inline=splitM3UStreamUrl(line);if(isHttp(inline.url)){const headers={...inline.headers,...opts};out.push({id:"m3u:"+(await hashId(inline.url)),type:"channel",name:info.name,logo:info.logo||findChannelLogo([info.name,info.tvgName,info.tvgId],config),group:info.group,tvgId:info.tvgId,tvgName:info.tvgName,url:inline.url,headers});info=null;opts={}}}
  }return finalizeIPTVChannels(out);
 }
 async function getM3UChannels(config){
