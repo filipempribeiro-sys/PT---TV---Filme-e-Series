@@ -3,7 +3,7 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { Buffer } from "node:buffer";
 
-const VERSION="3.1.6";
+const VERSION="3.1.7";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
@@ -119,7 +119,7 @@ function decodeTpbCatalogMetaId(metaId){try{const raw=String(metaId||"");if(!raw
 function tpbEpisodeMatches(name,season,episode){if(!Number.isFinite(season))return true;const text=String(name||""),s=String(season),e=Number.isFinite(episode)?String(episode):"";if(Number.isFinite(episode))return new RegExp("(?:s0*"+s+"\\s*e0*"+e+"\\b|\\b"+s+"x0*"+e+"\\b)","i").test(text);return new RegExp("(?:s0*"+s+"\\b|season\\s*0*"+s+"\\b)","i").test(text)}
 async function thePirateBayCatalogStreams(type,id){
  if(type!=="movie"&&type!=="series")return[];
- const parts=String(id||"").split(":"),imdbId=parts[0];if(!/^tt\\d+$/i.test(imdbId))return[];
+ const parts=String(id||"").split(":"),imdbId=parts[0];if(!/^tt\d+$/i.test(imdbId))return[];
  const season=parts[1]!=null&&parts[1]!==""?Number(parts[1]):NaN,episode=parts[2]!=null&&parts[2]!==""?Number(parts[2]):NaN;
  const cm=await fetchJson(CINEMETA_BASE+"/meta/"+type+"/"+encodeURIComponent(imdbId)+".json"),title=String(cm&&cm.meta&&cm.meta.name||"").trim();if(!title)return[];
  const catalogId=type==="movie"?"Movies":"TV shows",queries=[];
