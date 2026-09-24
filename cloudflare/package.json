@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js"
+    "check": "node --check src/index.js",
+    "test": "node --test test/manifest.test.js"
   },
   "devDependencies": {
     "wrangler": "4.136.3"
