@@ -293,7 +293,7 @@ async function manifest(config=null){
   if(!portuguese.some(x=>x?.type==="series"&&isNovela(x))){const x=portugueseFixed.find(x=>x.id==="pthub-portuguese-novelas");if(x)portuguese.push(x)}
   catalogs.push(...portuguese);
  }
- if(showPt&&features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
+ if(features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
  return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta",{name:"stream",types:["movie","series","channel"],idPrefixes:["tt","tmdb:","pthubptmeta:","m3u:","xtream:","iptvorg:","operator:","rtpplay:","pttv:"]},"addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
 async function hlsProxy(request,url,profile,target,customUserAgent="",configToken="",channelHeaders={}){
