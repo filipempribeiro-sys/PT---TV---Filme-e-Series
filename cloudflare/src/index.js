@@ -1226,6 +1226,23 @@ export default {async fetch(request,env,ctx){
     }
     const stream={name:"PT•HUB",title:`${ch.name}${epgTitle}`,url:streamUrl,behaviorHints};
     if(streamType)stream.type=streamType;
+    // Some IPTV origins serve devices directly but reject Cloudflare egress.
+    // For ordinary M3U HLS channels without custom request headers, prefer
+    // the original HTTPS source; keep the existing HLS proxy as a manual backup.
+    // Channels needing User-Agent/Referer/Origin retain their proxy-first path.
+    const requiresCustomHeaders=Boolean(
+      String(cfg?.globalUserAgent||"").trim()||
+      String(channelHeaders.userAgent||"").trim()||
+      String(channelHeaders.referrer||"").trim()||
+      String(channelHeaders.origin||"").trim()
+    );
+    const directHls=cfg?.mode==="m3u"&&streamType==="hls"&&needsProxy&&!requiresCustomHeaders;
+    if(directHls){
+     return json({streams:[
+      {name:"PT•HUB • Direto",title:`${ch.name}${epgTitle}`,url:rawUrl,type:"hls",behaviorHints:{notWebReady:true}},
+      {...stream,name:"PT•HUB • Proxy"}
+     ]});
+    }
     return json({streams:[stream]});
    }
    if(type==="movie"||type==="series"){
