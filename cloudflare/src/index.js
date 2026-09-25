@@ -1327,12 +1327,21 @@ export default {async fetch(request,env,ctx){
       String(channelHeaders.referrer||"").trim()||
       String(channelHeaders.origin||"").trim()
     );
-    const directHls=cfg?.mode==="m3u"&&streamType==="hls"&&needsProxy&&!requiresCustomHeaders;
-    if(directHls){
-     return json({streams:[
-      {name:"PT•HUB • Direto",title:`${ch.name}${epgTitle}`,url:rawUrl,type:"hls",behaviorHints:{notWebReady:true}},
-      {...stream,name:"PT•HUB • Proxy"}
-     ]});
+    const configuredM3uHls=cfg?.mode==="m3u"&&streamType==="hls"&&needsProxy;
+    if(configuredM3uHls){
+     const directHeaders={};
+     const userAgent=String(channelHeaders.userAgent||cfg?.globalUserAgent||"").trim();
+     if(userAgent)directHeaders["User-Agent"]=userAgent;
+     if(channelHeaders.referrer)directHeaders.Referer=String(channelHeaders.referrer);
+     if(channelHeaders.origin)directHeaders.Origin=String(channelHeaders.origin);
+     const direct={
+      name:"PT•HUB • Direto",title:`${ch.name}${epgTitle}`,url:rawUrl,type:"hls",
+      behaviorHints:{notWebReady:true,...(Object.keys(directHeaders).length?{proxyHeaders:{request:directHeaders}}:{})}
+     };
+     const proxied={...stream,name:"PT•HUB • Proxy"};
+     // Keep the proxy first when source-specific headers are configured, but
+     // retain a device-side source if the origin rejects Cloudflare egress.
+     return json({streams:requiresCustomHeaders?[proxied,direct]:[direct,proxied]});
     }
     return json({streams:[stream]});
    }
