@@ -1060,11 +1060,13 @@ function validateConfigParity(config){
 // tokens, playlist contents or media bytes.
 async function probeIptvDiagnosticStage(target,headers,stage){
  const start=Date.now(),ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
+ let responseStatus=null;
  try{
   const r=await fetch(target,{headers,signal:ctl.signal,redirect:"follow"});
+  responseStatus=r.status;
   const report={stage,status:r.status,ok:r.ok,contentType:String(r.headers.get("content-type")||"").split(";")[0].slice(0,100),elapsedMs:Date.now()-start};
   if(!r.ok){try{await r.body?.cancel()}catch{}return{report}}
-  if(stage==="segment"){
+  if(stage==="segment"||stage==="key"||stage==="init"){
    const reader=r.body?.getReader();
    if(!reader)return{report:{...report,ok:false,reason:"empty-body"}};
    const chunk=await reader.read();
@@ -1080,7 +1082,7 @@ async function probeIptvDiagnosticStage(target,headers,stage){
   report.elapsedMs=Date.now()-start;
   return{report,body:body.slice(0,262144),finalUrl:r.url||target};
  }catch(error){
-  return{report:{stage,ok:false,status:null,reason:error?.name==="AbortError"?"timeout":error?.name==="TypeError"?"network-error":"request-error",elapsedMs:Date.now()-start}};
+  return{report:{stage,ok:false,status:responseStatus,phase:responseStatus==null?"headers":"body",reason:error?.name==="AbortError"?"timeout":error?.name==="TypeError"?"network-error":"request-error",elapsedMs:Date.now()-start}};
  }finally{clearTimeout(timer)}
 }
 function firstIptvDiagnosticReference(body){
@@ -1109,7 +1111,18 @@ async function diagnoseIptvChannel(channel,config){
   }
   const segment=await probeIptvDiagnosticStage(new URL(ref,playlist.finalUrl).toString(),headers,"segment");
   stages.push(segment.report);
-  return{ok:segment.report.ok&&segment.report.hasData===true,stages};
+  if(!segment.report.ok||!segment.report.hasData)return{ok:false,stages};
+  // An HLS segment may be available while its AES key or fMP4 init map is not.
+  // Only probe the HTTP response, never return or store protected key bytes.
+  for(const [tag,stage] of [["#EXT-X-KEY:","key"],["#EXT-X-MAP:","init"]]){
+   const line=String(playlist.body||"").split(/\r?\n/).find(row=>row.trim().startsWith(tag));
+   const value=line?.match(/URI=(["'])(.*?)\1/)?.[2];
+   if(!value)continue;
+   const dependency=await probeIptvDiagnosticStage(new URL(value,playlist.finalUrl).toString(),headers,stage);
+   stages.push(dependency.report);
+   if(!dependency.report.ok||!dependency.report.hasData)return{ok:false,stages};
+  }
+  return{ok:true,stages};
  }catch{return{ok:false,reason:"invalid-media-reference",stages}}
 }
 async function recordClientTrace(env,entry){
