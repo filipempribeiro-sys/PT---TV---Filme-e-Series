@@ -332,9 +332,13 @@ async function hlsProxy(request,url,profile,target,customUserAgent="",configToke
  if(profile==="rtp"){headers.Origin="https://www.rtp.pt";headers.Referer="https://www.rtp.pt/play/"}
  const range=request.headers.get("range");if(range)headers.Range=range;
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
+ let playlistBodyTimeout=null;
  try{
   const upstream=await fetch(target,{headers,redirect:"follow",signal:controller.signal});
-  if(!upstream.ok){clearTimeout(timeout);return new Response(`HLS upstream HTTP ${upstream.status}`,{status:upstream.status,headers:{...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"}})}
+  // The connection timeout only covers origin response headers. Render cleared
+  // it here; do not abort a valid HLS playlist before its body has arrived.
+  clearTimeout(timeout);
+  if(!upstream.ok)return new Response(`HLS upstream HTTP ${upstream.status}`,{status:upstream.status,headers:{...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"}});
   const ct=upstream.headers.get("content-type")||"",ctl=ct.toLowerCase();
   const playlistByUrl=/\.m3u8(?:$|[?#])/i.test(target);
   const playlistByType=ctl.includes("mpegurl")||ctl.includes("application/vnd.apple");
@@ -347,7 +351,10 @@ async function hlsProxy(request,url,profile,target,customUserAgent="",configToke
    for(const k of ["content-type","content-length","content-range","accept-ranges","etag","last-modified"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
    return out;
   };
-  if(!maybePlaylist){clearTimeout(timeout);return new Response(upstream.body,{status:upstream.status,headers:passHeaders()})}
+  if(!maybePlaylist)return new Response(upstream.body,{status:upstream.status,headers:passHeaders()});
+  // A separate body deadline prevents a broken origin from retaining a Worker
+  // indefinitely while still allowing slow playlists more time than connect.
+  playlistBodyTimeout=setTimeout(()=>controller.abort(),35000);
   let buffer;
   if(playlistByUrl||playlistByType||!upstream.body){
    buffer=await upstream.arrayBuffer();
@@ -366,16 +373,16 @@ async function hlsProxy(request,url,profile,target,customUserAgent="",configToke
     if(prefix.startsWith("#EXTM3U")||(prefix.length>0&&!"#EXTM3U".startsWith(prefix)))break;
    }
    const replay=replayHlsSniffedStream(reader,chunks);
-   if(!prefix.startsWith("#EXTM3U")){clearTimeout(timeout);return new Response(replay,{status:upstream.status,headers:passHeaders()})}
+   if(!prefix.startsWith("#EXTM3U")){clearTimeout(playlistBodyTimeout);return new Response(replay,{status:upstream.status,headers:passHeaders()})}
    buffer=await new Response(replay).arrayBuffer();
   }
-  clearTimeout(timeout);
+  clearTimeout(playlistBodyTimeout);
   const bytes=new Uint8Array(buffer);
   const base=upstream.url||target,text=new TextDecoder().decode(bytes);
   const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}${configToken?`/${configToken}`:""}/hls-proxy/${encodeURIComponent(profile)}/${enc}${Object.keys(channelHeaders||{}).length?`?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:""}`}catch{return ref}};
   const rewritten=text.replace(/\r/g,"").split("\n").map(raw=>{const line=raw.trim();if(!line)return raw;if(line.startsWith("#"))return raw.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`);return proxify(line)}).join("\n");
   return new Response(rewritten,{headers:{...common,"Content-Type":"application/vnd.apple.mpegurl"}});
- }catch(e){clearTimeout(timeout);return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:{...CORS,"Cache-Control":"no-store"}})}
+ }catch(e){clearTimeout(timeout);if(playlistBodyTimeout)clearTimeout(playlistBodyTimeout);return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:{...CORS,"Cache-Control":"no-store"}})}
 }
 
 const PT_HUB_LOGO="https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/logo.png";
