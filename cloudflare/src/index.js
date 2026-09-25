@@ -1056,6 +1056,62 @@ function validateConfigParity(config){
  if(String(config.globalUserAgent||"").length>512)return "O User-Agent personalizado não pode exceder 512 caracteres.";
  return null;
 }
+// Explicit diagnostic only: do not return/log IPTV URLs, auth headers,
+// tokens, playlist contents or media bytes.
+async function probeIptvDiagnosticStage(target,headers,stage){
+ const start=Date.now(),ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
+ try{
+  const r=await fetch(target,{headers,signal:ctl.signal,redirect:"follow"});
+  const report={stage,status:r.status,ok:r.ok,contentType:String(r.headers.get("content-type")||"").split(";")[0].slice(0,100),elapsedMs:Date.now()-start};
+  if(!r.ok){try{await r.body?.cancel()}catch{}return{report}}
+  if(stage==="segment"){
+   const reader=r.body?.getReader();
+   if(!reader)return{report:{...report,ok:false,reason:"empty-body"}};
+   const chunk=await reader.read();
+   try{await reader.cancel()}catch{}
+   report.bytesRead=Math.min(chunk.value?.byteLength||0,8192);
+   report.hasData=report.bytesRead>0;
+   report.elapsedMs=Date.now()-start;
+   return{report};
+  }
+  const body=await r.text();
+  report.bytesRead=new TextEncoder().encode(body).byteLength;
+  report.validHls=body.trimStart().startsWith("#EXTM3U");
+  report.elapsedMs=Date.now()-start;
+  return{report,body:body.slice(0,262144),finalUrl:r.url||target};
+ }catch(error){
+  return{report:{stage,ok:false,status:null,reason:error?.name==="AbortError"?"timeout":error?.name==="TypeError"?"network-error":"request-error",elapsedMs:Date.now()-start}};
+ }finally{clearTimeout(timer)}
+}
+function firstIptvDiagnosticReference(body){
+ return String(body||"").split(/\r?\n/).map(line=>line.trim()).find(line=>line&&!line.startsWith("#"))||"";
+}
+async function diagnoseIptvChannel(channel,config){
+ const source=String(channel?.url||"");
+ if(!isHttp(source))return{ok:false,reason:"invalid-source",stages:[]};
+ const h=channel?.headers||{};
+ const headers={"User-Agent":String(h.userAgent||config?.globalUserAgent||"").trim()||"Mozilla/5.0 (PT-HUB HLS Engine)"};
+ if(h.referrer)headers.Referer=String(h.referrer);
+ if(h.origin)headers.Origin=String(h.origin);
+ const stages=[];
+ let playlist=await probeIptvDiagnosticStage(source,headers,"playlist");
+ stages.push(playlist.report);
+ if(!playlist.report.ok||!playlist.report.validHls)return{ok:false,stages};
+ let ref=firstIptvDiagnosticReference(playlist.body);
+ if(!ref)return{ok:false,reason:"no-media-reference",stages};
+ try{
+  if(playlist.body.includes("#EXT-X-STREAM-INF")){
+   playlist=await probeIptvDiagnosticStage(new URL(ref,playlist.finalUrl).toString(),headers,"variant");
+   stages.push(playlist.report);
+   if(!playlist.report.ok||!playlist.report.validHls)return{ok:false,stages};
+   ref=firstIptvDiagnosticReference(playlist.body);
+   if(!ref)return{ok:false,reason:"no-media-reference",stages};
+  }
+  const segment=await probeIptvDiagnosticStage(new URL(ref,playlist.finalUrl).toString(),headers,"segment");
+  stages.push(segment.report);
+  return{ok:segment.report.ok&&segment.report.hasData===true,stages};
+ }catch{return{ok:false,reason:"invalid-media-reference",stages}}
+}
 async function recordClientTrace(env,entry){
  try{
   if(!env?.PT_HUB_M3U)return;
@@ -1143,6 +1199,21 @@ export default {async fetch(request,env,ctx){
    if(cfg.mode==="xtream"){const data=await xtreamRequest(cfg,null);if(!data?.user_info||data.user_info.auth!==1)return json({success:false,error:"Autenticação Xtream inválida."},400);return json({success:true,message:"Ligação Xtream efetuada com sucesso."})}
    return json({success:false,error:"Modo IPTV inválido."},400)
   }catch(e){return json({success:false,error:e?.message||"Não foi possível testar a ligação."},500)}
+ }
+ let iptvDiag=p.match(/^\/([^/]+)\/iptv-diagnostic\.json$/);
+ if(request.method==="GET"&&iptvDiag){
+  const cfg=decodeConfig(iptvDiag[1]);
+  if(!cfg||cfg.mode!=="m3u")return json({ok:false,reason:"m3u-configuration-required"},400,noCache);
+  try{
+   const channels=await getIPTVChannels(cfg,env);
+   const name=String(url.searchParams.get("name")||"").trim().toLowerCase().slice(0,120);
+   const rawIndex=url.searchParams.get("index");
+   const index=name?channels.findIndex(ch=>String(ch.name||"").trim().toLowerCase()===name):
+    rawIndex==null?0:/^\d{1,5}$/.test(rawIndex)?Number(rawIndex):-1;
+   if(index<0||index>=channels.length)return json({ok:false,reason:"channel-not-found",channelsFound:channels.length},404,noCache);
+   const report=await diagnoseIptvChannel(channels[index],cfg);
+   return json({diagnostic:"iptv-hls",channelIndex:index,channelsFound:channels.length,...report},200,noCache);
+  }catch{return json({ok:false,reason:"channel-list-unavailable"},503,noCache)}
  }
  if(request.method==="GET"&&p==="/api/storage-health"){
   if(!env.PT_HUB_M3U)return json({ok:false,storage:"kv",binding:"PT_HUB_M3U",error:"Binding indisponível."},503);
