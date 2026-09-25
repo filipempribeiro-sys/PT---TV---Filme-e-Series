@@ -289,9 +289,16 @@ test("M3U HLS with custom User-Agent stays proxy-first and preserves that header
       config, "stream/channel/" + encodeURIComponent(catalog.metas[0].id) + ".json",
     );
     const streams = (await response.json()).streams;
-    assert.equal(streams.length, 1);
+    assert.equal(streams.length, 2);
+    assert.equal(streams[0].name, "PT•HUB • Proxy");
     assert.equal(streams[0].type, "hls");
     assert.match(streams[0].url, /\/hls-proxy\/generic\//);
+    assert.equal(streams[1].name, "PT•HUB • Direto");
+    assert.equal(streams[1].url, sourceUrl);
+    assert.equal(streams[1].type, "hls");
+    assert.deepEqual(streams[1].behaviorHints.proxyHeaders.request, {
+      "User-Agent": config.globalUserAgent,
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
