@@ -296,3 +296,92 @@ test("M3U HLS with custom User-Agent stays proxy-first and preserves that header
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("safe IPTV diagnostic observes playlist, variant and first segment without leaking URLs", async () => {
+  const playlistUrl = "https://media.example/live/master.m3u8?private=fixture-secret";
+  const variantUrl = "https://media.example/live/variant.m3u8?private=fixture-secret";
+  const segmentUrl = "https://media.example/live/segment00001.ts?private=fixture-secret";
+  const config = {
+    features: { iptv: true }, mode: "m3u", m3uSource: "file",
+    m3uFileData: '#EXTM3U\n#EXTINF:-1 tvg-logo="https://logo.example/channel.png",Diagnostic\n' +
+      playlistUrl + "\n",
+  };
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (target,options) => {
+    const requested = String(target);
+    requests.push(requested);
+    if (requested.startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ tree: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (requested === playlistUrl) {
+      assert.equal(options.headers["User-Agent"], "Mozilla/5.0 (PT-HUB HLS Engine)");
+      return new Response('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\n' +
+        "variant.m3u8?private=fixture-secret\n", {
+          headers: { "Content-Type": "application/vnd.apple.mpegurl" },
+        });
+    }
+    if (requested === variantUrl) {
+      return new Response('#EXTM3U\n#EXTINF:6.0,\nsegment00001.ts?private=fixture-secret\n', {
+        headers: { "Content-Type": "application/vnd.apple.mpegurl" },
+      });
+    }
+    if (requested === segmentUrl) {
+      return new Response(Uint8Array.from([0x47, 0x11, 0x22, 0x33]), {
+        headers: { "Content-Type": "video/MP2T" },
+      });
+    }
+    throw new Error("Unexpected diagnostic host");
+  };
+  try {
+    const response = await configuredFetch(config, "iptv-diagnostic.json?index=0");
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.ok, true);
+    assert.equal(data.channelIndex, 0);
+    assert.deepEqual(data.stages.map(stage => stage.stage),
+      ["playlist", "variant", "segment"]);
+    assert.ok(data.stages.every(stage => stage.status === 200 && stage.ok));
+    assert.equal(data.stages[2].hasData, true);
+    const serialized = JSON.stringify(data);
+    assert.ok(!serialized.includes("fixture-secret"));
+    assert.ok(!serialized.includes("media.example"));
+    assert.ok(!serialized.includes(tokenFor(config)));
+    assert.ok(requests.includes(segmentUrl));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("safe IPTV diagnostic reports origin HTTP failure without exposing source", async () => {
+  const playlistUrl = "https://media.example/blocked.m3u8?private=fixture-secret";
+  const config = {
+    features: { iptv: true }, mode: "m3u", m3uSource: "file",
+    m3uFileData: '#EXTM3U\n#EXTINF:-1 tvg-logo="https://logo.example/channel.png",Blocked\n' +
+      playlistUrl + "\n",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async target => {
+    if (String(target).startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ tree: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    assert.equal(target, playlistUrl);
+    return new Response("Denied", { status: 403 });
+  };
+  try {
+    const response = await configuredFetch(config, "iptv-diagnostic.json?index=0");
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.ok, false);
+    assert.equal(data.stages[0].status, 403);
+    assert.equal(data.stages.length, 1);
+    assert.ok(!JSON.stringify(data).includes("fixture-secret"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
