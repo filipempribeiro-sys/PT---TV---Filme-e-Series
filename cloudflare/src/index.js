@@ -296,6 +296,19 @@ async function manifest(config=null){
  if(features.ptContentSources?.rtpPlay===true) add("channel","rtp-play","🇵🇹 RTP Play");
  return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta",{name:"stream",types:["movie","series","channel"],idPrefixes:["tt","tmdb:","pthubptmeta:","m3u:","xtream:","iptvorg:","operator:","rtpplay:","pttv:"]},"addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
+// Replay the first bytes after sniffing an opaque URL/content type.
+// Non-HLS live media must remain a streaming response, never arrayBuffer().
+function replayHlsSniffedStream(reader,prefixChunks){
+ const pending=prefixChunks.slice();
+ return new ReadableStream({
+  async pull(controller){
+   if(pending.length){controller.enqueue(pending.shift());return}
+   const {done,value}=await reader.read();
+   if(done)controller.close();else controller.enqueue(value);
+  },
+  cancel(reason){return reader.cancel(reason)}
+ });
+}
 async function hlsProxy(request,url,profile,target,customUserAgent="",configToken="",channelHeaders={}){
  if(!isHttp(target))return new Response("HLS target inválido.",{status:400,headers:CORS});
  const headers={"User-Agent":String(channelHeaders?.userAgent||customUserAgent||"").trim()||"Mozilla/5.0 (PT-HUB HLS Engine)"};
@@ -306,21 +319,43 @@ async function hlsProxy(request,url,profile,target,customUserAgent="",configToke
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
  try{
   const upstream=await fetch(target,{headers,redirect:"follow",signal:controller.signal});
-  clearTimeout(timeout);
-  if(!upstream.ok)return new Response(`HLS upstream HTTP ${upstream.status}`,{status:upstream.status,headers:{...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"}});
-  const ct=upstream.headers.get("content-type")||"",ctl=ct.toLowerCase(),playlistByUrl=/\.m3u8(?:$|[?#])/i.test(target),playlistByType=ctl.includes("mpegurl")||ctl.includes("application/vnd.apple"),maybePlaylist=playlistByUrl||playlistByType||ctl.includes("text/plain")||ctl.includes("text/");
+  if(!upstream.ok){clearTimeout(timeout);return new Response(`HLS upstream HTTP ${upstream.status}`,{status:upstream.status,headers:{...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"}})}
+  const ct=upstream.headers.get("content-type")||"",ctl=ct.toLowerCase();
+  const playlistByUrl=/\.m3u8(?:$|[?#])/i.test(target);
+  const playlistByType=ctl.includes("mpegurl")||ctl.includes("application/vnd.apple");
+  // M3U providers may return extensionless HLS playlists as octet-stream or
+  // without Content-Type. Sniff those without buffering a continuous video feed.
+  const maybePlaylist=playlistByUrl||playlistByType||ctl.includes("text/")||ctl.includes("octet-stream")||!ctl;
   const common={...CORS,"Cache-Control":"no-store","Accept-Ranges":"bytes"};
-  if(!maybePlaylist){
+  const passHeaders=()=>{
    const out=new Headers(common);
    for(const k of ["content-type","content-length","content-range","accept-ranges","etag","last-modified"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
-   return new Response(upstream.body,{status:upstream.status,headers:out});
+   return out;
+  };
+  if(!maybePlaylist){clearTimeout(timeout);return new Response(upstream.body,{status:upstream.status,headers:passHeaders()})}
+  let buffer;
+  if(playlistByUrl||playlistByType||!upstream.body){
+   buffer=await upstream.arrayBuffer();
+  }else{
+   // Only read enough to recognize "#EXTM3U"; replay every byte if it is media.
+   const reader=upstream.body.getReader(),chunks=[];
+   let size=0,prefix="";
+   while(size<64){
+    const {done,value}=await reader.read();
+    if(done)break;
+    if(!value?.byteLength)continue;
+    chunks.push(value);size+=value.byteLength;
+    const peek=new Uint8Array(Math.min(size,64));let offset=0;
+    for(const chunk of chunks){const part=chunk.subarray(0,peek.byteLength-offset);peek.set(part,offset);offset+=part.byteLength;if(offset>=peek.byteLength)break}
+    prefix=new TextDecoder().decode(peek).trimStart();
+    if(prefix.startsWith("#EXTM3U")||(prefix.length>0&&!"#EXTM3U".startsWith(prefix)))break;
+   }
+   const replay=replayHlsSniffedStream(reader,chunks);
+   if(!prefix.startsWith("#EXTM3U")){clearTimeout(timeout);return new Response(replay,{status:upstream.status,headers:passHeaders()})}
+   buffer=await new Response(replay).arrayBuffer();
   }
-  const buffer=await upstream.arrayBuffer(),bytes=new Uint8Array(buffer),prefix=new TextDecoder().decode(bytes.slice(0,64)).trimStart(),playlist=playlistByUrl||playlistByType||prefix.startsWith("#EXTM3U");
-  if(!playlist){
-   const out=new Headers(common);
-   for(const k of ["content-type","content-length","content-range","accept-ranges","etag","last-modified"]){const v=upstream.headers.get(k);if(v)out.set(k,v)}
-   return new Response(buffer,{status:upstream.status,headers:out});
-  }
+  clearTimeout(timeout);
+  const bytes=new Uint8Array(buffer);
   const base=upstream.url||target,text=new TextDecoder().decode(bytes);
   const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}${configToken?`/${configToken}`:""}/hls-proxy/${encodeURIComponent(profile)}/${enc}${Object.keys(channelHeaders||{}).length?`?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:""}`}catch{return ref}};
   const rewritten=text.replace(/\r/g,"").split("\n").map(raw=>{const line=raw.trim();if(!line)return raw;if(line.startsWith("#"))return raw.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`);return proxify(line)}).join("\n");
@@ -1156,7 +1191,9 @@ export default {async fetch(request,env,ctx){
     const ch=(await getIPTVChannels(cfg,env)).find(x=>x.id===id);if(!ch)return json({streams:[]});
     const rawUrl=String(ch.url||"");
      const channelHeaders=ch.headers||{};
-     const needsProxy=isHttp(rawUrl)&&(/\\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin));
+     // All configured M3U sources use HLS-aware proxying: opaque URLs often
+     // hide a playlist even without the .m3u8 extension.
+     const needsProxy=isHttp(rawUrl)&&(cfg?.mode==="m3u"||/\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin));
      if(!isHttp(rawUrl))return json({streams:[]});
      const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:rawUrl;
     const epgTitle=ch.epg?.title?` • ${ch.epg.title}`:"";
