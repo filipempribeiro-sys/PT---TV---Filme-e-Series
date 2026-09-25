@@ -158,3 +158,72 @@ test("opaque non-HLS live media begins streaming before the source closes", asyn
     globalThis.fetch = source;
   }
 });
+
+
+test("M3U TS channel descriptors keep progressive media type through the proxy", async () => {
+  const sourceUrl = "https://media.example/live/channel001.ts";
+  const config = {
+    features: { iptv: true }, mode: "m3u", m3uSource: "file",
+    m3uFileData: '#EXTM3U\n#EXTINF:-1 tvg-id="ts-1",Transport Stream\n' + sourceUrl + "\n",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async target => {
+    if (String(target).startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ tree: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error("Unexpected mock network request");
+  };
+  try {
+    const catalog = await (await configuredFetch(config, "catalog/channel/m3u.json")).json();
+    assert.equal(catalog.metas.length, 1);
+    const response = await configuredFetch(
+      config, "stream/channel/" + encodeURIComponent(catalog.metas[0].id) + ".json",
+    );
+    const streams = (await response.json()).streams;
+    assert.equal(streams.length, 1);
+    assert.equal(streams[0].type, "mpegts");
+    assert.match(streams[0].url, /\/hls-proxy\/generic\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("DASH streams remain direct and retain M3U request headers", async () => {
+  const sourceUrl = "https://media.example/manifest.mpd";
+  const config = {
+    features: { iptv: true }, mode: "m3u", m3uSource: "file",
+    m3uFileData:
+      '#EXTM3U\n#EXTINF:-1 tvg-id="dash-1",DASH\n' +
+      '#EXTVLCOPT:http-user-agent=MEDIA-HUB-Test/1.0\n' +
+      '#EXTVLCOPT:http-referrer=https://media.example/app\n' +
+      sourceUrl + "\n",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async target => {
+    if (String(target).startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ tree: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error("Unexpected mock network request");
+  };
+  try {
+    const catalog = await (await configuredFetch(config, "catalog/channel/m3u.json")).json();
+    assert.equal(catalog.metas.length, 1);
+    const response = await configuredFetch(
+      config, "stream/channel/" + encodeURIComponent(catalog.metas[0].id) + ".json",
+    );
+    const streams = (await response.json()).streams;
+    assert.equal(streams.length, 1);
+    assert.equal(streams[0].url, sourceUrl);
+    assert.equal(streams[0].type, "dash");
+    assert.deepEqual(streams[0].behaviorHints.proxyHeaders.request, {
+      "User-Agent": "MEDIA-HUB-Test/1.0",
+      Referer: "https://media.example/app",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
