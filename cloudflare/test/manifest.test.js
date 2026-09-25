@@ -227,3 +227,72 @@ test("DASH streams remain direct and retain M3U request headers", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("ordinary M3U channels return direct HLS first with a proxy backup", async () => {
+  const sourceUrl = "https://media.example/live/channel001.m3u8?key=example";
+  const config = {
+    features: { iptv: true }, mode: "m3u", m3uSource: "file",
+    m3uFileData: '#EXTM3U\n#EXTINF:-1 tvg-id="hls-1",HLS\n' + sourceUrl + "\n",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async target => {
+    if (String(target).startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ tree: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error("Unexpected mock network request");
+  };
+  try {
+    const catalog = await (await configuredFetch(config, "catalog/channel/m3u.json")).json();
+    assert.equal(catalog.metas.length, 1);
+    const response = await configuredFetch(
+      config, "stream/channel/" + encodeURIComponent(catalog.metas[0].id) + ".json",
+    );
+    const streams = (await response.json()).streams;
+    assert.equal(streams.length, 2);
+    assert.equal(streams[0].name, "PT•HUB • Direto");
+    assert.equal(streams[0].type, "hls");
+    assert.equal(streams[0].url, sourceUrl);
+    assert.equal(streams[1].name, "PT•HUB • Proxy");
+    assert.equal(streams[1].type, "hls");
+    assert.match(streams[1].url, /\/hls-proxy\/generic\//);
+    assert.equal(Buffer.from(new URL(streams[1].url).pathname.split("/").at(-1),
+      "base64url").toString(), sourceUrl);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("M3U HLS with custom User-Agent stays proxy-first and preserves that header", async () => {
+  const sourceUrl = "https://media.example/live/protected.m3u8";
+  const config = {
+    features: { iptv: true }, mode: "m3u", m3uSource: "file",
+    globalUserAgent: "Authorized-Player/1.0",
+    m3uFileData: '#EXTM3U\n#EXTINF:-1 tvg-id="hls-2",Protected HLS\n' +
+      sourceUrl + "\n",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async target => {
+    if (String(target).startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ tree: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error("Unexpected mock network request");
+  };
+  try {
+    const catalog = await (await configuredFetch(config, "catalog/channel/m3u.json")).json();
+    assert.equal(catalog.metas.length, 1);
+    const response = await configuredFetch(
+      config, "stream/channel/" + encodeURIComponent(catalog.metas[0].id) + ".json",
+    );
+    const streams = (await response.json()).streams;
+    assert.equal(streams.length, 1);
+    assert.equal(streams[0].type, "hls");
+    assert.match(streams[0].url, /\/hls-proxy\/generic\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
