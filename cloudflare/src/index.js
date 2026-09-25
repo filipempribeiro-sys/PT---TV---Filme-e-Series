@@ -309,6 +309,21 @@ function replayHlsSniffedStream(reader,prefixChunks){
   cancel(reason){return reader.cancel(reason)}
  });
 }
+// Explicit media type keeps raw TS/MP4 from being mistaken for HLS merely
+// because the URL passes through the /hls-proxy/ transport endpoint.
+function iptvChannelStreamType(rawUrl){
+ try{
+  const u=new URL(rawUrl),path=u.pathname.toLowerCase();
+  const hint=(u.searchParams.get("output")||u.searchParams.get("format")||u.searchParams.get("ext")||"").trim().toLowerCase();
+  if(path.endsWith(".m3u8")||hint==="m3u8"||hint==="hls")return "hls";
+  if(path.endsWith(".mpd")||hint==="mpd"||hint==="dash")return "dash";
+  if(/\.ism(?:\/manifest)?$/.test(path)||hint==="smoothstreaming")return "smoothstreaming";
+  if(/\.(?:ts|mts|m2ts)$/.test(path)||["ts","mpegts","mp2t"].includes(hint))return "mpegts";
+  if(/\.(?:mp4|m4v)$/.test(path)||hint==="mp4")return "mp4";
+  if(/\.(?:mkv|webm|mov|avi)$/.test(path))return "progressive";
+ }catch{}
+ return null;
+}
 async function hlsProxy(request,url,profile,target,customUserAgent="",configToken="",channelHeaders={}){
  if(!isHttp(target))return new Response("HLS target inválido.",{status:400,headers:CORS});
  const headers={"User-Agent":String(channelHeaders?.userAgent||customUserAgent||"").trim()||"Mozilla/5.0 (PT-HUB HLS Engine)"};
@@ -1193,11 +1208,25 @@ export default {async fetch(request,env,ctx){
      const channelHeaders=ch.headers||{};
      // All configured M3U sources use HLS-aware proxying: opaque URLs often
      // hide a playlist even without the .m3u8 extension.
-     const needsProxy=isHttp(rawUrl)&&(cfg?.mode==="m3u"||/\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin));
+     const streamType=iptvChannelStreamType(rawUrl);
+     // DASH/SmoothStreaming manifests need their own relative-resource handling;
+     // leave those direct, preserving any source-specific request headers.
+     const needsProxy=isHttp(rawUrl)&&streamType!=="dash"&&streamType!=="smoothstreaming"&&(cfg?.mode==="m3u"||/\.m3u8(?:$|[?#])/i.test(rawUrl)||Boolean(cfg?.globalUserAgent)||Boolean(channelHeaders.userAgent||channelHeaders.referrer||channelHeaders.origin));
      if(!isHttp(rawUrl))return json({streams:[]});
      const streamUrl=needsProxy?`${url.origin}/${st[1]}/hls-proxy/generic/${Buffer.from(rawUrl,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:rawUrl;
     const epgTitle=ch.epg?.title?` • ${ch.epg.title}`:"";
-    return json({streams:[{name:"PT•HUB",title:`${ch.name}${epgTitle}`,url:streamUrl,behaviorHints:{notWebReady:true}}]});
+    const behaviorHints={notWebReady:true};
+    if(!needsProxy){
+     const directHeaders={};
+     const userAgent=String(channelHeaders.userAgent||cfg?.globalUserAgent||"").trim();
+     if(userAgent)directHeaders["User-Agent"]=userAgent;
+     if(channelHeaders.referrer)directHeaders.Referer=String(channelHeaders.referrer);
+     if(channelHeaders.origin)directHeaders.Origin=String(channelHeaders.origin);
+     if(Object.keys(directHeaders).length)behaviorHints.proxyHeaders={request:directHeaders};
+    }
+    const stream={name:"PT•HUB",title:`${ch.name}${epgTitle}`,url:streamUrl,behaviorHints};
+    if(streamType)stream.type=streamType;
+    return json({streams:[stream]});
    }
    if(type==="movie"||type==="series"){
     if(id.startsWith("pthubptmeta:"))return json({streams:(await ptExternalStreams(cfg,type,id))||[]});
