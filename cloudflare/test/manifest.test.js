@@ -392,3 +392,75 @@ test("safe IPTV diagnostic reports origin HTTP failure without exposing source",
     globalThis.fetch = originalFetch;
   }
 });
+
+test("streamer configuration exposes expanded services, multi-country and discovery controls", async () => {
+  const response = await worker.fetch(
+    new Request(origin + "/configure"), {}, { waitUntil() {} },
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /data-streamer="skyshowtime"/);
+  assert.match(html, /data-streamer="paramount-plus"/);
+  assert.match(html, /data-streamer="crunchyroll"/);
+  assert.match(html, /data-catalog-country="ALL"/);
+  assert.match(html, /data-catalog-country="PT"/);
+  assert.match(html, /data-catalog-country="ES"/);
+  assert.match(html, /streamerTop10Preview/);
+  assert.match(html, /streamerMultiSearchPreview/);
+});
+
+test("configured streamer manifest supports multiple countries, top 10 and multi-source search", async () => {
+  const config = {
+    catalogCountries: ["PT", "ES"],
+    catalogCountry: "PT",
+    features: {
+      streamers: true,
+      streamerTop10: true,
+      streamerMultiSearch: true,
+      selectedStreamerMovies: ["netflix", "skyshowtime"],
+      selectedStreamerSeries: ["netflix", "skyshowtime"],
+    },
+  };
+  const response = await configuredFetch(config);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const ids = new Set(body.catalogs.map(c => c.type + ":" + c.id));
+  assert.ok(ids.has("movie:netflix"));
+  assert.ok(ids.has("series:skyshowtime"));
+  assert.ok(ids.has("movie:pthub-search"));
+  assert.ok(ids.has("series:pthub-search"));
+  assert.ok(ids.has("movie:top10--netflix--PT"));
+  assert.ok(ids.has("movie:top10--netflix--ES"));
+  assert.ok(ids.has("series:top10--skyshowtime--PT"));
+  assert.ok(ids.has("series:top10--skyshowtime--ES"));
+});
+
+test("Todos expands to every configured PT HUB streamer country in Top 10 catalogs", async () => {
+  const config = {
+    catalogCountries: ["ALL"],
+    catalogCountry: "ALL",
+    features: {
+      streamers: true,
+      streamerTop10: true,
+      streamerMultiSearch: false,
+      selectedStreamerMovies: ["netflix"],
+      selectedStreamerSeries: [],
+    },
+  };
+  const response = await configuredFetch(config);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const topIds = body.catalogs
+    .filter(c => c.type === "movie" && c.id.startsWith("top10--netflix--"))
+    .map(c => c.id)
+    .sort();
+  assert.deepEqual(topIds, [
+    "top10--netflix--BR",
+    "top10--netflix--ES",
+    "top10--netflix--FR",
+    "top10--netflix--GB",
+    "top10--netflix--PT",
+    "top10--netflix--US",
+  ]);
+});
+
