@@ -1244,6 +1244,142 @@ async function readClientTrace(env){
   return Array.isArray(events)?events:[];
  }catch{return[]}
 }
+
+function catalogFeatureEnabled(env,key){
+ const value=String(env?.[key]??"").trim().toLowerCase();
+ return !["0","false","off","no"].includes(value);
+}
+function catalogApiMeta(meta,extra={}){
+ const id=String(meta?.id||"");
+ return {
+  id,
+  imdbId:/^tt\d+$/i.test(id)?id:(meta?.imdbId||meta?.imdb_id||null),
+  type:meta?.type||extra.type||null,
+  title:meta?.name||meta?.title||"Título",
+  year:meta?.releaseInfo?String(meta.releaseInfo).match(/\b(19|20)\d{2}\b/)?.[0]||null:null,
+  releaseInfo:meta?.releaseInfo||null,
+  poster:meta?.poster||null,
+  background:meta?.background||null,
+  source:extra.source||meta?._ptHub?.source||"aggregated",
+  ...extra
+ };
+}
+async function apiStreamingCatalog(params){
+ const provider=String(params.get("provider")||"netflix").trim();
+ const type=String(params.get("type")||"movie").toLowerCase();
+ if(!["movie","series"].includes(type))return{error:"type deve ser movie ou series",status:400};
+ if(!STREAMERS.some(x=>x.id===provider))return{error:"provider desconhecido",status:404};
+ const rawCountries=params.getAll("country").length?params.getAll("country"):String(params.get("countries")||params.get("country")||"PT").split(",");
+ const countries=normalizeCatalogCountries(rawCountries);
+ const data=await getJwCatalog(type,provider,countries);
+ return {
+  engine:"streaming",provider,type,countries,
+  source:"justwatch",
+  items:(data?.metas||[]).map(meta=>catalogApiMeta(meta,{provider,countries,availability:{streaming:Object.fromEntries(countries.map(c=>[c,[provider]]))}}))
+ };
+}
+async function apiRankingsCatalog(params){
+ const provider=String(params.get("provider")||"netflix").trim();
+ const type=String(params.get("type")||"movie").toLowerCase();
+ const country=normalizeCountryCode(params.get("country")||"PT");
+ if(!["movie","series"].includes(type))return{error:"type deve ser movie ou series",status:400};
+ if(!STREAMERS.some(x=>x.id===provider))return{error:"provider desconhecido",status:404};
+ const data=await top10StreamerCatalog(type,provider,country);
+ return {
+  engine:"rankings",provider,type,country,
+  rankingSource:"aggregated",
+  source:"justwatch",
+  collectedAt:new Date().toISOString(),
+  items:(data?.metas||[]).map((meta,index)=>catalogApiMeta(meta,{
+   provider,country,rank:index+1,rankingSource:"aggregated"
+  }))
+ };
+}
+async function apiCinemaCatalog(params){
+ const country=normalizeCountryCode(params.get("country")||"PT");
+ const section=String(params.get("section")||"now-playing").toLowerCase();
+ const mode={
+  "now-playing":"cinema","cinema":"cinema",
+  "opening-this-week":"opening-this-week",
+  "upcoming":"upcoming",
+  "popular":"popular",
+  "new":"new"
+ }[section];
+ if(!mode)return{error:"section inválida",status:400};
+ const data=await getDiscoveryJw("movie",mode,country);
+ return {
+  engine:"cinema",country,section,
+  source:"justwatch",
+  items:(data?.metas||[]).map(meta=>catalogApiMeta(meta,{
+   country,cinemaState:section==="now-playing"?"now_playing":section.replace(/-/g,"_"),
+   availability:{cinema:[country]}
+  }))
+ };
+}
+async function apiTelevisionCatalog(config,env,params){
+ if(!config)return{error:"configuração PT•HUB necessária",status:400};
+ const section=String(params.get("section")||"now").toLowerCase();
+ const date=String(params.get("date")||new Date().toISOString().slice(0,10));
+ const channels=await getIPTVChannels(config,env);
+ const items=[];
+ for(const channel of channels){
+  const schedule=Array.isArray(channel?.epgSchedule)?channel.epgSchedule:[];
+  const selected=section==="now"
+   ? (channel?.epg?[channel.epg]:[])
+   : schedule.filter(item=>String(item?.start||"").slice(0,10)===date);
+  for(const programme of selected){
+   if(!programme?.title)continue;
+   items.push({
+    channelId:channel.id||null,
+    channel:channel.name||channel.tvgName||"Canal",
+    logo:channel.logo||null,
+    title:programme.title,
+    description:programme.description||"",
+    start:programme.start||null,
+    stop:programme.stop||null,
+    source:"epg",
+    country:config?.catalogCountry||config?.iptvOrg?.country||"PT"
+   });
+  }
+ }
+ items.sort((a,b)=>String(a.start||"").localeCompare(String(b.start||"")));
+ return{engine:"television",section,date,source:"epg",items:items.slice(0,500)};
+}
+async function apiNowCatalog(config,env,params){
+ const country=normalizeCountryCode(params.get("country")||config?.catalogCountry||"PT");
+ const provider=String(params.get("provider")||"netflix").trim();
+ const [rankings,cinema,tv,arrivals]=await Promise.allSettled([
+  apiRankingsCatalog(new URLSearchParams({country,provider,type:"movie"})),
+  apiCinemaCatalog(new URLSearchParams({country,section:"now-playing"})),
+  config?apiTelevisionCatalog(config,env,new URLSearchParams({section:"now"})):Promise.resolve({engine:"television",items:[]}),
+  getDiscoveryJw("movie","new",country)
+ ]);
+ return{
+  engine:"now",country,collectedAt:new Date().toISOString(),
+  sections:{
+   top10:rankings.status==="fulfilled"?rankings.value:{items:[]},
+   cinema:cinema.status==="fulfilled"?cinema.value:{items:[]},
+   television:tv.status==="fulfilled"?tv.value:{items:[]},
+   arrivedStreaming:arrivals.status==="fulfilled"
+    ?{source:"justwatch",items:(arrivals.value?.metas||[]).slice(0,30).map(meta=>catalogApiMeta(meta,{country,arrivalDate:"observed/estimated"}))}
+    :{items:[]}
+  }
+ };
+}
+async function cachedCatalogResponse(request,ctx,ttlSeconds,producer){
+ const cache=caches?.default;
+ if(!cache)return producer();
+ const cached=await cache.match(request);
+ if(cached)return cached;
+ const value=await producer();
+ const response=value instanceof Response?value:json(value?.error?{ok:false,error:value.error}:{ok:true,...value},value?.status||200,{"Cache-Control":`public, max-age=${ttlSeconds}, stale-while-revalidate=${ttlSeconds}`});
+ if(response.ok){
+  const put=cache.put(request,response.clone());
+  if(ctx?.waitUntil)ctx.waitUntil(put);else await put;
+ }
+ return response;
+}
+
 export default {async fetch(request,env,ctx){
  const url=new URL(request.url),p=url.pathname;
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
