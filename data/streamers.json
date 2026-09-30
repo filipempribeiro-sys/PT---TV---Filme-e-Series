@@ -439,5 +439,84 @@
       "Shahid",
       "Shahid VIP"
     ]
+  },
+  {
+    "id": "mubi",
+    "name": "MUBI",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "MUBI"
+    ]
+  },
+  {
+    "id": "filmin",
+    "name": "Filmin",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Filmin"
+    ]
+  },
+  {
+    "id": "britbox",
+    "name": "BritBox",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "BritBox"
+    ]
+  },
+  {
+    "id": "amc-plus",
+    "name": "AMC+",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "AMC Plus",
+      "AMC+"
+    ]
+  },
+  {
+    "id": "plex",
+    "name": "Plex",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Plex"
+    ]
+  },
+  {
+    "id": "pluto-tv",
+    "name": "Pluto TV",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Pluto TV"
+    ]
+  },
+  {
+    "id": "tubi",
+    "name": "Tubi",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Tubi",
+      "Tubi TV"
+    ]
   }
 ]
