@@ -1385,6 +1385,12 @@ export default {async fetch(request,env,ctx){
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
+ if(request.method==="GET"&&p==="/api/catalog/providers"){
+  return json({ok:true,providers:STREAMERS.map(item=>({id:item.id,name:item.name,aliases:item.aliases||[],supportsCatalog:true,supportsRanking:true,countries:"dynamic-via-JustWatch"}))},200,{"Cache-Control":"public, max-age=21600"});
+ }
+ if(request.method==="GET"&&p==="/api/catalog/countries"){
+  return json({ok:true,countries:normalizeCatalogCountries(["ALL"]),allToken:"ALL"},200,{"Cache-Control":"public, max-age=21600"});
+ }
  if(request.method==="GET"&&p==="/api/catalog/streaming"){
   if(!catalogFeatureEnabled(env,"ENABLE_STREAMING_DISCOVERY"))return json({ok:false,error:"Streaming Catalog Engine desativado."},503,noCache);
   return cachedCatalogResponse(request,ctx,21600,async()=>apiStreamingCatalog(url.searchParams));
