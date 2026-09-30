@@ -70,14 +70,46 @@ export function providerTargets(streamerId) {
   return [...new Set([provider.id,provider.name,...(provider.aliases||[])].map(normalizeProviderName).filter(Boolean))];
 }
 
+export function normalizeTitle(value) {
+  return String(value||"")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .trim()
+    .replace(/\s+/g," ");
+}
+
+export function entityKey(meta = {}) {
+  const imdb=String(meta.imdbId||meta.imdb_id||meta?.externalIds?.imdbId||"").trim().toLowerCase();
+  if (/^tt\d+$/i.test(imdb)) return "imdb:"+imdb;
+  const id=String(meta.id||"").trim().toLowerCase();
+  if (/^tt\d+$/i.test(id)) return "imdb:"+id;
+  if (/^tmdb:\d+$/i.test(id)) return id;
+  const title=normalizeTitle(meta.name||meta.title||"");
+  const year=String(meta.year||meta.releaseInfo||meta.released||"").match(/\b(19|20)\d{2}\b/)?.[0]||"";
+  const type=String(meta.type||"").toLowerCase();
+  return title ? "title:"+type+":"+title+":"+year : (id ? "id:"+id : "");
+}
+
 export function mergeCatalogMetas(results, limit = 100) {
-  const seen = new Set();
+  const seen = new Map();
   const metas = [];
   for (const result of results || []) {
     for (const meta of result?.metas || []) {
-      const key = String(meta?.id || ((meta?.type||"")+":"+(meta?.name||""))).toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
+      const key = entityKey(meta);
+      if (!key) continue;
+      if (seen.has(key)) {
+        const index=seen.get(key);
+        const current=metas[index];
+        const availability={
+          ...(current?.availability||{}),
+          ...(meta?.availability||{})
+        };
+        metas[index]={...current,...meta,availability:Object.keys(availability).length?availability:undefined};
+        continue;
+      }
+      seen.set(key,metas.length);
       metas.push(meta);
       if (metas.length >= limit) return {metas};
     }
