@@ -1431,7 +1431,7 @@ async function apiNowCatalog(config,env,params){
  };
 }
 async function cachedCatalogResponse(request,ctx,ttlSeconds,producer){
- const cache=caches?.default;
+ const cache=globalThis.caches?.default;
  if(!cache)return producer();
  const cached=await cache.match(request);
  if(cached)return cached;
