@@ -464,3 +464,33 @@ test("Todos expands to every configured PT HUB streamer country in Top 10 catalo
   ]);
 });
 
+
+
+test("configured manifest exposes compact AGORA catalogs without catalog explosion", async () => {
+  const config = {
+    catalogCountries: ["PT"],
+    catalogCountry: "PT",
+    features: {
+      featured: true,
+      featuredContent: { movies: true, series: true },
+      streamers: true,
+      streamerTop10: false,
+      streamerMultiSearch: false,
+      selectedStreamerMovies: ["netflix"],
+      selectedStreamerSeries: ["netflix"],
+      iptv: true,
+    },
+    mode: "m3u",
+    m3uSource: "url",
+    m3uUrl: "https://example.org/authorized.m3u",
+  };
+  const response = await configuredFetch(config);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const ids = new Set(body.catalogs.map(c => c.type + ":" + c.id));
+  assert.ok(ids.has("movie:now-top10"));
+  assert.ok(ids.has("movie:now-cinema"));
+  assert.ok(ids.has("movie:now-arrivals"));
+  assert.ok(ids.has("movie:now-week"));
+  assert.ok(ids.has("channel:tv-now"));
+});
