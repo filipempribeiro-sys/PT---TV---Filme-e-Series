@@ -300,14 +300,40 @@ async function top10StreamerCatalog(type,streamerId,country){
  const d=await getJwCatalog(type,streamerId,country);
  return{metas:(d?.metas||[]).slice(0,10)};
 }
+async function tvMazeSearch(search){
+ if(!String(search||"").trim())return{metas:[]};
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
+ try{
+  const response=await fetch("https://api.tvmaze.com/search/shows?q="+encodeURIComponent(search),{
+   signal:controller.signal,headers:{"Accept":"application/json","User-Agent":`PT-HUB/${VERSION}`}
+  });
+  if(!response.ok)return{metas:[]};
+  const rows=await response.json(),metas=[];
+  for(const row of Array.isArray(rows)?rows:[]){
+   const show=row?.show,imdb=String(show?.externals?.imdb||"").trim();
+   if(!/^tt\d+$/i.test(imdb))continue;
+   metas.push({
+    id:imdb,type:"series",name:show?.name||"Título",
+    releaseInfo:show?.premiered?String(show.premiered).slice(0,4):undefined,
+    poster:show?.image?.original||show?.image?.medium||`https://images.metahub.space/poster/medium/${imdb}/img`,
+    background:`https://images.metahub.space/background/medium/${imdb}/img`,
+    _ptHub:{source:"tvmaze"}
+   });
+  }
+  return{metas};
+ }catch{return{metas:[]}}finally{clearTimeout(timer)}
+}
 async function multiSourceCatalog(config,type,search=""){
  const ids=selectedStreamerIds(config,type),countries=configuredCatalogCountries(config||{});
  const settled=await Promise.allSettled(ids.map(id=>getJwCatalog(type,id,countries)));
  const jw=mergeCatalogMetas(settled.filter(x=>x.status==="fulfilled").map(x=>x.value),100);
  const filtered=search?{metas:filterMetasBySearch(jw.metas||[],search)}:jw;
- let cine={metas:[]};
- if(search){try{cine=await getCinemetaCatalog(type,search)}catch{}}
- return mergeCatalogMetas([cine,filtered],100);
+ const extras=[];
+ if(search){
+  try{extras.push(await getCinemetaCatalog(type,search))}catch{}
+  if(type==="series"){try{extras.push(await tvMazeSearch(search))}catch{}}
+ }
+ return mergeCatalogMetas([...extras,filtered],100);
 }
 
 async function manifest(config=null){
