@@ -1295,6 +1295,44 @@ async function apiRankingsCatalog(params){
   }))
  };
 }
+async function persistRankingHistory(env,data){
+ if(!env?.PT_HUB_M3U||!data||data.error)return data;
+ const key=`catalog:ranking:${data.provider}:${data.country}:${data.type}`;
+ let previous={};
+ try{previous=JSON.parse(await env.PT_HUB_M3U.get(key)||"{}")}catch{}
+ const prevItems=previous?.items&&typeof previous.items==="object"?previous.items:{};
+ const nextItems={};
+ data.items=(data.items||[]).map(item=>{
+  const prior=prevItems[item.id]||{};
+  const weeksInTop=Math.max(1,Number(prior.weeksInTop)||0)+(prior.rank?1:0);
+  nextItems[item.id]={rank:item.rank,weeksInTop,lastSeen:data.collectedAt};
+  return {...item,previousRank:Number(prior.rank)||null,weeksInTop,historySource:"observed"};
+ });
+ try{await env.PT_HUB_M3U.put(key,JSON.stringify({collectedAt:data.collectedAt,items:nextItems}),{expirationTtl:60*60*24*180})}catch{}
+ return data;
+}
+async function apiArrivalsCatalog(env,params){
+ const streaming=await apiStreamingCatalog(params);
+ if(streaming?.error)return streaming;
+ const provider=streaming.provider,type=streaming.type,countries=streaming.countries||["PT"];
+ const collectedAt=new Date().toISOString(),items=[];
+ for(const country of countries){
+  const key=`catalog:arrivals:${provider}:${country}:${type}`;
+  let state={};
+  try{state=JSON.parse(await env?.PT_HUB_M3U?.get(key)||"{}")}catch{}
+  const prior=state?.items&&typeof state.items==="object"?state.items:{};
+  const next={...prior};
+  for(const item of streaming.items||[]){
+   const firstSeen=prior[item.id]?.firstSeen||collectedAt;
+   next[item.id]={firstSeen,lastSeen:collectedAt};
+   items.push({...item,country,firstSeen,arrivalDate:firstSeen,arrivalDateSource:"observed"});
+  }
+  try{if(env?.PT_HUB_M3U)await env.PT_HUB_M3U.put(key,JSON.stringify({collectedAt,items:next}),{expirationTtl:60*60*24*180})}catch{}
+ }
+ items.sort((a,b)=>String(b.firstSeen||"").localeCompare(String(a.firstSeen||"")));
+ return{engine:"arrivals",provider,type,countries,source:"observed-availability",collectedAt,items:mergeCatalogMetas([{metas:items}],100).metas};
+}
+
 async function apiCinemaCatalog(params){
  const country=normalizeCountryCode(params.get("country")||"PT");
  const section=String(params.get("section")||"now-playing").toLowerCase();
