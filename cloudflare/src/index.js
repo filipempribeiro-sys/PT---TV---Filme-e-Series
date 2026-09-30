@@ -1435,7 +1435,14 @@ export default {async fetch(request,env,ctx){
  }
  if(request.method==="GET"&&p==="/api/catalog/rankings"){
   if(!catalogFeatureEnabled(env,"ENABLE_RANKINGS"))return json({ok:false,error:"Rankings Engine desativado."},503,noCache);
-  return cachedCatalogResponse(request,ctx,21600,async()=>apiRankingsCatalog(url.searchParams));
+  const data=await apiRankingsCatalog(url.searchParams);
+  const enriched=await persistRankingHistory(env,data);
+  return json(enriched?.error?{ok:false,error:enriched.error}:{ok:true,...enriched},enriched?.status||200,{"Cache-Control":"public, max-age=21600, stale-while-revalidate=43200"});
+ }
+ if(request.method==="GET"&&p==="/api/catalog/arrivals"){
+  if(!catalogFeatureEnabled(env,"ENABLE_STREAMING_DISCOVERY"))return json({ok:false,error:"Streaming Catalog Engine desativado."},503,noCache);
+  const data=await apiArrivalsCatalog(env,url.searchParams);
+  return json(data?.error?{ok:false,error:data.error}:{ok:true,...data},data?.status||200,{"Cache-Control":"public, max-age=21600, stale-while-revalidate=43200"});
  }
  if(request.method==="GET"&&p==="/api/catalog/cinema"){
   if(!catalogFeatureEnabled(env,"ENABLE_CINEMA"))return json({ok:false,error:"Cinema Engine desativado."},503,noCache);
