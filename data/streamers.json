@@ -2,26 +2,442 @@
   {
     "id": "netflix",
     "name": "Netflix",
-    "type": ["movie", "series"]
-  },
-  {
-    "id": "hbomax",
-    "name": "HBO Max",
-    "type": ["movie", "series"]
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Netflix"
+    ]
   },
   {
     "id": "prime-video",
     "name": "Prime Video",
-    "type": ["movie", "series"]
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Amazon Prime Video",
+      "Prime Video"
+    ]
   },
   {
     "id": "disney-plus",
     "name": "Disney+",
-    "type": ["movie", "series"]
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Disney Plus",
+      "Disney+"
+    ]
   },
   {
     "id": "apple-tv-plus",
     "name": "Apple TV+",
-    "type": ["movie", "series"]
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Apple TV Plus",
+      "Apple TV+"
+    ]
+  },
+  {
+    "id": "paramount-plus",
+    "name": "Paramount+",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Paramount Plus",
+      "Paramount+"
+    ]
+  },
+  {
+    "id": "now",
+    "name": "NOW",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "NOW",
+      "Now TV"
+    ]
+  },
+  {
+    "id": "skyshowtime",
+    "name": "SkyShowtime",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "SkyShowtime"
+    ]
+  },
+  {
+    "id": "hbomax",
+    "name": "HBO Max",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "HBO Max",
+      "Max"
+    ]
+  },
+  {
+    "id": "crunchyroll",
+    "name": "Crunchyroll",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Crunchyroll"
+    ]
+  },
+  {
+    "id": "rakuten-tv",
+    "name": "Rakuten TV",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Rakuten TV"
+    ]
+  },
+  {
+    "id": "viu",
+    "name": "Viu",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Viu"
+    ]
+  },
+  {
+    "id": "raiplay",
+    "name": "RaiPlay",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Rai Play",
+      "RaiPlay"
+    ]
+  },
+  {
+    "id": "chili",
+    "name": "CHILI",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "CHILI",
+      "Chili"
+    ]
+  },
+  {
+    "id": "vudu",
+    "name": "Vudu",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Vudu",
+      "Fandango At Home"
+    ]
+  },
+  {
+    "id": "starz",
+    "name": "STARZ",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "STARZ",
+      "Starz"
+    ]
+  },
+  {
+    "id": "hulu",
+    "name": "Hulu",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Hulu"
+    ]
+  },
+  {
+    "id": "peacock",
+    "name": "Peacock",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Peacock",
+      "Peacock Premium"
+    ]
+  },
+  {
+    "id": "discovery-plus",
+    "name": "Discovery+",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Discovery Plus",
+      "Discovery+"
+    ]
+  },
+  {
+    "id": "viki",
+    "name": "Viki",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Rakuten Viki",
+      "Viki"
+    ]
+  },
+  {
+    "id": "canal-plus",
+    "name": "Canal+",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Canal Plus",
+      "Canal+"
+    ]
+  },
+  {
+    "id": "tf1",
+    "name": "TF1",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "TF1",
+      "TF1+"
+    ]
+  },
+  {
+    "id": "m6-plus",
+    "name": "M6+",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "M6 Plus",
+      "M6+"
+    ]
+  },
+  {
+    "id": "wow",
+    "name": "WOW",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "WOW"
+    ]
+  },
+  {
+    "id": "viaplay",
+    "name": "Viaplay",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Viaplay"
+    ]
+  },
+  {
+    "id": "videoland",
+    "name": "Videoland",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Videoland"
+    ]
+  },
+  {
+    "id": "globoplay",
+    "name": "Globoplay",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Globoplay"
+    ]
+  },
+  {
+    "id": "claro-video",
+    "name": "Claro Video",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Claro Video"
+    ]
+  },
+  {
+    "id": "u-next",
+    "name": "U-NEXT",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "U-NEXT",
+      "U Next"
+    ]
+  },
+  {
+    "id": "wavve",
+    "name": "Wavve",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Wavve"
+    ]
+  },
+  {
+    "id": "coupang-play",
+    "name": "Coupang Play",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Coupang Play"
+    ]
+  },
+  {
+    "id": "jiohotstar",
+    "name": "JioHotstar",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "JioHotstar",
+      "Hotstar",
+      "Disney+ Hotstar"
+    ]
+  },
+  {
+    "id": "zee5",
+    "name": "ZEE5",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "ZEE5"
+    ]
+  },
+  {
+    "id": "stan",
+    "name": "Stan",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Stan"
+    ]
+  },
+  {
+    "id": "player",
+    "name": "Player",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Player",
+      "Player.pl"
+    ]
+  },
+  {
+    "id": "cda-pl",
+    "name": "cda.pl",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "cda.pl",
+      "CDA Premium"
+    ]
+  },
+  {
+    "id": "oneplay",
+    "name": "Oneplay",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Oneplay"
+    ]
+  },
+  {
+    "id": "osn",
+    "name": "OSN+",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "OSN Plus",
+      "OSN+"
+    ]
+  },
+  {
+    "id": "shahid",
+    "name": "Shahid",
+    "type": [
+      "movie",
+      "series"
+    ],
+    "aliases": [
+      "Shahid",
+      "Shahid VIP"
+    ]
   }
 ]
