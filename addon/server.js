@@ -5398,21 +5398,6 @@ app.get(
         return res.json(ptExternalCatalog);
       }
 
-      const top10Catalog = parseTop10CatalogId(id);
-      if (top10Catalog) {
-        return res.json(
-          await getTop10StreamerCatalog(
-            "movie",
-            top10Catalog.streamerId,
-            top10Catalog.country
-          )
-        );
-      }
-
-      if (id === "pthub-search") {
-        return res.json(await getMultiSourceCatalog(config || {}, "movie", ""));
-      }
-
       const validCatalog =
         movieCatalogs.some(
           (catalog) => catalog.id === id
@@ -5654,21 +5639,6 @@ app.get(
 
       if (ptExternalCatalog) {
         return res.json(ptExternalCatalog);
-      }
-
-      const top10Catalog = parseTop10CatalogId(id);
-      if (top10Catalog) {
-        return res.json(
-          await getTop10StreamerCatalog(
-            "series",
-            top10Catalog.streamerId,
-            top10Catalog.country
-          )
-        );
-      }
-
-      if (id === "pthub-search") {
-        return res.json(await getMultiSourceCatalog(config || {}, "series", ""));
       }
 
       const validCatalog =
