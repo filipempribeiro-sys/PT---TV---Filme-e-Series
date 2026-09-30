@@ -1385,6 +1385,37 @@ export default {async fetch(request,env,ctx){
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});
+ if(request.method==="GET"&&p==="/api/catalog/streaming"){
+  if(!catalogFeatureEnabled(env,"ENABLE_STREAMING_DISCOVERY"))return json({ok:false,error:"Streaming Catalog Engine desativado."},503,noCache);
+  return cachedCatalogResponse(request,ctx,21600,async()=>apiStreamingCatalog(url.searchParams));
+ }
+ if(request.method==="GET"&&p==="/api/catalog/rankings"){
+  if(!catalogFeatureEnabled(env,"ENABLE_RANKINGS"))return json({ok:false,error:"Rankings Engine desativado."},503,noCache);
+  return cachedCatalogResponse(request,ctx,21600,async()=>apiRankingsCatalog(url.searchParams));
+ }
+ if(request.method==="GET"&&p==="/api/catalog/cinema"){
+  if(!catalogFeatureEnabled(env,"ENABLE_CINEMA"))return json({ok:false,error:"Cinema Engine desativado."},503,noCache);
+  return cachedCatalogResponse(request,ctx,21600,async()=>apiCinemaCatalog(url.searchParams));
+ }
+ if(request.method==="GET"&&p==="/api/catalog/now"){
+  const data=await apiNowCatalog(null,env,url.searchParams);
+  return json({ok:true,...data},200,{"Cache-Control":"public, max-age=3600, stale-while-revalidate=7200"});
+ }
+ let catalogTvApi=p.match(/^\/([^/]+)\/api\/catalog\/tv$/);
+ if(request.method==="GET"&&catalogTvApi){
+  if(!catalogFeatureEnabled(env,"ENABLE_TV_CATALOG"))return json({ok:false,error:"Television Catalog Engine desativado."},503,noCache);
+  const cfg=decodeConfig(catalogTvApi[1]);
+  if(!cfg)return json({ok:false,error:"Configuração inválida."},400,noCache);
+  const data=await apiTelevisionCatalog(cfg,env,url.searchParams);
+  return json(data?.error?{ok:false,error:data.error}:{ok:true,...data},data?.status||200,{"Cache-Control":"private, max-age=900"});
+ }
+ let catalogNowApi=p.match(/^\/([^/]+)\/api\/catalog\/now$/);
+ if(request.method==="GET"&&catalogNowApi){
+  const cfg=decodeConfig(catalogNowApi[1]);
+  if(!cfg)return json({ok:false,error:"Configuração inválida."},400,noCache);
+  const data=await apiNowCatalog(cfg,env,url.searchParams);
+  return json({ok:true,...data},200,{"Cache-Control":"private, max-age=900"});
+ }
  if(request.method==="GET"&&p==="/api/last-stream-request")return json({ok:true,last:await readStreamTrace(env)},200,noCache);
  if(request.method==="GET"&&p==="/api/client-trace"){
   let storageRoundtrip=false;
