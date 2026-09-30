@@ -375,11 +375,21 @@ async function manifest(config=null){
      }
    }
  }
+ if(hasConfig&&(showStreamers||showFeatured)){
+   const nowCountry=normalizeCatalogCountries(configuredCatalogCountries(config||{}))[0]||"PT";
+   const nowProvider=(sm&&sm[0])||(ss&&ss[0])||"netflix";
+   const providerName=STREAMERS.find(x=>x.id===nowProvider)?.name||nowProvider;
+   add("movie","now-top10",`🔥 AGORA · Top 10 ${providerName} · ${nowCountry}`);
+   add("movie","now-cinema","🍿 AGORA · Nos Cinemas");
+   add("movie","now-arrivals","🆕 AGORA · Chegou aos Streamers");
+   add("movie","now-week","📅 AGORA · Estreias esta semana");
+ }
  const showIPTV=features.iptv===true;
  if(showIPTV){
    const name=config?.mode==="xtream"?(config?.xtreamCatalogName||"📡 Xtream API"):config?.mode==="iptv-org"?(config?.iptvOrg?.catalogName||"📡 IPTV-org Free"):(config?.m3uCatalogName||"📡 Minha IPTV");
    add("channel","m3u",name);
  }
+ if(hasConfig&&showIPTV)add("channel","tv-now","📺 AGORA · Agora na TV");
  if(features.operators===true){
    const selected=Array.isArray(features.selectedOperators)?features.selectedOperators:[];
    for(const op of OPERATORS) if(!hasConfig||selected.includes(op.id)) add("channel",op.id,op.name);
