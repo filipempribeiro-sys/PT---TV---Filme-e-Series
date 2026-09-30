@@ -68,7 +68,36 @@ async function getDiscoveryJw(type,mode,country){
   const settled=await Promise.allSettled(countries.map(code=>getDiscoveryJw(type,mode,code)));
   return mergeCatalogMetas(settled.filter(x=>x.status==="fulfilled").map(x=>x.value),100);
  }
- country=normalizeCountryCode(countries[0]);const key=`${mode}:${type}:${country}`,old=discoveryCache.get(key);if(old&&Date.now()-old.t<1800000)return old.v;const q=`query GetPopularTitles($country: Country!,$filter: TitleFilter,$first: Int!,$sortBy: PopularTitlesSorting!){popularTitles(country:$country,filter:$filter,first:$first,sortBy:$sortBy){edges{node{objectType content(country:$country,language:pt){title originalReleaseYear externalIds{imdbId}}}}}}`;const filter={objectTypes:[type==="movie"?"MOVIE":"SHOW"]};if(mode==="cinema")filter.monetizationTypes=["CINEMA"];const d=await jwGraph("GetPopularTitles",q,{country,filter,first:100,sortBy:mode==="popular"?"POPULAR":"TRENDING"}),year=new Date().getUTCFullYear(),seen=new Set(),metas=[];for(const e of d?.popularTitles?.edges||[]){const c=e?.node?.content,id=c?.externalIds?.imdbId;if(!id||seen.has(id))continue;if(mode==="new"&&(!Number(c.originalReleaseYear)||Number(c.originalReleaseYear)<year-1))continue;seen.add(id);metas.push({id,type,name:c.title||"Título",releaseInfo:c.originalReleaseYear?String(c.originalReleaseYear):undefined,poster:`https://images.metahub.space/poster/medium/${id}/img`,background:`https://images.metahub.space/background/medium/${id}/img`})}if(mode==="new")metas.sort((a,b)=>Number(b.releaseInfo||0)-Number(a.releaseInfo||0));let final=metas.slice(0,100);if(mode==="cinema"&&!final.length)final=(await getDiscoveryJw(type,"new",country)).metas.slice(0,100);const v={metas:final};discoveryCache.set(key,{t:Date.now(),v});return v}
+ country=normalizeCountryCode(countries[0]);
+ const key=`${mode}:${type}:${country}`,old=discoveryCache.get(key);
+ if(old&&Date.now()-old.t<1800000)return old.v;
+ const q=`query GetPopularTitles($country: Country!,$filter: TitleFilter,$first: Int!,$sortBy: PopularTitlesSorting!){popularTitles(country:$country,filter:$filter,first:$first,sortBy:$sortBy){edges{node{objectType content(country:$country,language:pt){title originalReleaseYear originalReleaseDate externalIds{imdbId}}}}}}`;
+ const filter={objectTypes:[type==="movie"?"MOVIE":"SHOW"]};
+ if(mode==="cinema")filter.monetizationTypes=["CINEMA"];
+ const d=await jwGraph("GetPopularTitles",q,{country,filter,first:100,sortBy:mode==="popular"?"POPULAR":"TRENDING"});
+ const now=Date.now(),weekMs=7*24*60*60*1000,year=new Date().getUTCFullYear(),seen=new Set(),metas=[];
+ for(const edge of d?.popularTitles?.edges||[]){
+  const item=edge?.node?.content,id=item?.externalIds?.imdbId;
+  if(!id||seen.has(id))continue;
+  const releaseDate=item?.originalReleaseDate?Date.parse(item.originalReleaseDate):NaN;
+  if(mode==="new"&&(!Number(item.originalReleaseYear)||Number(item.originalReleaseYear)<year-1))continue;
+  if(mode==="upcoming"&&(!Number.isFinite(releaseDate)||releaseDate<now))continue;
+  if(mode==="opening-this-week"&&(!Number.isFinite(releaseDate)||releaseDate<now||releaseDate>now+weekMs))continue;
+  seen.add(id);
+  metas.push({
+   id,type,name:item.title||"Título",
+   releaseInfo:item.originalReleaseDate||(item.originalReleaseYear?String(item.originalReleaseYear):undefined),
+   poster:`https://images.metahub.space/poster/medium/${id}/img`,
+   background:`https://images.metahub.space/background/medium/${id}/img`,
+   _ptHub:{source:"justwatch",country,section:mode}
+  });
+ }
+ if(mode==="new")metas.sort((a,b)=>String(b.releaseInfo||"").localeCompare(String(a.releaseInfo||"")));
+ if(mode==="upcoming"||mode==="opening-this-week")metas.sort((a,b)=>String(a.releaseInfo||"").localeCompare(String(b.releaseInfo||"")));
+ let final=metas.slice(0,100);
+ if(mode==="cinema"&&!final.length)final=(await getDiscoveryJw(type,"new",country)).metas.slice(0,100);
+ const v={metas:final};discoveryCache.set(key,{t:Date.now(),v});return v;
+}
 
 const RTP_PLAY_CHANNELS=Object.freeze([
 {id:"rtpplay:rtp1",slug:"rtp1",name:"RTP1",logo:"https://cdn-images.rtp.pt/common/img/channels/logos/color/horizontal/5-563718101410.png",group:"RTP Play • TV em direto",streamUrl:"https://streaming-live.rtp.pt/liverepeater/smil:rtp1HD.smil/playlist.m3u8"},
