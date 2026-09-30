@@ -35,6 +35,14 @@ test("catalog merge deduplicates IDs", () => {
   assert.deepEqual(result.metas.map(x=>x.id), ["tt1","tt2","tt3"]);
 });
 
+test("catalog merge also deduplicates normalized title + year when IDs differ", () => {
+  const result=mergeCatalogMetas([
+    {metas:[{id:"source-a:1",type:"movie",name:"Amélie",releaseInfo:"2001"}]},
+    {metas:[{id:"source-b:9",type:"movie",name:"Amelie",year:2001}]}
+  ]);
+  assert.equal(result.metas.length,1);
+});
+
 test("Top10 catalog IDs round-trip", () => {
   assert.deepEqual(parseTop10CatalogId("top10--netflix--PT"), {streamerId:"netflix",country:"PT"});
   assert.equal(parseTop10CatalogId("netflix"), null);
