@@ -43,6 +43,15 @@ function absoluteTviUrl(value = "") {
   }
 }
 
+function absoluteHttpUrl(value = "") {
+  try {
+    const u = new URL(decodeHtml(value), TVI_BASE);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 function tviPath(value = "") {
   try {
     const u = new URL(value, TVI_BASE);
@@ -129,10 +138,13 @@ function anchorImage(anchor) {
   const attrs = imageMatch?.[1] || "";
   const srcset = attrValue(attrs, "srcset") || attrValue(attrs, "data-srcset");
   const srcsetFirst = srcset ? srcset.split(",")[0].trim().split(/\s+/)[0] : "";
-  return absoluteTviUrl(
+  const style = attrValue(attrs, "style");
+  const styleUrl = style.match(/url\((['"]?)(.*?)\1\)/i)?.[2] || "";
+  return absoluteHttpUrl(
     attrValue(attrs, "src") || attrValue(attrs, "data-src") ||
     attrValue(attrs, "data-original") || attrValue(attrs, "data-lazy-src") ||
-    attrValue(attrs, "data-image") || attrValue(attrs, "data-background-image") || srcsetFirst,
+    attrValue(attrs, "data-image") || attrValue(attrs, "data-background-image") ||
+    srcsetFirst || styleUrl,
   );
 }
 
@@ -222,6 +234,24 @@ function parseVideos(html, rootPath) {
     });
     if (videos.length >= 300) break;
   }
+  const escapedRoot = rootPath.replace(/[.*+?^$()|[\]\\]/g, "\\  return videos;
+}
+
+export async function getTviVodCatalog");
+  const embedded = new RegExp(escapedRoot + "\\/video\\/[a-z0-9]+", "gi");
+  for (const match of String(html).matchAll(embedded)) {
+    const path = match[0].replace(/\\\//g, "/");
+    if (seen.has(path)) continue;
+    seen.add(path);
+    videos.push({
+      id: encodeId(path),
+      title: "Episódio " + (videos.length + 1),
+      season: 1,
+      episode: videos.length + 1,
+      released: new Date(0).toISOString(),
+    });
+    if (videos.length >= 300) break;
+  }
   return videos;
 }
 
@@ -258,7 +288,7 @@ export async function getTviVodMeta(type, id) {
   const html = await fetchHtml(website);
   const title = cleanTitle(metaTag(html, "og:title")) || slugTitle(root);
   const description = cleanTitle(metaTag(html, "og:description") || metaTag(html, "description")) || "Conteúdo TVI Player";
-  const poster = absoluteTviUrl(metaTag(html, "og:image"));
+  const poster = absoluteHttpUrl(metaTag(html, "og:image"));
   const videos = parseVideos(html, root);
   const meta = {
     id: rootId,
@@ -273,6 +303,46 @@ export async function getTviVodMeta(type, id) {
   return meta;
 }
 
+
+function extractJsonData(html = "") {
+  const match = String(html).match(/jsonData\s*=\s*(\{[\s\S]*?\})\s*;/i);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch { return null; }
+}
+
+function withQuery(url, key, value) {
+  const u = new URL(url);
+  u.searchParams.set(key, value);
+  return u.toString();
+}
+
+async function resolveTviAuthorizedHls(website, html) {
+  const data = extractJsonData(html);
+  if (!data || !data.id || !data.videoUrl) return "";
+  const rawUrl = absoluteHttpUrl(data.videoUrl);
+  if (!rawUrl || !/\.m3u8(?:$|[?#])/i.test(rawUrl)) return "";
+
+  const liveType = String(data.liveType || "").toUpperCase();
+  const videoType = String(data.videoType || "").toUpperCase();
+  const rightsKind = liveType === "DIRETO" && videoType === "LIVE" ? "live" : "vod";
+
+  const rights = await fetch("https://services.iol.pt/direitos/rights/" + rightsKind + "?id=" + encodeURIComponent(data.id), {
+    headers: { Referer: TVI_BASE + "/", Accept: "application/json" },
+  });
+  if (!rights.ok && rights.status !== 403) return "";
+  const rightsBody = await rights.json().catch(() => null);
+  if (!rightsBody || rightsBody.detail !== "ok") return "";
+
+  const matrix = await fetch("https://services.iol.pt/matrix?userId=", {
+    headers: { Referer: TVI_BASE + "/", Accept: "text/plain,*/*" },
+  });
+  if (!matrix.ok) return "";
+  const token = (await matrix.text()).trim();
+  if (!token) return "";
+
+  return withQuery(rawUrl, "wmsAuthSign", token);
+}
+
 export async function getTviVodStreams(type, id) {
   if (type !== "series") return [];
   const path = decodeId(id);
@@ -280,13 +350,21 @@ export async function getTviVodStreams(type, id) {
   const website = TVI_BASE + path;
   try {
     const html = await fetchHtml(website);
-    const mediaUrl = extractPublicMediaUrl(html);
-    if (mediaUrl) {
+    const authorizedHls = await resolveTviAuthorizedHls(website, html);
+    if (authorizedHls) {
       return [{
         name: "PT•HUB • TVI Player",
         title: "TVI Player",
-        url: mediaUrl,
-        behaviorHints: { notWebReady: true },
+        url: authorizedHls,
+        behaviorHints: {
+          notWebReady: true,
+          proxyHeaders: {
+            request: {
+              Referer: TVI_BASE + "/",
+              "User-Agent": "Mozilla/5.0",
+            },
+          },
+        },
       }];
     }
   } catch {}
