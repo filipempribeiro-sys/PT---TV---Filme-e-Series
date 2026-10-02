@@ -9,15 +9,15 @@ const metaCache = new Map();
 export const RTP_VOD_CATALOGS = Object.freeze([
   { type: "series", id: "rtp-vod-series", name: "🇵🇹 RTP Play • Séries", url: RTP_BASE + "/play/hub/series" },
   { type: "series", id: "rtp-vod-docs", name: "🇵🇹 RTP Play • DOCS", url: RTP_BASE + "/play/hub/documentarios" },
-  { type: "movie", id: "rtp-vod-concerts", name: "🎵 RTP Palco • Concertos", url: RTP_BASE + "/play/palco/colecao/concertos" },
+  { type: "movie", id: "rtp-vod-concerts", name: "🎵 RTP Palco • Concertos", url: RTP_BASE + "/play/palco/espetaculos/concertos/todos" },
 ]);
 
 function decodeHtml(value = "") {
-  const named = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ", ndash: "–", mdash: "—", hellip: "…", laquo: "«", raquo: "»" };
+  const named = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ", ndash: "–", mdash: "—", hellip: "…", laquo: "«", raquo: "»", aacute:"á", eacute:"é", iacute:"í", oacute:"ó", uacute:"ú", agrave:"à", acirc:"â", ecirc:"ê", ocirc:"ô", atilde:"ã", otilde:"õ", ccedil:"ç", Aacute:"Á", Eacute:"É", Iacute:"Í", Oacute:"Ó", Uacute:"Ú", Agrave:"À", Acirc:"Â", Ecirc:"Ê", Ocirc:"Ô", Atilde:"Ã", Otilde:"Õ", Ccedil:"Ç" };
   return String(value)
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#([0-9]+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
-    .replace(/&([a-z]+);/gi, (m, key) => named[key.toLowerCase()] ?? m);
+    .replace(/&([a-z]+);/gi, (m, key) => named[key] ?? named[key.toLowerCase()] ?? m);
 }
 
 function stripTags(value = "") {
@@ -109,6 +109,10 @@ function slugTitle(path) {
     .replace(/\b\p{L}/gu, c => c.toUpperCase());
 }
 
+function cleanTitle(value = "") {
+  return stripTags(value).replace(/^Aceder\s+a:\s*/i, "").replace(/^Ver\s+(?:agora|detalhes):?\s*/i, "").trim();
+}
+
 function parseCatalog(html, type) {
   const metas = [];
   const seen = new Set();
@@ -122,11 +126,13 @@ function parseCatalog(html, type) {
     const body = match[5] || "";
     const imageMatch = body.match(/<img\b([^>]*)>/i);
     const imageAttrs = imageMatch?.[1] || "";
-    const title = attrValue(attrs, "title") || attrValue(attrs, "aria-label") ||
-      attrValue(imageAttrs, "alt") || stripTags(body) || slugTitle(path);
+    const title = cleanTitle(attrValue(attrs, "title") || attrValue(attrs, "aria-label") ||
+      attrValue(imageAttrs, "alt") || stripTags(body)) || slugTitle(path);
     if (!title || title.length > 220) continue;
+    const srcset = attrValue(imageAttrs, "srcset") || attrValue(imageAttrs, "data-srcset");
+    const srcsetFirst = srcset ? srcset.split(",")[0].trim().split(/\s+/)[0] : "";
     const posterRaw = attrValue(imageAttrs, "src") || attrValue(imageAttrs, "data-src") ||
-      attrValue(imageAttrs, "data-original") || attrValue(imageAttrs, "data-lazy-src");
+      attrValue(imageAttrs, "data-original") || attrValue(imageAttrs, "data-lazy-src") || srcsetFirst;
     const poster = absoluteRtpUrl(posterRaw);
     seen.add(path);
     metas.push({
@@ -139,6 +145,66 @@ function parseCatalog(html, type) {
     });
   }
   return metas;
+}
+
+
+function parseEpisodes(html, programPath) {
+  const videos = [];
+  const seen = new Set();
+  const re = /<a\b([^>]*?)href\s*=\s*(["'])(.*?)\2([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = re.exec(html)) && videos.length < 300) {
+    const href = absoluteRtpUrl(match[3]);
+    const path = rtpPathFromUrl(href);
+    if (!path || !/\/e\d+\//i.test(path) || seen.has(path)) continue;
+    const attrs = (match[1] || "") + " " + (match[4] || "");
+    const body = match[5] || "";
+    const imageMatch = body.match(/<img\b([^>]*)>/i);
+    const imageAttrs = imageMatch?.[1] || "";
+    const rawTitle = attrValue(attrs, "title") || attrValue(attrs, "aria-label") ||
+      attrValue(imageAttrs, "alt") || stripTags(body);
+    const title = cleanTitle(rawTitle) || ("Episódio " + (videos.length + 1));
+    const ep = path.match(/\/e(\d+)\//i)?.[1] || "";
+    seen.add(path);
+    videos.push({
+      id: encodeId(path),
+      title,
+      season: 1,
+      episode: videos.length + 1,
+      ...(ep ? { episodeId: ep } : {}),
+    });
+  }
+  return videos;
+}
+
+function unescapeMediaUrl(value = "") {
+  return decodeHtml(String(value))
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\\//g, "/")
+    .replace(/\\\\/g, "\\");
+}
+
+function extractPublicMediaUrl(html = "") {
+  const text = String(html);
+  const candidates = [];
+  for (const pattern of [
+    /https?:\\?\/\\?\/[^"'<>\\\s]+?\.m3u8(?:\?[^"'<>\\\s]*)?/gi,
+    /https?:\\?\/\\?\/[^"'<>\\\s]+?\.mpd(?:\?[^"'<>\\\s]*)?/gi,
+    /["'](?:file|src|url)["']\s*:\s*["'](https?:\\?\/\\?\/[^"']+)["']/gi,
+  ]) {
+    for (const match of text.matchAll(pattern)) candidates.push(match[1] || match[0]);
+  }
+  for (const raw of candidates) {
+    const value = unescapeMediaUrl(raw);
+    try {
+      const u = new URL(value);
+      if ((u.protocol === "https:" || u.protocol === "http:") &&
+          (/\.m3u8(?:$|[?#])/i.test(u.toString()) || /\.mpd(?:$|[?#])/i.test(u.toString()))) {
+        return u.toString();
+      }
+    } catch {}
+  }
+  return "";
 }
 
 function findCatalog(type, id) {
@@ -175,9 +241,10 @@ export async function getRtpVodMeta(type, id) {
   const website = RTP_BASE + path;
   const html = await fetchHtml(website);
   const title = metaTag(html, "og:title") || firstHeading(html) || slugTitle(path);
-  const description = metaTag(html, "og:description") || metaTag(html, "description") || "Conteúdo RTP Play";
+  const description = cleanTitle(metaTag(html, "og:description") || metaTag(html, "description")) || "Conteúdo RTP Play";
   const poster = absoluteRtpUrl(metaTag(html, "og:image"));
-  const meta = { id, type, name: title, description, website, ...(poster ? { poster, background: poster } : { poster: RTP_LOGO }) };
+  const videos = parseEpisodes(html, path);
+  const meta = { id, type, name: cleanTitle(title), description, website, ...(videos.length ? { videos } : {}), ...(poster ? { poster, background: poster } : { poster: RTP_LOGO }) };
   metaCache.set(key, { at: Date.now(), meta });
   return meta;
 }
@@ -186,5 +253,11 @@ export async function getRtpVodStreams(type, id) {
   if (type !== "movie" && type !== "series") return [];
   const path = decodeId(id);
   if (!path) return [];
-  return [{ name: "PT•HUB • RTP Play", title: "Ver na RTP Play", externalUrl: RTP_BASE + path }];
+  const website = RTP_BASE + path;
+  try {
+    const html = await fetchHtml(website);
+    const mediaUrl = extractPublicMediaUrl(html);
+    if (mediaUrl) return [{ name: "PT•HUB • RTP Play", title: "RTP Play", url: mediaUrl, behaviorHints: { notWebReady: true } }];
+  } catch {}
+  return [{ name: "PT•HUB • RTP Play", title: "Ver na RTP Play", externalUrl: website }];
 }

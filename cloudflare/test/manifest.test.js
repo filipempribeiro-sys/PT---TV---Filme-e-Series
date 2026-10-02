@@ -599,3 +599,57 @@ test("TVI Player public VOD catalog exposes programs and episode playback links"
     globalThis.fetch = source;
   }
 });
+
+
+test("RTP VOD cleans accessibility labels, decodes PT entities, exposes episodes and prefers public HLS", async () => {
+  const config = { features: { ptContentSources: { rtpPlay: true } } };
+  const source = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const target = typeof input === "string" ? input : input.url;
+    if (target === "https://www.rtp.pt/play/hub/series") {
+      return new Response(
+        '<a href="/play/p15493/a-febre" aria-label="Aceder a: A Febre">' +
+        '<img data-src="https://cdn-images.rtp.pt/a-febre.jpg" alt="Aceder a: A Febre"></a>',
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    if (target === "https://www.rtp.pt/play/p15493/a-febre") {
+      return new Response(
+        '<html><head><meta property="og:title" content="A Febre">' +
+        '<meta property="og:description" content="Thriller pol&amp;iacute;tico"></head><body>' +
+        '<a href="/play/p15493/e956396/a-febre">Ep. 1</a>' +
+        '<script>window.media={"file":"https:\\/\\/streaming.rtp.pt\\/vod\\/a-febre\\/master.m3u8"}</script>' +
+        '</body></html>',
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    if (target === "https://www.rtp.pt/play/p15493/e956396/a-febre") {
+      return new Response(
+        '<html><script>var player={"src":"https:\\/\\/streaming.rtp.pt\\/vod\\/a-febre\\/e956396.m3u8"}</script></html>',
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    throw new Error("Unexpected mock request: " + target);
+  };
+  try {
+    const catalogResponse = await configuredFetch(config, "catalog/series/rtp-vod-series.json");
+    const catalog = await catalogResponse.json();
+    assert.equal(catalog.metas[0].name, "A Febre");
+    assert.equal(catalog.metas[0].poster, "https://cdn-images.rtp.pt/a-febre.jpg");
+
+    const id = encodeURIComponent(catalog.metas[0].id);
+    const metaResponse = await configuredFetch(config, "meta/series/" + id + ".json");
+    const meta = (await metaResponse.json()).meta;
+    assert.equal(meta.name, "A Febre");
+    assert.equal(meta.description, "Thriller político");
+    assert.equal(meta.videos.length, 1);
+    assert.match(meta.videos[0].id, /^rtpvod:/);
+
+    const streamResponse = await configuredFetch(config, "stream/series/" + encodeURIComponent(meta.videos[0].id) + ".json");
+    const streams = (await streamResponse.json()).streams;
+    assert.equal(streams[0].url, "https://streaming.rtp.pt/vod/a-febre/e956396.m3u8");
+    assert.equal(streams[0].externalUrl, undefined);
+  } finally {
+    globalThis.fetch = source;
+  }
+});
