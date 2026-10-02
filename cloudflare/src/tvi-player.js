@@ -11,11 +11,11 @@ export const TVI_VOD_CATALOGS = Object.freeze([
 ]);
 
 function decodeHtml(value = "") {
-  const named = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ", ndash: "–", mdash: "—", hellip: "…" };
+  const named = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ", ndash: "–", mdash: "—", hellip: "…", aacute:"á", eacute:"é", iacute:"í", oacute:"ó", uacute:"ú", agrave:"à", acirc:"â", ecirc:"ê", ocirc:"ô", atilde:"ã", otilde:"õ", ccedil:"ç", Aacute:"Á", Eacute:"É", Iacute:"Í", Oacute:"Ó", Uacute:"Ú", Agrave:"À", Acirc:"Â", Ecirc:"Ê", Ocirc:"Ô", Atilde:"Ã", Otilde:"Õ", Ccedil:"Ç" };
   return String(value)
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#([0-9]+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
-    .replace(/&([a-z]+);/gi, (m, key) => named[key.toLowerCase()] ?? m);
+    .replace(/&([a-z]+);/gi, (m, key) => named[key] ?? named[key.toLowerCase()] ?? m);
 }
 
 function stripTags(value = "") {
@@ -106,6 +106,10 @@ function slugTitle(path) {
     .replace(/\b\p{L}/gu, c => c.toUpperCase());
 }
 
+function cleanTitle(value = "") {
+  return stripTags(value).replace(/^Aceder\s+a:\s*/i, "").replace(/^Ver\s+(?:agora|detalhes):?\s*/i, "").trim();
+}
+
 function parseAnchors(html) {
   const out = [];
   const re = /<a\b([^>]*?)href\s*=\s*(["'])(.*?)\2([^>]*)>([\s\S]*?)<\/a>/gi;
@@ -123,17 +127,51 @@ function parseAnchors(html) {
 function anchorImage(anchor) {
   const imageMatch = anchor.body.match(/<img\b([^>]*)>/i);
   const attrs = imageMatch?.[1] || "";
+  const srcset = attrValue(attrs, "srcset") || attrValue(attrs, "data-srcset");
+  const srcsetFirst = srcset ? srcset.split(",")[0].trim().split(/\s+/)[0] : "";
   return absoluteTviUrl(
     attrValue(attrs, "src") || attrValue(attrs, "data-src") ||
-    attrValue(attrs, "data-original") || attrValue(attrs, "data-lazy-src"),
+    attrValue(attrs, "data-original") || attrValue(attrs, "data-lazy-src") ||
+    attrValue(attrs, "data-image") || attrValue(attrs, "data-background-image") || srcsetFirst,
   );
 }
 
 function anchorTitle(anchor, fallback = "") {
   const imageMatch = anchor.body.match(/<img\b([^>]*)>/i);
   const imageAttrs = imageMatch?.[1] || "";
-  return attrValue(anchor.attrs, "title") || attrValue(anchor.attrs, "aria-label") ||
-    attrValue(imageAttrs, "alt") || stripTags(anchor.body) || fallback;
+  return cleanTitle(attrValue(anchor.attrs, "title") || attrValue(anchor.attrs, "aria-label") ||
+    attrValue(imageAttrs, "alt") || stripTags(anchor.body)) || fallback;
+}
+
+
+function unescapeMediaUrl(value = "") {
+  return decodeHtml(String(value))
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\\//g, "/")
+    .replace(/\\\\/g, "\\");
+}
+
+function extractPublicMediaUrl(html = "") {
+  const text = String(html);
+  const candidates = [];
+  for (const pattern of [
+    /https?:\\?\/\\?\/[^"'<>\\\s]+?\.m3u8(?:\?[^"'<>\\\s]*)?/gi,
+    /https?:\\?\/\\?\/[^"'<>\\\s]+?\.mpd(?:\?[^"'<>\\\s]*)?/gi,
+    /["'](?:file|src|url|streamUrl|playbackUrl)["']\s*:\s*["'](https?:\\?\/\\?\/[^"']+)["']/gi,
+  ]) {
+    for (const match of text.matchAll(pattern)) candidates.push(match[1] || match[0]);
+  }
+  for (const raw of candidates) {
+    const value = unescapeMediaUrl(raw);
+    try {
+      const u = new URL(value);
+      if ((u.protocol === "https:" || u.protocol === "http:") &&
+          (/\.m3u8(?:$|[?#])/i.test(u.toString()) || /\.mpd(?:$|[?#])/i.test(u.toString()))) {
+        return u.toString();
+      }
+    } catch {}
+  }
+  return "";
 }
 
 function programRootPath(path) {
@@ -218,8 +256,8 @@ export async function getTviVodMeta(type, id) {
 
   const website = TVI_BASE + root;
   const html = await fetchHtml(website);
-  const title = metaTag(html, "og:title") || slugTitle(root);
-  const description = metaTag(html, "og:description") || metaTag(html, "description") || "Conteúdo TVI Player";
+  const title = cleanTitle(metaTag(html, "og:title")) || slugTitle(root);
+  const description = cleanTitle(metaTag(html, "og:description") || metaTag(html, "description")) || "Conteúdo TVI Player";
   const poster = absoluteTviUrl(metaTag(html, "og:image"));
   const videos = parseVideos(html, root);
   const meta = {
@@ -239,9 +277,22 @@ export async function getTviVodStreams(type, id) {
   if (type !== "series") return [];
   const path = decodeId(id);
   if (!path) return [];
+  const website = TVI_BASE + path;
+  try {
+    const html = await fetchHtml(website);
+    const mediaUrl = extractPublicMediaUrl(html);
+    if (mediaUrl) {
+      return [{
+        name: "PT•HUB • TVI Player",
+        title: "TVI Player",
+        url: mediaUrl,
+        behaviorHints: { notWebReady: true },
+      }];
+    }
+  } catch {}
   return [{
     name: "PT•HUB • TVI Player",
     title: /\/video\//i.test(path) ? "Ver episódio no TVI Player" : "Abrir no TVI Player",
-    externalUrl: TVI_BASE + path,
+    externalUrl: website,
   }];
 }
