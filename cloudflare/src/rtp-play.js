@@ -9,7 +9,7 @@ const metaCache = new Map();
 export const RTP_VOD_CATALOGS = Object.freeze([
   { type: "series", id: "rtp-vod-series", name: "🇵🇹 RTP Play • Séries", url: RTP_BASE + "/play/hub/series" },
   { type: "series", id: "rtp-vod-docs", name: "🇵🇹 RTP Play • DOCS", url: RTP_BASE + "/play/hub/documentarios" },
-  { type: "movie", id: "rtp-vod-concerts", name: "🎵 RTP Palco • Concertos", url: RTP_BASE + "/play/palco/espetaculos/concertos/todos" },
+  { type: "music", id: "rtp-vod-concerts", name: "🎵 RTP Palco • Concertos", url: RTP_BASE + "/play/palco/espetaculos/concertos/todos", palcoOnly: true },
 ]);
 
 function decodeHtml(value = "") {
@@ -113,7 +113,7 @@ function cleanTitle(value = "") {
   return stripTags(value).replace(/^Aceder\s+a:\s*/i, "").replace(/^Ver\s+(?:agora|detalhes):?\s*/i, "").trim();
 }
 
-function parseCatalog(html, type) {
+function parseCatalog(html, type, catalog = null) {
   const metas = [];
   const seen = new Set();
   const anchorRe = /<a\b([^>]*?)href\s*=\s*(["'])(.*?)\2([^>]*)>([\s\S]*?)<\/a>/gi;
@@ -123,6 +123,7 @@ function parseCatalog(html, type) {
     const href = absoluteRtpUrl(match[3]);
     const path = rtpPathFromUrl(href);
     if (!path || seen.has(path)) continue;
+    if (catalog?.palcoOnly && !/^\/play\/palco\/p\d+(?:\/e\d+)?\//i.test(path)) continue;
     const body = match[5] || "";
     const imageMatch = body.match(/<img\b([^>]*)>/i);
     const imageAttrs = imageMatch?.[1] || "";
@@ -221,7 +222,7 @@ export async function getRtpVodCatalog(type, id, search = "") {
     metas = cached.metas;
   } else {
     const html = await fetchHtml(catalog.url);
-    metas = parseCatalog(html, type);
+    metas = parseCatalog(html, type, catalog);
     catalogCache.set(key, { at: Date.now(), metas });
   }
   const needle = stripTags(search).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -250,7 +251,7 @@ export async function getRtpVodMeta(type, id) {
 }
 
 export async function getRtpVodStreams(type, id) {
-  if (type !== "movie" && type !== "series") return [];
+  if (type !== "movie" && type !== "series" && type !== "music") return [];
   const path = decodeId(id);
   if (!path) return [];
   const website = RTP_BASE + path;
