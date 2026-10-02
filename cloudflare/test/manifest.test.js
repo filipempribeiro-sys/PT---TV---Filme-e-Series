@@ -7,13 +7,16 @@ const tokenFor = config => Buffer.from(JSON.stringify(config), "utf8").toString(
 const configuredFetch = (config, resource = "manifest.json") =>
   worker.fetch(new Request(`${origin}/${tokenFor(config)}/${resource}`), {}, { waitUntil() {} });
 
-test("RTP Play live channels can be enabled without Portuguese films and series", async () => {
+test("RTP Play live and VOD catalogs can be enabled without Portuguese films and series", async () => {
   const response = await configuredFetch({ features: { ptContentSources: { rtpPlay: true } } });
   assert.equal(response.status, 200);
   const manifest = await response.json();
   assert.ok(manifest.catalogs.some(c => c.type === "channel" && c.id === "rtp-play"));
+  assert.ok(manifest.catalogs.some(c => c.type === "series" && c.id === "rtp-vod-series"));
+  assert.ok(manifest.catalogs.some(c => c.type === "series" && c.id === "rtp-vod-docs"));
+  assert.ok(manifest.catalogs.some(c => c.type === "movie" && c.id === "rtp-vod-concerts"));
   assert.ok(manifest.resources.some(r => typeof r === "object" && r.name === "stream" &&
-    r.types.includes("channel") && r.idPrefixes.includes("rtpplay:")));
+    r.types.includes("channel") && r.idPrefixes.includes("rtpplay:") && r.idPrefixes.includes("rtpvod:")));
 });
 
 test("IPTV installs under channel catalogs and does not enable RTP Play", async () => {
@@ -493,4 +496,50 @@ test("configured manifest exposes compact AGORA catalogs without catalog explosi
   assert.ok(ids.has("movie:now-arrivals"));
   assert.ok(ids.has("movie:now-week"));
   assert.ok(ids.has("channel:tv-now"));
+});
+
+
+test("RTP Palco public concert catalog exposes meta and official playback link", async () => {
+  const config = { features: { ptContentSources: { rtpPlay: true } } };
+  const source = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const target = typeof input === "string" ? input : input.url;
+    if (target === "https://www.rtp.pt/play/palco/colecao/concertos") {
+      return new Response(
+        '<a href="/play/palco/p15328/xutos-e-pontapes-ao-vivo-45-anos-ola-vida-malvada">' +
+        '<img src="https://cdn-images.rtp.pt/test/xutos.jpg" alt="Xutos &amp; Pontapés ao Vivo 45 Anos - Olá Vida Malvada"></a>',
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    if (target === "https://www.rtp.pt/play/palco/p15328/xutos-e-pontapes-ao-vivo-45-anos-ola-vida-malvada") {
+      return new Response(
+        '<html><head><meta property="og:title" content="Xutos &amp; Pontapés ao Vivo 45 Anos - Olá Vida Malvada">' +
+        '<meta property="og:description" content="Concerto RTP Palco">' +
+        '<meta property="og:image" content="https://cdn-images.rtp.pt/test/xutos-detail.jpg"></head></html>',
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    throw new Error("Unexpected mock request: " + target);
+  };
+  try {
+    const catalogResponse = await configuredFetch(config, "catalog/movie/rtp-vod-concerts.json");
+    assert.equal(catalogResponse.status, 200);
+    const catalog = await catalogResponse.json();
+    assert.equal(catalog.metas.length, 1);
+    assert.equal(catalog.metas[0].name, "Xutos & Pontapés ao Vivo 45 Anos - Olá Vida Malvada");
+    assert.match(catalog.metas[0].id, /^rtpvod:/);
+    const encodedId = encodeURIComponent(catalog.metas[0].id);
+    const metaResponse = await configuredFetch(config, "meta/movie/" + encodedId + ".json");
+    assert.equal(metaResponse.status, 200);
+    const meta = (await metaResponse.json()).meta;
+    assert.equal(meta.name, "Xutos & Pontapés ao Vivo 45 Anos - Olá Vida Malvada");
+    assert.equal(meta.description, "Concerto RTP Palco");
+    const streamResponse = await configuredFetch(config, "stream/movie/" + encodedId + ".json");
+    assert.equal(streamResponse.status, 200);
+    const streams = (await streamResponse.json()).streams;
+    assert.equal(streams.length, 1);
+    assert.equal(streams[0].externalUrl, "https://www.rtp.pt/play/palco/p15328/xutos-e-pontapes-ao-vivo-45-anos-ola-vida-malvada");
+  } finally {
+    globalThis.fetch = source;
+  }
 });
