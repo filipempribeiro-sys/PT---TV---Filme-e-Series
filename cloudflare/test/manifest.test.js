@@ -543,3 +543,59 @@ test("RTP Palco public concert catalog exposes meta and official playback link",
     globalThis.fetch = source;
   }
 });
+
+
+test("TVI Player public VOD catalog exposes programs and episode playback links", async () => {
+  const config = { features: { ptContent: true, ptContentSources: { tviPlayer: true } } };
+  const source = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const target = typeof input === "string" ? input : input.url;
+    if (target === "https://tviplayer.iol.pt/programas/tvi") {
+      return new Response(
+        '<a href="/programa/o-beijo-do-escorpiao/6989b284d34e92a344989887">' +
+        '<img src="https://tviplayer.iol.pt/img/beijo.jpg" alt="O Beijo do Escorpião"></a>',
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    if (target === "https://tviplayer.iol.pt/programa/o-beijo-do-escorpiao/6989b284d34e92a344989887") {
+      return new Response(
+        '<html><head><meta property="og:title" content="O Beijo do Escorpião">' +
+        '<meta property="og:description" content="Novela TVI">' +
+        '<meta property="og:image" content="https://tviplayer.iol.pt/img/beijo-detail.jpg"></head><body>' +
+        '<a href="/programa/o-beijo-do-escorpiao/6989b284d34e92a344989887/video/abc123">' +
+        '<img alt="Episódio 1" src="https://tviplayer.iol.pt/img/e1.jpg"></a></body></html>',
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    throw new Error("Unexpected mock request: " + target);
+  };
+  try {
+    const manifestResponse = await configuredFetch(config, "manifest.json");
+    assert.equal(manifestResponse.status, 200);
+    const manifest = await manifestResponse.json();
+    assert.ok(manifest.catalogs.some(c => c.type === "series" && c.id === "tvi-vod-programas"));
+
+    const catalogResponse = await configuredFetch(config, "catalog/series/tvi-vod-programas.json");
+    assert.equal(catalogResponse.status, 200);
+    const catalog = await catalogResponse.json();
+    assert.equal(catalog.metas.length, 1);
+    assert.equal(catalog.metas[0].name, "O Beijo do Escorpião");
+    assert.match(catalog.metas[0].id, /^tvivod:/);
+
+    const metaResponse = await configuredFetch(config, "meta/series/" + encodeURIComponent(catalog.metas[0].id) + ".json");
+    assert.equal(metaResponse.status, 200);
+    const meta = (await metaResponse.json()).meta;
+    assert.equal(meta.name, "O Beijo do Escorpião");
+    assert.equal(meta.videos.length, 1);
+    assert.equal(meta.videos[0].title, "Episódio 1");
+
+    const streamResponse = await configuredFetch(config, "stream/series/" + encodeURIComponent(meta.videos[0].id) + ".json");
+    assert.equal(streamResponse.status, 200);
+    const streams = (await streamResponse.json()).streams;
+    assert.equal(streams.length, 1);
+    assert.equal(streams[0].externalUrl,
+      "https://tviplayer.iol.pt/programa/o-beijo-do-escorpiao/6989b284d34e92a344989887/video/abc123");
+  } finally {
+    globalThis.fetch = source;
+  }
+});
