@@ -89,13 +89,12 @@ function decodeRtpObfuscatedPlayers(html=""){
   )
 }
 function normalizeRtpMediaUrl(raw=""){
-  const value=unescapeMediaUrl(raw)
-    .replace("/drm-fps/","/hls/")
-    .replace("/drm-dash/","/dash/");
+  const value=unescapeMediaUrl(raw);
   try{
     const u=new URL(value);
     if(!/^https?:$/.test(u.protocol))return"";
     if(u.hostname==="streaming-ondemand.rtp.pt")return"";
+    if(/\/drm-(?:fps|dash)\//i.test(u.pathname))return"";
     if(/\.m3u8(?:$|[?#])/i.test(u.toString())||/\.mpd(?:$|[?#])/i.test(u.toString()))return u.toString();
   }catch{}
   return""
@@ -166,18 +165,90 @@ async function getRtpEpisodePublicAssets(programId,episodeId){
     return collectAssetUrls(result?.assets||result?.episode||result);
   }catch{return[]}
 }
+
+const playbackProbeCache=new Map();
+function rtpPlaybackHeaders(){
+  return {
+    Accept:"*/*",
+    "Accept-Language":"pt-PT,pt;q=0.9,en;q=0.7",
+    "User-Agent":"Mozilla/5.0",
+    Referer:RTP_BASE+"/play/",
+    Origin:RTP_BASE
+  }
+}
+async function fetchProbeText(target,limit=256*1024){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+  try{
+    const response=await fetch(target,{headers:rtpPlaybackHeaders(),redirect:"follow",signal:controller.signal});
+    if(!response.ok)return null;
+    const text=await response.text();
+    return {text:text.slice(0,limit),url:response.url||target,contentType:response.headers.get("content-type")||""}
+  }catch{return null}finally{clearTimeout(timer)}
+}
+function firstHlsReference(text=""){
+  for(const raw of String(text).replace(/\r/g,"").split("\n")){
+    const line=raw.trim();
+    if(line&&!line.startsWith("#"))return line
+  }
+  return""
+}
+function firstHlsMediaSegment(text=""){
+  const lines=String(text).replace(/\r/g,"").split("\n");
+  let sawMedia=false;
+  for(const raw of lines){
+    const line=raw.trim();
+    if(line.startsWith("#EXTINF:")){sawMedia=true;continue}
+    if(sawMedia&&line&&!line.startsWith("#"))return line
+  }
+  return""
+}
+async function probeRtpHls(url,depth=0){
+  if(depth>2)return false;
+  const fetched=await fetchProbeText(url);
+  if(!fetched||!fetched.text.trimStart().startsWith("#EXTM3U"))return false;
+  const text=fetched.text,base=fetched.url||url;
+  const segment=firstHlsMediaSegment(text);
+  if(segment){
+    try{
+      const mediaUrl=new URL(segment,base).toString(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+      try{
+        const response=await fetch(mediaUrl,{headers:{...rtpPlaybackHeaders(),Range:"bytes=0-1"},redirect:"follow",signal:controller.signal});
+        return response.ok||response.status===206
+      }finally{clearTimeout(timer)}
+    }catch{return false}
+  }
+  const child=firstHlsReference(text);
+  if(!child)return false;
+  try{return await probeRtpHls(new URL(child,base).toString(),depth+1)}catch{return false}
+}
+async function probeRtpDash(url){
+  const fetched=await fetchProbeText(url);
+  return !!fetched&&/<MPD\b/i.test(fetched.text)
+}
+async function probeRtpPlaybackUrl(url){
+  const cached=playbackProbeCache.get(url);
+  if(cached&&Date.now()-cached.at<5*60*1000)return cached.ok;
+  const ok=/\.m3u8(?:$|[?#])/i.test(url)?await probeRtpHls(url):/\.mpd(?:$|[?#])/i.test(url)?await probeRtpDash(url):false;
+  playbackProbeCache.set(url,{at:Date.now(),ok});
+  return ok
+}
 async function resolveRtpPlaybackUrls(path){
   const resolved=await resolveEpisodePath(path);
-  const urls=[];
+  const candidates=[];
   if(resolved.programId&&resolved.episodeId){
     for(const u of await getRtpEpisodePublicAssets(resolved.programId,resolved.episodeId)){
-      if(!urls.includes(u))urls.push(u)
+      if(!candidates.includes(u))candidates.push(u)
     }
   }
   try{
     const html=await fetchHtml(RTP_BASE+resolved.path);
-    for(const u of extractPublicMediaUrls(html))if(!urls.includes(u))urls.push(u)
+    for(const u of extractPublicMediaUrls(html))if(!candidates.includes(u))candidates.push(u)
   }catch{}
+  const urls=[];
+  for(const u of candidates){
+    if(await probeRtpPlaybackUrl(u))urls.push(u)
+  }
+  urls.sort((a,b)=>Number(/\.mpd(?:$|[?#])/i.test(a))-Number(/\.mpd(?:$|[?#])/i.test(b)));
   return{path:resolved.path,urls}
 }
 function findCatalog(type,id){return RTP_VOD_CATALOGS.find(x=>x.type===type&&x.id===id)||null}
