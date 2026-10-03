@@ -122,6 +122,64 @@ function extractPublicMediaUrl(html=""){
   const urls=extractPublicMediaUrls(html);
   return urls.find(u=>/\.m3u8(?:$|[?#])/i.test(u))||urls.find(u=>/\.mpd(?:$|[?#])/i.test(u))||""
 }
+
+function parseRtpProgramEpisode(path=""){
+  const m=String(path).match(/^\/play\/(?:palco\/|zigzag\/)?(p\d+)(?:\/(e\d+))?/i);
+  return m?{programId:m[1],episodeId:m[2]||""}:null
+}
+async function resolveEpisodePath(path){
+  const parsed=parseRtpProgramEpisode(path);
+  if(!parsed)return{path,programId:"",episodeId:""};
+  if(parsed.episodeId)return{path,programId:parsed.programId,episodeId:parsed.episodeId};
+  try{
+    const response=await fetch(RTP_BASE+path,{redirect:"follow",headers:{Accept:"text/html,application/xhtml+xml","Accept-Language":"pt-PT,pt;q=0.9","User-Agent":"Mozilla/5.0"}});
+    if(response.ok){
+      const finalPath=rtpPathFromUrl(response.url);
+      const finalParsed=parseRtpProgramEpisode(finalPath);
+      if(finalParsed?.episodeId)return{path:finalPath,programId:finalParsed.programId,episodeId:finalParsed.episodeId};
+      const html=await response.text();
+      const e=html.match(/\/play\/(?:palco\/|zigzag\/)?(p\d+)\/(e\d+)\//i);
+      if(e)return{path:e[0].replace(/\/$/,""),programId:e[1],episodeId:e[2]};
+    }
+  }catch{}
+  return{path,programId:parsed.programId,episodeId:""}
+}
+function collectAssetUrls(value,out=[]){
+  if(value==null)return out;
+  if(typeof value==="string"){
+    const u=normalizeRtpMediaUrl(value);
+    if(u&&!out.includes(u))out.push(u);
+    return out
+  }
+  if(Array.isArray(value)){for(const item of value)collectAssetUrls(item,out);return out}
+  if(typeof value==="object"){for(const item of Object.values(value))collectAssetUrls(item,out)}
+  return out
+}
+async function getRtpEpisodePublicAssets(programId,episodeId){
+  if(!/^p\d+$/i.test(programId)||!/^e\d+$/i.test(episodeId))return[];
+  const url=RTP_BASE+"/play/api/1/get-episode/"+programId.slice(1)+"/"+episodeId.slice(1)+"?include_assets=true&include_webparams=true";
+  try{
+    const response=await fetch(url,{headers:{Accept:"application/json,text/plain,*/*","User-Agent":"Mozilla/5.0","Referer":RTP_BASE+"/play/"}});
+    if(!response.ok)return[];
+    const data=await response.json();
+    const result=data?.result||data;
+    return collectAssetUrls(result?.assets||result?.episode||result);
+  }catch{return[]}
+}
+async function resolveRtpPlaybackUrls(path){
+  const resolved=await resolveEpisodePath(path);
+  const urls=[];
+  if(resolved.programId&&resolved.episodeId){
+    for(const u of await getRtpEpisodePublicAssets(resolved.programId,resolved.episodeId)){
+      if(!urls.includes(u))urls.push(u)
+    }
+  }
+  try{
+    const html=await fetchHtml(RTP_BASE+resolved.path);
+    for(const u of extractPublicMediaUrls(html))if(!urls.includes(u))urls.push(u)
+  }catch{}
+  return{path:resolved.path,urls}
+}
 function findCatalog(type,id){return RTP_VOD_CATALOGS.find(x=>x.type===type&&x.id===id)||null}
 
 export async function getRtpVodCatalog(type,id,search=""){
@@ -143,7 +201,7 @@ export async function getRtpVodCatalog(type,id,search=""){
 
 export async function getRtpVodMeta(type,id){
   const path=decodeId(id);if(!path)return null;const key=type+":"+id,cached=metaCache.get(key);if(cached&&Date.now()-cached.at<CACHE_TTL_MS)return cached.meta;
-  const website=RTP_BASE+path,html=await fetchHtml(website),title=metaTag(html,"og:title")||firstHeading(html)||slugTitle(path),description=cleanTitle(metaTag(html,"og:description")||metaTag(html,"description"))||"Conteúdo RTP Play",poster=absoluteHttpUrl(metaTag(html,"og:image")),videos=parseEpisodes(html);
+  const resolved=await resolveEpisodePath(path),website=RTP_BASE+resolved.path,html=await fetchHtml(website),title=metaTag(html,"og:title")||firstHeading(html)||slugTitle(resolved.path),description=cleanTitle(metaTag(html,"og:description")||metaTag(html,"description"))||"Conteúdo RTP Play",poster=absoluteHttpUrl(metaTag(html,"og:image")),videos=parseEpisodes(html);
   const duration=stripTags(html.match(/Dura(?:ç|&ccedil;)ão:\s*([^<\n]+)/i)?.[1]||"");
   const meta={id,type,name:cleanTitle(title),description,website,...(videos.length?{videos}:{}),...(poster?{poster,background:poster}:{poster:RTP_LOGO}),...(duration?{runtime:duration}:{})};
   metaCache.set(key,{at:Date.now(),meta});return meta
@@ -152,7 +210,11 @@ export async function getRtpVodMeta(type,id){
 export async function getRtpVodStreams(type,id){
   if(!["movie","series","music","podcast"].includes(type))return[];
   const path=decodeId(id);if(!path)return[];
-  const website=RTP_BASE+path;
-  try{const mediaUrl=extractPublicMediaUrl(await fetchHtml(website));if(mediaUrl)return[{name:"PT•HUB • RTP Play",title:"RTP Play",url:mediaUrl,behaviorHints:{notWebReady:true}}]}catch{}
+  const resolved=await resolveRtpPlaybackUrls(path),website=RTP_BASE+resolved.path;
+  const streams=[];
+  for(const mediaUrl of resolved.urls){
+    streams.push({name:"PT•HUB • RTP Play",title:/\.mpd(?:$|[?#])/i.test(mediaUrl)?"RTP Play • DASH":"RTP Play • HLS",url:mediaUrl,behaviorHints:{notWebReady:true}})
+  }
+  if(streams.length)return streams;
   return[{name:"PT•HUB • RTP Play",title:"Abrir na RTP Play",externalUrl:website}]
 }
