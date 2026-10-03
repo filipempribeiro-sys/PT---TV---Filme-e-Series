@@ -297,7 +297,7 @@ const OPERATORS=[
 function selectedStreamerIds(config={},type="movie"){
  const f=config?.features||{};
  const list=type==="series"?f.selectedStreamerSeries:f.selectedStreamerMovies;
- return Array.isArray(list)&&list.length?list:STREAMERS.slice(0,5).map(x=>x.id);
+ if(Array.isArray(list))return list; return STREAMERS.slice(0,5).map(x=>x.id);
 }
 async function top10StreamerCatalog(type,streamerId,country){
  const d=await getJwCatalog(type,streamerId,country);
