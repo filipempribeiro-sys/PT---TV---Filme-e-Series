@@ -39,7 +39,7 @@ export const RTP_VOD_CATALOGS = Object.freeze([
   ] },
   { type: "series", id: "rtp-zigzag-programas", name: "🧒 RTP ZigZag • Programas", url: RTP_BASE + "/play/zigzag/programas/all", zigzagOnly: true },
   { type: "podcast", id: "rtp-podcasts", name: "🎙️ RTP Play • Podcasts", url: RTP_BASE + "/play/podcasts", podcastOnly: true },
-  { type: "music", id: "rtp-vod-concerts", name: "🎵 RTP Palco • Concertos", url: RTP_BASE + "/play/palco/espetaculos/concertos/todos", palcoOnly: true },
+  { type: "music", id: "rtp-vod-concerts", name: "🎵 RTP Palco • Concertos", url: RTP_BASE + "/play/palco/colecao/concertos", palcoOnly: true },
   { type: "music", id: "rtp-palco-musica", name: "🎵 RTP Palco • Música", url: RTP_BASE + "/play/palco/espetaculos/musica/todos", palcoOnly: true },
   { type: "music", id: "rtp-palco-danca", name: "🎭 RTP Palco • Dança", url: RTP_BASE + "/play/palco/espetaculos/dan%C3%A7a/todos", palcoOnly: true },
   { type: "music", id: "rtp-palco-opera", name: "🎭 RTP Palco • Ópera", url: RTP_BASE + "/play/palco/espetaculos/opera/todos", palcoOnly: true },
