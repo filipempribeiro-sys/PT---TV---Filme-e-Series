@@ -507,7 +507,7 @@ async function hlsProxy(request,url,profile,target,customUserAgent="",configToke
   clearTimeout(playlistBodyTimeout);
   const bytes=new Uint8Array(buffer);
   const base=upstream.url||target,text=new TextDecoder().decode(bytes);
-  const proxify=(ref)=>{try{const absolute=new URL(ref,base).toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}${configToken?`/${configToken}`:""}/hls-proxy/${encodeURIComponent(profile)}/${enc}${Object.keys(channelHeaders||{}).length?`?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:""}`}catch{return ref}};
+  const proxify=(ref)=>{try{const absoluteUrl=new URL(ref,base),baseUrl=new URL(base);if((profile==="rtp"||profile==="tvi")&&!absoluteUrl.search&&baseUrl.search){for(const [k,v] of baseUrl.searchParams)absoluteUrl.searchParams.append(k,v)}const absolute=absoluteUrl.toString(),enc=Buffer.from(absolute,"utf8").toString("base64url");return `${url.origin}${configToken?`/${configToken}`:""}/hls-proxy/${encodeURIComponent(profile)}/${enc}${Object.keys(channelHeaders||{}).length?`?ch=${encodeURIComponent(Buffer.from(JSON.stringify(channelHeaders),"utf8").toString("base64url"))}`:""}`}catch{return ref}};
   const rewritten=text.replace(/\r/g,"").split("\n").map(raw=>{const line=raw.trim();if(!line)return raw;if(line.startsWith("#"))return raw.replace(/URI=(["'])(.*?)\1/gi,(m,q,u)=>`URI=${q}${proxify(u)}${q}`);return proxify(line)}).join("\n");
   return new Response(rewritten,{headers:{...common,"Content-Type":"application/vnd.apple.mpegurl"}});
  }catch(e){clearTimeout(timeout);if(playlistBodyTimeout)clearTimeout(playlistBodyTimeout);return new Response("Falha no PT•HUB HLS Engine.",{status:502,headers:{...CORS,"Cache-Control":"no-store"}})}
@@ -1649,7 +1649,7 @@ export default {async fetch(request,env,ctx){
  if(request.method==="GET"&&st){
   try{
    const cfg=decodeConfig(st[1]),type=decodeURIComponent(st[2]),id=decodeURIComponent(st[3]);
-   if((type==="movie"||type==="series"||type==="music"||type==="podcast")&&id.startsWith("rtpvod:"))return json({streams:await getRtpVodStreams(type,id)});
+   if((type==="movie"||type==="series"||type==="music"||type==="podcast")&&id.startsWith("rtpvod:")){const streams=await getRtpVodStreams(type,id);const out=streams.map(stream=>{if(!stream?.url)return stream;const ch={referrer:"https://www.rtp.pt/play/",origin:"https://www.rtp.pt",userAgent:"Mozilla/5.0"};return {...stream,url:`${url.origin}/${st[1]}/hls-proxy/rtp/${Buffer.from(stream.url,"utf8").toString("base64url")}?ch=${encodeURIComponent(Buffer.from(JSON.stringify(ch),"utf8").toString("base64url"))}`,behaviorHints:{...(stream.behaviorHints||{}),notWebReady:true}}});return json({streams:out})}
    if(type==="series"&&id.startsWith("tvivod:")){
     const streams=await getTviVodStreams(type,id);
     const out=streams.map(stream=>{
