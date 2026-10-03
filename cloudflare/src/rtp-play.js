@@ -260,5 +260,5 @@ export async function getRtpVodStreams(type, id) {
     const mediaUrl = extractPublicMediaUrl(html);
     if (mediaUrl) return [{ name: "PT•HUB • RTP Play", title: "RTP Play", url: mediaUrl, behaviorHints: { notWebReady: true } }];
   } catch {}
-  return [{ name: "PT•HUB • RTP Play", title: "Ver na RTP Play", externalUrl: website }];
+  return [];
 }

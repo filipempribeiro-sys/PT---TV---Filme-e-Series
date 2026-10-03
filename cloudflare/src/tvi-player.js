@@ -368,9 +368,5 @@ export async function getTviVodStreams(type, id) {
       }];
     }
   } catch {}
-  return [{
-    name: "PT•HUB • TVI Player",
-    title: /\/video\//i.test(path) ? "Ver episódio no TVI Player" : "Abrir no TVI Player",
-    externalUrl: website,
-  }];
+  return [];
 }
