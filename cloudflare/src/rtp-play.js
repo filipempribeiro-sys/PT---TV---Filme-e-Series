@@ -29,6 +29,15 @@ export const RTP_VOD_CATALOGS = Object.freeze([
   { type: "series", id: "rtp-vod-series", name: "🇵🇹 RTP Play • Séries", url: RTP_BASE + "/play/hub/series" },
   { type: "series", id: "rtp-vod-docs", name: "🇵🇹 RTP Play • DOCS", url: RTP_BASE + "/play/hub/documentarios" },
   { type: "series", id: "rtp-vod-sports", name: "🏅 RTP Play • Desporto", url: RTP_BASE + "/play/hub/rtpdesporto" },
+  { type: "series", id: "rtp-sports-fit-em-casa", name: "🏋️ RTP Desporto • Fit em Casa", staticItems: [
+    { path: "/play/p7179/fit-em-casa-treino-funcional", name: "Fit em Casa: Treino Funcional" },
+    { path: "/play/p7180/fit-em-casa-treino-de-mobilidade", name: "Fit em Casa: Treino de Mobilidade" },
+    { path: "/play/p7302/fit-em-casa-danca", name: "Fit em Casa: Dança" },
+    { path: "/play/p7181/fit-em-casa-pilates", name: "Fit em Casa: Pilates" },
+    { path: "/play/p7184/fit-em-casa-treino-funcional-para-crianca", name: "Fit em Casa: Treino Funcional para Crianças" },
+    { path: "/play/p7182/fit-em-casa-yoga", name: "Fit em Casa: Yoga" },
+    { path: "/play/p7183/fit-em-casa-nutricao", name: "Fit em Casa: Nutrição" },
+  ] },
   { type: "series", id: "rtp-zigzag-programas", name: "🧒 RTP ZigZag • Programas", url: RTP_BASE + "/play/zigzag/programas/all", zigzagOnly: true },
   { type: "podcast", id: "rtp-podcasts", name: "🎙️ RTP Play • Podcasts", url: RTP_BASE + "/play/podcasts", podcastOnly: true },
   { type: "music", id: "rtp-vod-concerts", name: "🎵 RTP Palco • Concertos", url: RTP_BASE + "/play/palco/espetaculos/concertos/todos", palcoOnly: true },
@@ -73,7 +82,14 @@ export async function getRtpVodCatalog(type,id,search=""){
   const catalog=findCatalog(type,id);if(!catalog)return{metas:[]};
   const key=type+":"+id,cached=catalogCache.get(key);let metas;
   if(cached&&Date.now()-cached.at<CACHE_TTL_MS)metas=cached.metas;
-  else{metas=parseCatalog(await fetchHtml(catalog.url),type,catalog);catalogCache.set(key,{at:Date.now(),metas})}
+  else if(Array.isArray(catalog.staticItems)){
+    metas=(await Promise.all(catalog.staticItems.map(async item=>{
+      try{
+        const html=await fetchHtml(RTP_BASE+item.path),poster=absoluteHttpUrl(metaTag(html,"og:image")),description=cleanTitle(metaTag(html,"og:description")||metaTag(html,"description"))||catalog.name;
+        return{id:encodeId(item.path),type,name:item.name,...(poster?{poster,background:poster}:{poster:RTP_LOGO}),description,website:RTP_BASE+item.path};
+      }catch{return{id:encodeId(item.path),type,name:item.name,poster:RTP_LOGO,description:catalog.name,website:RTP_BASE+item.path}}
+    }));catalogCache.set(key,{at:Date.now(),metas})
+  }else{metas=parseCatalog(await fetchHtml(catalog.url),type,catalog);catalogCache.set(key,{at:Date.now(),metas})}
   const needle=stripTags(search).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
   if(needle)metas=metas.filter(x=>String(x.name||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().includes(needle));
   return{metas:metas.slice(0,160)}
