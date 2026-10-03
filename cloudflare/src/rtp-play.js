@@ -7,19 +7,19 @@ const catalogCache = new Map();
 const metaCache = new Map();
 
 const PROGRAM_CATALOGS = [
-  ["rtp-vod-programas","🇵🇹 RTP Play • Programas","https://www.rtp.pt/play/programas/tema/canal"],
-  ["rtp-vod-informacao","🇵🇹 RTP Play • Informação","https://www.rtp.pt/play/programas/informacao/canal"],
-  ["rtp-vod-cultura","🇵🇹 RTP Play • Cultura","https://www.rtp.pt/play/programas/cultura/canal"],
-  ["rtp-vod-humor","🇵🇹 RTP Play • Humor","https://www.rtp.pt/play/programas/humor/canal"],
-  ["rtp-vod-desporto-programas","🏅 RTP Play • Desporto • Programas","https://www.rtp.pt/play/programas/desporto/canal"],
-  ["rtp-vod-ficcao","🇵🇹 RTP Play • Ficção","https://www.rtp.pt/play/programas/ficcao/canal"],
-  ["rtp-vod-entretenimento","🇵🇹 RTP Play • Entretenimento","https://www.rtp.pt/play/programas/entretenimento/canal"],
-  ["rtp-vod-ciencia","🇵🇹 RTP Play • Ciência e Natureza","https://www.rtp.pt/play/programas/ciencia-e-natureza/canal"],
-  ["rtp-vod-entrevista","🇵🇹 RTP Play • Entrevista, Opinião e Debate","https://www.rtp.pt/play/programas/entrevista-opiniao-e-debate/canal"],
-  ["rtp-vod-gastronomia","🇵🇹 RTP Play • Gastronomia","https://www.rtp.pt/play/programas/gastronomia/canal"],
-  ["rtp-vod-artes","🇵🇹 RTP Play • Artes","https://www.rtp.pt/play/programas/artes/canal"],
-  ["rtp-vod-saude","🇵🇹 RTP Play • Saúde","https://www.rtp.pt/play/programas/saude/canal"],
-  ["rtp-vod-especiais","🇵🇹 RTP Play • Especiais","https://www.rtp.pt/play/programas/especiais/canal"],
+  ["rtp-vod-programas","🇵🇹 RTP Play • Programas","https://www.rtp.pt/play/programas/tema/canal/a-z"],
+  ["rtp-vod-informacao","🇵🇹 RTP Play • Informação","https://www.rtp.pt/play/programas/informacao/canal/a-z"],
+  ["rtp-vod-cultura","🇵🇹 RTP Play • Cultura","https://www.rtp.pt/play/programas/cultura/canal/a-z"],
+  ["rtp-vod-humor","🇵🇹 RTP Play • Humor","https://www.rtp.pt/play/programas/humor/canal/a-z"],
+  ["rtp-vod-desporto-programas","🏅 RTP Play • Desporto • Programas","https://www.rtp.pt/play/programas/desporto/canal/a-z"],
+  ["rtp-vod-ficcao","🇵🇹 RTP Play • Ficção","https://www.rtp.pt/play/programas/ficcao/canal/a-z"],
+  ["rtp-vod-entretenimento","🇵🇹 RTP Play • Entretenimento","https://www.rtp.pt/play/programas/entretenimento/canal/a-z"],
+  ["rtp-vod-ciencia","🇵🇹 RTP Play • Ciência e Natureza","https://www.rtp.pt/play/programas/ciencia-e-natureza/canal/a-z"],
+  ["rtp-vod-entrevista","🇵🇹 RTP Play • Entrevista, Opinião e Debate","https://www.rtp.pt/play/programas/entrevista-opiniao-e-debate/canal/a-z"],
+  ["rtp-vod-gastronomia","🇵🇹 RTP Play • Gastronomia","https://www.rtp.pt/play/programas/gastronomia/canal/a-z"],
+  ["rtp-vod-artes","🇵🇹 RTP Play • Artes","https://www.rtp.pt/play/programas/artes/canal/a-z"],
+  ["rtp-vod-saude","🇵🇹 RTP Play • Saúde","https://www.rtp.pt/play/programas/saude/canal/a-z"],
+  ["rtp-vod-especiais","🇵🇹 RTP Play • Especiais","https://www.rtp.pt/play/programas/especiais/canal/a-z"],
 ].map(([id,name,url])=>({type:"series",id,name,url,programList:true}));
 
 export const RTP_VOD_CATALOGS = Object.freeze([
@@ -71,7 +71,7 @@ function slugTitle(path){const slug=String(path).split("/").filter(Boolean).at(-
 function cleanTitle(value=""){return stripTags(value).replace(/^Aceder\s+a:\s*/i,"").replace(/^Ver\s+(?:agora|detalhes):?\s*/i,"").trim()}
 function anchorImage(body=""){const m=body.match(/<img\b([^>]*)>/i),attrs=m?.[1]||"",srcset=attrValue(attrs,"srcset")||attrValue(attrs,"data-srcset"),first=srcset?srcset.split(",")[0].trim().split(/\s+/)[0]:"";const raw=attrValue(attrs,"src")||attrValue(attrs,"data-src")||attrValue(attrs,"data-original")||attrValue(attrs,"data-lazy-src")||first;return absoluteHttpUrl(raw)}
 function catalogAllowsPath(catalog,path){if(catalog?.palcoOnly)return /^\/play\/palco\/p\d+/i.test(path);if(catalog?.zigzagOnly)return /^\/play\/zigzag\/p\d+/i.test(path);if(catalog?.podcastOnly)return /^\/play\/p\d+/i.test(path);return /^\/play\/p\d+/i.test(path)}
-function scopeProgramListHtml(html,catalog){if(!catalog?.programList)return String(html);const text=String(html);const lower=text.toLowerCase();let start=-1;for(const marker of ["ordem:","ordem :","recentes |","recentes</"]){const i=lower.lastIndexOf(marker);if(i>start)start=i}if(start<0)return text;let scoped=text.slice(start);for(const endMarker of ["instale a aplicação rtp play","instale a aplica&ccedil;&atilde;o rtp play","<footer"]){const i=scoped.toLowerCase().indexOf(endMarker);if(i>0){scoped=scoped.slice(0,i);break}}return scoped}
+function scopeProgramListHtml(html,catalog){if(!catalog?.programList)return String(html);const text=String(html);let start=-1;for(const re of [/ordem(?:\s|&nbsp;|<[^>]*>)*:?(?:\s|&nbsp;|<[^>]*>){0,20}(?:recentes|a-z)/gi,/(?:recentes|a-z)(?:\s|&nbsp;|<[^>]*>){0,20}\|(?:\s|&nbsp;|<[^>]*>){0,20}(?:recentes|a-z)/gi]){let m;while((m=re.exec(text)))start=Math.max(start,m.index)}if(start<0){const lower=text.toLowerCase();for(const marker of ["ordem:","ordem :","recentes |","recentes</","a-z</"]){const i=lower.lastIndexOf(marker);if(i>start)start=i}}if(start<0)return text;let scoped=text.slice(start);for(const endMarker of ["instale a aplicação rtp play","instale a aplica&ccedil;&atilde;o rtp play","<footer"]){const i=scoped.toLowerCase().indexOf(endMarker);if(i>0){scoped=scoped.slice(0,i);break}}return scoped}
 function parseCatalog(html,type,catalog){html=scopeProgramListHtml(html,catalog);const metas=[],seen=new Set(),re=/<a\b([^>]*?)href\s*=\s*([\"'])(.*?)\2([^>]*)>([\s\S]*?)<\/a>/gi;let m;while((m=re.exec(html))&&metas.length<160){const attrs=(m[1]||"")+" "+(m[4]||""),href=absoluteRtpUrl(m[3]),path=rtpPathFromUrl(href);if(!path||seen.has(path)||!catalogAllowsPath(catalog,path))continue;const body=m[5]||"",img=body.match(/<img\b([^>]*)>/i)?.[1]||"";const title=cleanTitle(attrValue(attrs,"title")||attrValue(attrs,"aria-label")||attrValue(img,"alt")||stripTags(body))||slugTitle(path);if(!title||title.length>220)continue;const poster=anchorImage(body);seen.add(path);metas.push({id:encodeId(path),type,name:title,...(poster?{poster,background:poster}:{poster:RTP_LOGO}),description:catalog?.name||"RTP Play",website:RTP_BASE+path})}return metas}
 function parseEpisodes(html){const videos=[],seen=new Set(),re=/<a\b([^>]*?)href\s*=\s*([\"'])(.*?)\2([^>]*)>([\s\S]*?)<\/a>/gi;let m;while((m=re.exec(html))&&videos.length<400){const href=absoluteRtpUrl(m[3]),path=rtpPathFromUrl(href);if(!path||!/\/e\d+\//i.test(path)||seen.has(path))continue;const attrs=(m[1]||"")+" "+(m[4]||""),body=m[5]||"",img=body.match(/<img\b([^>]*)>/i)?.[1]||"";const title=cleanTitle(attrValue(attrs,"title")||attrValue(attrs,"aria-label")||attrValue(img,"alt")||stripTags(body))||("Episódio "+(videos.length+1));const ep=path.match(/\/e(\d+)\//i)?.[1]||"",thumb=anchorImage(body);seen.add(path);videos.push({id:encodeId(path),title,season:1,episode:videos.length+1,...(ep?{episodeId:ep}:{}),...(thumb?{thumbnail:thumb}:{})})}return videos}
 function unescapeMediaUrl(value=""){return decodeHtml(String(value)).replace(/\\u0026/gi,"&").replace(/\\\//g,"/").replace(/\\\\/g,"\\")}
@@ -106,6 +106,7 @@ export async function getRtpVodMeta(type,id){
 export async function getRtpVodStreams(type,id){
   if(!["movie","series","music","podcast"].includes(type))return[];
   const path=decodeId(id);if(!path)return[];
-  try{const mediaUrl=extractPublicMediaUrl(await fetchHtml(RTP_BASE+path));if(mediaUrl)return[{name:"PT•HUB • RTP Play",title:"RTP Play",url:mediaUrl,behaviorHints:{notWebReady:true}}]}catch{}
-  return[]
+  const website=RTP_BASE+path;
+  try{const mediaUrl=extractPublicMediaUrl(await fetchHtml(website));if(mediaUrl)return[{name:"PT•HUB • RTP Play",title:"RTP Play",url:mediaUrl,behaviorHints:{notWebReady:true}}]}catch{}
+  return[{name:"PT•HUB • RTP Play",title:"Abrir na RTP Play",externalUrl:website}]
 }
