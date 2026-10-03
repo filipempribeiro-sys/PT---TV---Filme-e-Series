@@ -11,6 +11,8 @@ export const TVI_VOD_CATALOGS=Object.freeze([
   {type:"series",id:"tvi-vod-novelas",name:"🇵🇹 TVI Player • Novelas",url:TVI_BASE+"/programas/tvi",keywords:["novela","morango","festa é festa","a fazenda","beijo do escorpiao","queridos papas","cacau"]},
   {type:"series",id:"tvi-vod-reality",name:"🇵🇹 TVI Player • Reality",url:TVI_BASE+"/programas/tvi",keywords:["big brother","casa dos segredos","secret story","dilema","reality","desafio final"]},
   {type:"series",id:"tvi-vod-informacao",name:"🇵🇹 TVI Player • Informação",url:TVI_BASE+"/programas/tvi",keywords:["jornal","noticias","notícias","informacao","informação","entrevista","cnn","exclusivo"]},
+  {type:"series",id:"tvi-vod-series",name:"🇵🇹 TVI Player • Séries",url:TVI_BASE+"/programas/tvi",keywords:["serie","série","ficcao","ficção","minisserie","minissérie"]},
+  {type:"series",id:"tvi-vod-entretenimento",name:"🇵🇹 TVI Player • Entretenimento",url:TVI_BASE+"/programas/tvi",keywords:["entretenimento","goucha","dois às 10","dois as 10","em familia","em família","somos portugal","a tua cara","dança","danca","talento"]},
 ]);
 
 function decodeHtml(value=""){const named={amp:"&",quot:'"',apos:"'",lt:"<",gt:">",nbsp:" ",ndash:"–",mdash:"—",hellip:"…",aacute:"á",eacute:"é",iacute:"í",oacute:"ó",uacute:"ú",agrave:"à",acirc:"â",ecirc:"ê",ocirc:"ô",atilde:"ã",otilde:"õ",ccedil:"ç",Aacute:"Á",Eacute:"É",Iacute:"Í",Oacute:"Ó",Uacute:"Ú",Agrave:"À",Acirc:"Â",Ecirc:"Ê",Ocirc:"Ô",Atilde:"Ã",Otilde:"Õ",Ccedil:"Ç"};return String(value).replace(/&#x([0-9a-f]+);/gi,(_,h)=>String.fromCodePoint(parseInt(h,16))).replace(/&#([0-9]+);/g,(_,d)=>String.fromCodePoint(parseInt(d,10))).replace(/&([a-z]+);/gi,(m,k)=>named[k]??named[k.toLowerCase()]??m)}
