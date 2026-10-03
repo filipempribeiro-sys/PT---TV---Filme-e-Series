@@ -11,9 +11,7 @@ const PROGRAM_CATALOGS = [
   ["rtp-vod-informacao","🇵🇹 RTP Play • Informação","https://www.rtp.pt/play/programas/informacao/canal"],
   ["rtp-vod-cultura","🇵🇹 RTP Play • Cultura","https://www.rtp.pt/play/programas/cultura/canal"],
   ["rtp-vod-humor","🇵🇹 RTP Play • Humor","https://www.rtp.pt/play/programas/humor/canal"],
-  ["rtp-vod-musica","🇵🇹 RTP Play • Música","https://www.rtp.pt/play/programas/musica/canal"],
   ["rtp-vod-desporto-programas","🏅 RTP Play • Desporto • Programas","https://www.rtp.pt/play/programas/desporto/canal"],
-  ["rtp-vod-infantis","🧒 RTP Play • Infantis e Juvenis","https://www.rtp.pt/play/programas/infantis-e-juvenis/canal"],
   ["rtp-vod-ficcao","🇵🇹 RTP Play • Ficção","https://www.rtp.pt/play/programas/ficcao/canal"],
   ["rtp-vod-entretenimento","🇵🇹 RTP Play • Entretenimento","https://www.rtp.pt/play/programas/entretenimento/canal"],
   ["rtp-vod-ciencia","🇵🇹 RTP Play • Ciência e Natureza","https://www.rtp.pt/play/programas/ciencia-e-natureza/canal"],
@@ -28,6 +26,7 @@ export const RTP_VOD_CATALOGS = Object.freeze([
   ...PROGRAM_CATALOGS,
   { type: "series", id: "rtp-vod-series", name: "🇵🇹 RTP Play • Séries", url: RTP_BASE + "/play/hub/series" },
   { type: "series", id: "rtp-vod-docs", name: "🇵🇹 RTP Play • DOCS", url: RTP_BASE + "/play/hub/documentarios" },
+  { type: "series", id: "rtp-vod-originais", name: "🇵🇹 RTP Play • Originais", url: RTP_BASE + "/play/programas/entretenimento/originaisrtpplay" },
   { type: "series", id: "rtp-vod-sports", name: "🏅 RTP Play • Desporto", url: RTP_BASE + "/play/hub/rtpdesporto" },
   { type: "series", id: "rtp-sports-fit-em-casa", name: "🏋️ RTP Desporto • Fit em Casa", staticItems: [
     { path: "/play/p7179/fit-em-casa-treino-funcional", name: "Fit em Casa: Treino Funcional" },
