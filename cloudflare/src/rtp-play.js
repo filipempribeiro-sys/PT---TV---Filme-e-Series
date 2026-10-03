@@ -87,7 +87,7 @@ export async function getRtpVodCatalog(type,id,search=""){
         const html=await fetchHtml(RTP_BASE+item.path),poster=absoluteHttpUrl(metaTag(html,"og:image")),description=cleanTitle(metaTag(html,"og:description")||metaTag(html,"description"))||catalog.name;
         return{id:encodeId(item.path),type,name:item.name,...(poster?{poster,background:poster}:{poster:RTP_LOGO}),description,website:RTP_BASE+item.path};
       }catch{return{id:encodeId(item.path),type,name:item.name,poster:RTP_LOGO,description:catalog.name,website:RTP_BASE+item.path}}
-    }));catalogCache.set(key,{at:Date.now(),metas})
+    })));catalogCache.set(key,{at:Date.now(),metas})
   }else{metas=parseCatalog(await fetchHtml(catalog.url),type,catalog);catalogCache.set(key,{at:Date.now(),metas})}
   const needle=stripTags(search).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
   if(needle)metas=metas.filter(x=>String(x.name||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().includes(needle));
