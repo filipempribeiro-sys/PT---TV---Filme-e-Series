@@ -34,7 +34,7 @@ export const STREAMERS = Object.freeze([
   {id:"jiohotstar",name:"JioHotstar",aliases:["JioHotstar","Hotstar","Disney+ Hotstar"]},
   {id:"zee5",name:"ZEE5",aliases:["ZEE5"]},
   {id:"stan",name:"Stan",aliases:["Stan"]},
-  {id:"player",name:"Player",aliases:["Player","Player.pl"]},
+  {id:"player",name:"Player.pl",aliases:["Player.pl"]},
   {id:"cda-pl",name:"cda.pl",aliases:["cda.pl","CDA Premium"]},
   {id:"oneplay",name:"Oneplay",aliases:["Oneplay"]},
   {id:"osn",name:"OSN+",aliases:["OSN Plus","OSN+"]},
