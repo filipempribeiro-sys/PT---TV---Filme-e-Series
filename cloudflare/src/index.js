@@ -10,7 +10,7 @@ import { JAMENDO_CATALOGS, getJamendoCatalog, getJamendoMeta, getJamendoStreams 
 import { YOUTUBE_PUBLIC_CATALOGS, getYouTubeCatalog, getYouTubeMeta, getYouTubeStreams } from "./youtube-public.js";
 import { OFFICIAL_PROVIDER_CATALOGS, getOfficialProviderCatalog, getOfficialProviderMeta, getOfficialProviderStreams } from "./official-providers.js";
 
-const VERSION="3.2.0";
+const VERSION="4.0.0";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
@@ -419,8 +419,9 @@ async function manifest(config=null,env={}){
  if(features.ptContentSources?.opto===true){for(const optoCatalog of OPTO_VOD_CATALOGS)add(optoCatalog.type,optoCatalog.id,optoCatalog.name)}
  if(String(env?.JAMENDO_CLIENT_ID||"").trim()){for(const x of JAMENDO_CATALOGS)add(x.type,x.id,x.name)}
  if(String(env?.YOUTUBE_API_KEY||"").trim()){for(const x of YOUTUBE_PUBLIC_CATALOGS)add(x.type,x.id,x.name)}
- if(features.ptContent===true){for(const x of OFFICIAL_PROVIDER_CATALOGS.filter(p=>!["official-plex-free","official-rakuten-free"].includes(p.id)))add(x.type,x.id,x.name)}
+ if(features.ptContent===true){for(const x of OFFICIAL_PROVIDER_CATALOGS.filter(p=>!["official-plex-free","official-rakuten-free","official-spotify-podcasts"].includes(p.id)))add(x.type,x.id,x.name)}
  if(showStreamers){for(const x of OFFICIAL_PROVIDER_CATALOGS.filter(p=>["official-plex-free","official-rakuten-free"].includes(p.id)))add(x.type,x.id,x.name)}
+ for(const x of OFFICIAL_PROVIDER_CATALOGS.filter(p=>p.id==="official-spotify-podcasts"))add(x.type,x.id,x.name)
  return {id:"pt.filipe.nuvio.tvhub",version:VERSION,name:"PT•HUB",description:"Hub universal e agregador configurável de addons Stremio: TV, IPTV, filmes, séries, conteúdo português e fontes externas.",logo:`${PT_HUB_LOGO}?v=${VERSION}`,background:"https://raw.githubusercontent.com/filipempribeiro-sys/PT---TV---Filme-e-Series/main/addon/background.jpg?v="+VERSION,resources:["catalog","meta",{name:"stream",types:["movie","series","music","podcast","channel"],idPrefixes:["tt","tmdb:","pthubptmeta:","m3u:","xtream:","iptvorg:","operator:","rtpplay:","rtpvod:","tvivod:","optovod:","jamendo:","youtube:","official:","pttv:"]},"addon_catalog",...(features.subtitles===true?["subtitles"]:[])],types:["channel","tv","movie","series","music","podcast"],catalogs,addonCatalogs:[{type:"addon",id:"recommended",name:"Add-ons recomendados"}],idPrefixes:["pttv:","m3u:","xtream:","pthubptmeta:","rtpplay:","rtpvod:","tvivod:","optovod:","jamendo:","youtube:","official:","tt","tmdb:"],behaviorHints:{configurable:true,configurationRequired:false,p2p:true}};
 }
 // Replay the first bytes after sniffing an opaque URL/content type.
