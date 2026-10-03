@@ -12,6 +12,7 @@ test("RTP provider exposes separated hubs", () => {
   const ids = new Set(RTP_VOD_CATALOGS.map(x => x.id));
   assert.ok(ids.has("rtp-vod-series"));
   assert.ok(ids.has("rtp-vod-docs"));
+  assert.ok(ids.has("rtp-vod-originais"));
   assert.ok(ids.has("rtp-vod-sports"));
   assert.ok(ids.has("rtp-sports-fit-em-casa"));
   assert.ok(ids.has("rtp-zigzag-programas"));
@@ -31,12 +32,17 @@ test("TVI exposes program sections", () => {
   assert.ok(ids.includes("tvi-vod-novelas"));
   assert.ok(ids.includes("tvi-vod-reality"));
   assert.ok(ids.includes("tvi-vod-informacao"));
+  assert.ok(ids.includes("tvi-vod-series"));
+  assert.ok(ids.includes("tvi-vod-entretenimento"));
 });
 
 test("OPTO exposes Portuguese and podcast sections", () => {
   const ids = OPTO_VOD_CATALOGS.map(x => x.id);
   assert.ok(ids.includes("opto-vod-programas"));
   assert.ok(ids.includes("opto-vod-series"));
+  assert.ok(ids.includes("opto-vod-originais"));
+  assert.ok(ids.includes("opto-vod-crime"));
+  assert.ok(ids.includes("opto-vod-entretenimento"));
   assert.ok(ids.includes("opto-vod-novelas"));
   assert.ok(ids.includes("opto-vod-informacao"));
   assert.equal(OPTO_VOD_CATALOGS.find(x => x.id === "opto-podcasts")?.type, "podcast");
@@ -59,6 +65,7 @@ test("official provider hubs include sports, children and AVOD", () => {
     "official-liga-portugal",
     "official-plex-free",
     "official-rakuten-free",
+    "official-spotify-podcasts",
   ]) assert.ok(ids.has(id));
 });
 
