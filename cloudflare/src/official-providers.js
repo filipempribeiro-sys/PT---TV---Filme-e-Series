@@ -7,6 +7,7 @@ const PROVIDERS=Object.freeze([
   {id:"liga-portugal",type:"series",catalogId:"official-liga-portugal",catalogName:"⚽ Liga Portugal • Oficial",name:"Liga Portugal",website:"https://www.ligaportugal.pt/",description:"Vídeos, calendário, resultados, classificações e informação oficial da Liga Portugal.",access:"public"},
   {id:"plex-free",type:"movie",catalogId:"official-plex-free",catalogName:"🎬 Plex Free • Oficial",name:"Plex Free",website:"https://watch.plex.tv/",description:"VOD/FAST suportado por publicidade. Reprodução deve permanecer no mecanismo oficial quando exigido.",access:"avod"},
   {id:"rakuten-free",type:"movie",catalogId:"official-rakuten-free",catalogName:"🎬 Rakuten TV Free • Oficial",name:"Rakuten TV Free",website:"https://www.rakuten.tv/",description:"Conteúdo AVOD gratuito quando disponível na região. Reprodução depende das regras oficiais do serviço.",access:"avod"},
+  {id:"spotify-podcasts",type:"podcast",catalogId:"official-spotify-podcasts",catalogName:"🎙️ Spotify • Podcasts",name:"Spotify Podcasts",website:"https://open.spotify.com/genre/podcasts-web",description:"Podcasts no Spotify. Catálogo e reprodução usam o serviço oficial; conteúdos e capacidades dependem da conta e da região.",access:"account"},
 ]);
 
 export const OFFICIAL_PROVIDER_CATALOGS=Object.freeze(PROVIDERS.map(p=>({type:p.type,id:p.catalogId,name:p.catalogName})));
