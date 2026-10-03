@@ -9,9 +9,12 @@ const metaCache=new Map();
 
 export const OPTO_VOD_CATALOGS=Object.freeze([
   {type:"series",id:"opto-vod-programas",name:"🇵🇹 OPTO • Programas",headings:["O Melhor da SIC","Episódios da Vida Real"]},
-  {type:"series",id:"opto-vod-series",name:"🇵🇹 OPTO • Séries",headings:["Originais OPTO","Séries de Informação","Crime e Investigação"]},
+  {type:"series",id:"opto-vod-series",name:"🇵🇹 OPTO • Séries",headings:["Séries de Informação"]},
+  {type:"series",id:"opto-vod-originais",name:"🇵🇹 OPTO • Originais",headings:["Originais OPTO"]},
+  {type:"series",id:"opto-vod-crime",name:"🇵🇹 OPTO • Crime e Investigação",headings:["Crime e Investigação"]},
   {type:"series",id:"opto-vod-novelas",name:"🇵🇹 OPTO • Novelas",headings:["Novelas","Foste tu que pediste?"]},
   {type:"series",id:"opto-vod-informacao",name:"🇵🇹 OPTO • Informação",headings:["Informação","Portugal Criminal"]},
+  {type:"series",id:"opto-vod-entretenimento",name:"🇵🇹 OPTO • Entretenimento",headings:["O Melhor da SIC","Entretenimento"]},
   {type:"podcast",id:"opto-podcasts",name:"🎙️ OPTO • Podcasts",headings:["Podcasts"]},
 ]);
 
