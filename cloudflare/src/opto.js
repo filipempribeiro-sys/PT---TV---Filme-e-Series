@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { readPublicNuxtState } from "./nuxt-public-data.js";
 
 const OPTO_BASE="https://opto.sic.pt";
 const OPTO_HOME=OPTO_BASE+"/";
@@ -43,6 +44,19 @@ function parseHome(html){
     if(!title||title.length>220)continue;
     seen.add(path);entries.push({path,heading,title,poster:imageFromBody(body)});
   }
+  const playlists=readPublicNuxtState(html)?.homepage?._homepagePlaylists||[];
+  for(const playlist of playlists){
+    const section=cleanTitle(playlist.name);if(!section||section==='Em Direto')continue;
+    for(const item of playlist.contents||[]){
+      if(!/^[0-9a-f-]{36}$/i.test(item.id||'')||!item.title)continue;
+      const kind=String(item.contentType||'').toUpperCase();
+      if(!['SERIES','MOVIE','EPISODE'].includes(kind))continue;
+      const slug=String(item.title).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      const path=kind==='EPISODE'?'/content/'+item.id:'/'+(kind==='MOVIE'?'movie':'series')+'/'+(slug||'conteudo')+'/'+item.id;
+      const key=section+':'+path;if(seen.has(key))continue;seen.add(key);
+      entries.push({path,heading:section,title:cleanTitle(item.title),poster:absoluteHttp(item.images?.poster||item.images?.thumbnail||item.images?.landscape||''),description:stripTags(item.shortDescription||item.fullDescription||''),premium:item.premium===true});
+    }
+  }
   return entries;
 }
 function cachedHome(){return catalogCache.get("home")}
@@ -53,7 +67,7 @@ function extractPublicMediaUrl(html=""){const candidates=[];for(const re of [/ht
 
 export async function getOptoVodCatalog(type,id,search=""){
   const catalog=OPTO_VOD_CATALOGS.find(x=>x.id===id&&x.type===type);if(!catalog)return{metas:[]};
-  const allowed=new Set(catalog.headings.map(normalize));let selected=(await homeEntries()).filter(x=>allowed.has(normalize(x.heading)));
+  const allowed=new Set(catalog.headings.map(normalize));let selected=[...new Map((await homeEntries()).filter(x=>allowed.has(normalize(x.heading))).map(x=>[x.path,x])).values()];
   const q=normalize(search);if(q)selected=selected.filter(x=>normalize(x.title).includes(q));
   return{metas:selected.slice(0,140).map(x=>({id:encodeId(x.path),type,name:x.title,...(x.poster?{poster:x.poster,background:x.poster}:{poster:OPTO_LOGO}),description:catalog.name,website:OPTO_BASE+x.path}))}
 }
