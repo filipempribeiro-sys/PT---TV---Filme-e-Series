@@ -48,6 +48,7 @@ function requestBuffer(
   target,
   {
     headers = {},
+    transport = {},
     timeoutMs = 15000,
     maxRedirects = 4
   } = {}
@@ -62,7 +63,8 @@ function requestBuffer(
         port: url.port || 443,
         method: "GET",
         path: url.pathname + url.search,
-        headers
+        headers,
+        ...transport
       },
       (res) => {
         const status = Number(res.statusCode || 0);
@@ -82,6 +84,7 @@ function requestBuffer(
 
           return requestBuffer(next, {
             headers,
+            transport,
             timeoutMs,
             maxRedirects: maxRedirects - 1
           }).then(resolve, reject);
@@ -117,12 +120,13 @@ async function requestJson(target, options = {}) {
   const response = await requestBuffer(target, options);
 
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(
-      "RTP HTTP " +
-      response.status +
-      ": " +
-      response.body.toString("utf8", 0, 200)
-    );
+    const error = new Error("RTP HTTP " + response.status);
+    const picked = {};
+    for (const key of ["server", "via", "x-cache", "x-served-by", "content-type", "date", "location"]) {
+      if (response.headers[key]) picked[key] = response.headers[key];
+    }
+    error.diagnostic = { status: response.status, host: new URL(response.url).hostname, path: new URL(response.url).pathname, headers: picked, html404: /404 Not Found/i.test(response.body.toString("utf8", 0, 2048)) };
+    throw error;
   }
 
   let data;
@@ -150,6 +154,7 @@ function createRtpPlayMobileClient(options = {}) {
   const apiBase =
     String(options.apiBase || DEFAULT_API_BASE).trim();
 
+  const transport = options.transport || {};
   let authToken = "";
   let authExpiryMs = 0;
   let authUser = "";
@@ -184,6 +189,7 @@ function createRtpPlayMobileClient(options = {}) {
     );
 
     const data = await requestJson(authUrl, {
+      transport,
       headers: {
         Accept: "*/*",
         "User-Agent": DEFAULT_USER_AGENT,
@@ -218,6 +224,7 @@ function createRtpPlayMobileClient(options = {}) {
       const data = await requestJson(
         new URL(endpoint, apiBase).toString(),
         {
+          transport,
           headers: {
             Accept: "*/*",
             Authorization: "Bearer " + token,

@@ -53,8 +53,17 @@ async function createApplication({ env = process.env, client } = {}) {
   return async function handle(request) {
     const url = new URL(request.url);
     if (url.pathname === '/health' || url.pathname === '/api/health') return json({ ok: true, name: 'PT•HUB', version: '4.0.0', runtime: 'node-render', sharedImplementation: 'cloudflare/src/index.js', torrentsDisabled: process.env.PT_HUB_RTP_TEST_ONLY === '1', storage: 'local-ephemeral' });
+    if (url.pathname === '/rtp-test/auth-diagnostic') {
+      const profiles = [{ name: 'native-default', transport: {} }, { name: 'native-ipv4', transport: { family: 4 } }, { name: 'native-tls12-ipv4', transport: { family: 4, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } }];
+      const results = await Promise.all(profiles.map(async profile => {
+        const candidate = createRtpPlayMobileClient({ authName: env.RTP_PLAY_AUTH_NAME, authKey: env.RTP_PLAY_AUTH_KEY, authUrl: env.RTP_PLAY_AUTH_URL, apiBase: env.RTP_PLAY_API_BASE, transport: profile.transport });
+        try { const status = await candidate.getStatus(); return { profile: profile.name, authenticated: status.authenticated }; }
+        catch(error) { return { profile: profile.name, authenticated: false, error: error.message, diagnostic: error.diagnostic || null }; }
+      }));
+      return json({ runtime: process.version, results });
+    }
     if (url.pathname === '/rtp-test/status') {
-      try { return json(await mobile.getStatus()); } catch(error) { return json({ authenticated: false, error: error.message }, 502); }
+      try { return json(await mobile.getStatus()); } catch(error) { return json({ authenticated: false, error: error.message, diagnostic: error.diagnostic || null }, 502); }
     }
     const diagnostic = url.pathname.match(/^\/rtp-test\/(episode|probe)\/(\d+)\/(\d+)$/);
     if (diagnostic) {
