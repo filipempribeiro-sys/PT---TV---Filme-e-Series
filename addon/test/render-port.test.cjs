@@ -53,3 +53,21 @@ test('internal-only RTP returns HLS to the player and never substitutes a web pa
     assert.deepEqual(await rtp.getRtpVodStreams('music', id), []);
   } finally { rtp.setNodePlaybackResolver(null); delete process.env.PT_HUB_RTP_INTERNAL_ONLY; }
 });
+test('RTP API bridge permits signed official API calls and rejects arbitrary targets', async () => {
+  const worker = (await import('../../cloudflare/src/index.js')).default;
+  const original = global.fetch;
+  const seen = [];
+  global.fetch = async (target, options) => { seen.push({ target: String(target), options }); return new Response('{"token":{"token":"test-token"}}', { headers: { 'content-type':'application/json' } }); };
+  const post = data => worker.fetch(new Request('https://pt-hub.test/rtp-api', { method: 'POST', headers: { 'content-type':'application/json' }, body: JSON.stringify(data) }), {}, {});
+  try {
+    assert.equal((await post({ target: 'https://example.com/', headers: {} })).status, 400);
+    assert.equal((await post({ target: 'https://rtpplayapi.rtp.pt/play/api/2/token-manager', headers: {} })).status, 400);
+    const headers = { 'RTP-Play-Auth':'test-profile', 'RTP-Play-Auth-Hash':'signed', 'RTP-Play-Auth-Timestamp':'123', Cookie:'do-not-forward' };
+    const response = await post({ target: 'https://rtpplayapi.rtp.pt/play/api/2/token-manager', headers });
+    assert.equal(response.status, 200);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].options.headers.get('cookie'), null);
+    assert.equal(seen[0].options.headers.get('RTP-Play-Auth-Hash'), 'signed');
+    assert.equal(response.headers.get('cache-control'), 'no-cache, no-store, must-revalidate');
+  } finally { global.fetch = original; }
+});

@@ -1471,6 +1471,25 @@ async function cachedCatalogResponse(request,ctx,ttlSeconds,producer){
 
 export default {async fetch(request,env,ctx){
  const url=new URL(request.url),p=url.pathname;
+ // Fixed RTP API transport bridge. Accept signed requests, never raw auth keys,
+ // arbitrary URLs, cookies, media, or license endpoints.
+ if(request.method==="POST"&&p==="/rtp-api"){
+  try{
+   if(Number(request.headers.get("content-length")||0)>8192)return json({error:"Payload demasiado grande."},413,noCache);
+   const text=await request.text();if(text.length>8192)return json({error:"Payload demasiado grande."},413,noCache);
+   const payload=JSON.parse(text),target=new URL(String(payload.target||""));
+   const auth=target.origin==="https://rtpplayapi.rtp.pt"&&target.pathname==="/play/api/2/token-manager"&&!target.search;
+   const api=target.origin==="https://www.rtp.pt"&&/^\/play\/api\/1\/(?:get-episode\/\d+\/\d+|get-asset\/\d+|list-episodes\/\d+\/?)$/.test(target.pathname);
+   if(!auth&&!api)return json({error:"Endpoint RTP não permitido."},400,noCache);
+   const supplied=new Headers(payload.headers||{}),headers=new Headers({Accept:"*/*","User-Agent":"okhttp/4.12.0"});
+   for(const key of auth?["RTP-Play-Auth","RTP-Play-Auth-Hash","RTP-Play-Auth-Timestamp"]:["Authorization","RTP-Play-Auth-Timestamp"]){
+    const value=supplied.get(key);if(!value||value.length>2048)return json({error:"Autenticação RTP em falta."},400,noCache);headers.set(key,value);
+   }
+   const upstream=await fetch(target,{headers,redirect:"error",signal:AbortSignal.timeout(15000)});
+   return new Response(upstream.body,{status:upstream.status,headers:{...noCache,"content-type":upstream.headers.get("content-type")||"application/json"}});
+  }catch{return json({error:"Falha na ligação à API RTP."},502,noCache)}
+ }
+
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
  if(request.method==="GET"&&p.startsWith("/channel-poster/")&&p.endsWith(".svg"))return channelPoster(p.slice("/channel-poster/".length,-4));
  if(request.method==="GET"&&p==="/api/health")return json({ok:true,name:"PT•HUB",version:VERSION,runtime:"cloudflare-workers"});

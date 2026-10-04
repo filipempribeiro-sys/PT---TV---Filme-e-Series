@@ -48,6 +48,8 @@ function requestBuffer(
   target,
   {
     headers = {},
+    method = "GET",
+    body = null,
     transport = {},
     timeoutMs = 15000,
     maxRedirects = 4
@@ -61,7 +63,7 @@ function requestBuffer(
         protocol: url.protocol,
         hostname: url.hostname,
         port: url.port || 443,
-        method: "GET",
+        method,
         path: url.pathname + url.search,
         headers,
         ...transport
@@ -84,6 +86,8 @@ function requestBuffer(
 
           return requestBuffer(next, {
             headers,
+            method,
+            body,
             transport,
             timeoutMs,
             maxRedirects: maxRedirects - 1
@@ -112,7 +116,7 @@ function requestBuffer(
     });
 
     req.on("error", reject);
-    req.end();
+    req.end(body);
   });
 }
 
@@ -155,6 +159,16 @@ function createRtpPlayMobileClient(options = {}) {
     String(options.apiBase || DEFAULT_API_BASE).trim();
 
   const transport = options.transport || {};
+  const apiBridge = String(options.apiBridge || "").trim();
+  async function rtpJson(target, requestOptions) {
+    if (!apiBridge) return requestJson(target, requestOptions);
+    return requestJson(apiBridge, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target, headers: requestOptions.headers }),
+      timeoutMs: 20000
+    });
+  }
   let authToken = "";
   let authExpiryMs = 0;
   let authUser = "";
@@ -188,7 +202,7 @@ function createRtpPlayMobileClient(options = {}) {
       timestamp + authUrl
     );
 
-    const data = await requestJson(authUrl, {
+    const data = await rtpJson(authUrl, {
       transport,
       headers: {
         Accept: "*/*",
@@ -221,7 +235,7 @@ function createRtpPlayMobileClient(options = {}) {
     const timestamp = String(Date.now());
 
     try {
-      const data = await requestJson(
+      const data = await rtpJson(
         new URL(endpoint, apiBase).toString(),
         {
           transport,

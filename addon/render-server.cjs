@@ -36,7 +36,7 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), { status
 async function createApplication({ env = process.env, client } = {}) {
   const worker = (await import('../cloudflare/src/index.js')).default;
   const rtp = await import('../cloudflare/src/rtp-play.js');
-  const mobile = client || createRtpPlayMobileClient({ authName: env.RTP_PLAY_AUTH_NAME, authKey: env.RTP_PLAY_AUTH_KEY, authUrl: env.RTP_PLAY_AUTH_URL, apiBase: env.RTP_PLAY_API_BASE });
+  const mobile = client || createRtpPlayMobileClient({ authName: env.RTP_PLAY_AUTH_NAME, authKey: env.RTP_PLAY_AUTH_KEY, authUrl: env.RTP_PLAY_AUTH_URL, apiBase: env.RTP_PLAY_API_BASE, apiBridge: env.RTP_PLAY_API_BRIDGE });
   const bindings = { ...env, PT_HUB_M3U: new LocalKV(env.PT_HUB_DATA_DIR || path.join(require('node:os').tmpdir(), 'pt-hub-render-data')) };
   rtp.setNodePlaybackResolver(async originalPath => {
     const resolved = await rtp.resolveEpisodePath(originalPath);
