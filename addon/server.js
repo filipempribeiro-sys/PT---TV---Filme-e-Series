@@ -4,6 +4,11 @@ const path = require("path");
 const crypto = require("crypto");
 const dns = require("dns");
 const zlib = require("zlib");
+const {
+  createRtpPlayMobileClient,
+  summarizeRtpEpisode,
+  probeRtpEpisodePlayback
+} = require("./rtp-play-mobile-api");
 
 /*
  * Alguns servidores Xtream/IPTV rejeitam ou "resetam" ligações
@@ -6321,6 +6326,10 @@ let torrentEngineWakePromise = null;
 let torrentEngineLastHealthyAt = 0;
 
 function getConfiguredPtHubTorrentEngineBase() {
+  if (String(process.env.PT_HUB_RTP_TEST_ONLY || "").trim() === "1") {
+    return "";
+  }
+
   const configuredBase =
     String(
       process.env.PT_HUB_TORRENT_ENGINE_URL || ""
@@ -7832,6 +7841,97 @@ app.get(
       req.params.extra
     )
 );
+
+
+/* =========================================================
+   RTP PLAY — TESTE API MÓVEL ATUAL (RENDER / NODE NATIVO)
+   =========================================================
+   Isolado das rotas normais do addon. Não altera canais,
+   catálogos ou playback existentes. Não usa torrent engine.
+   ========================================================= */
+
+const rtpPlayMobileClient = createRtpPlayMobileClient({
+  authName: process.env.RTP_PLAY_AUTH_NAME,
+  authKey: process.env.RTP_PLAY_AUTH_KEY,
+  authUrl: process.env.RTP_PLAY_AUTH_URL,
+  apiBase: process.env.RTP_PLAY_API_BASE
+});
+
+app.get("/rtp-test/status", async (req, res) => {
+  try {
+    const status = await rtpPlayMobileClient.getStatus();
+    return res.json({
+      ok: true,
+      runtime: "render-node-native",
+      torrentEngineEnabled: false,
+      ...status
+    });
+  } catch (error) {
+    console.error("RTP Play API status:", error.message);
+    return res.status(502).json({
+      ok: false,
+      runtime: "render-node-native",
+      error: error.message
+    });
+  }
+});
+
+app.get("/rtp-test/episode/:programId/:episodeId", async (req, res) => {
+  try {
+    const data = await rtpPlayMobileClient.getEpisode(
+      req.params.programId,
+      req.params.episodeId
+    );
+
+    return res.json({
+      ok: true,
+      ...summarizeRtpEpisode(data)
+    });
+  } catch (error) {
+    console.error("RTP Play API episode:", error.message);
+    return res.status(502).json({
+      ok: false,
+      error: error.message
+    });
+  }
+});
+
+app.get("/rtp-test/asset/:assetId", async (req, res) => {
+  try {
+    const asset = await rtpPlayMobileClient.getAsset(req.params.assetId);
+    return res.json({
+      ok: true,
+      asset
+    });
+  } catch (error) {
+    console.error("RTP Play API asset:", error.message);
+    return res.status(502).json({
+      ok: false,
+      error: error.message
+    });
+  }
+});
+
+app.get("/rtp-test/probe/:programId/:episodeId", async (req, res) => {
+  try {
+    const result = await probeRtpEpisodePlayback(
+      rtpPlayMobileClient,
+      req.params.programId,
+      req.params.episodeId
+    );
+
+    return res.status(result.playable ? 200 : 424).json({
+      ok: true,
+      ...result
+    });
+  } catch (error) {
+    console.error("RTP Play API probe:", error.message);
+    return res.status(502).json({
+      ok: false,
+      error: error.message
+    });
+  }
+});
 
 /* =========================================================
    HOME
