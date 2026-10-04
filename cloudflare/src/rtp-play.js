@@ -1,5 +1,8 @@
 import { Buffer } from "node:buffer";
 
+let nodePlaybackResolver = null;
+export function setNodePlaybackResolver(resolver){ nodePlaybackResolver = resolver; }
+
 const RTP_BASE = "https://www.rtp.pt";
 const RTP_LOGO = "https://www.rtp.pt/favicon.ico";
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -126,7 +129,7 @@ function parseRtpProgramEpisode(path=""){
   const m=String(path).match(/^\/play\/(?:palco\/|zigzag\/)?(p\d+)(?:\/(e\d+))?/i);
   return m?{programId:m[1],episodeId:m[2]||""}:null
 }
-async function resolveEpisodePath(path){
+export async function resolveEpisodePath(path){
   const parsed=parseRtpProgramEpisode(path);
   if(!parsed)return{path,programId:"",episodeId:""};
   if(parsed.episodeId)return{path,programId:parsed.programId,episodeId:parsed.episodeId};
@@ -233,6 +236,7 @@ async function probeRtpPlaybackUrl(url){
   return ok
 }
 async function resolveRtpPlaybackUrls(path){
+  if(nodePlaybackResolver)return nodePlaybackResolver(path);
   const resolved=await resolveEpisodePath(path);
   const candidates=[];
   if(resolved.programId&&resolved.episodeId){

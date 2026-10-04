@@ -475,8 +475,8 @@ async function probeBytes(target, range = "bytes=0-1") {
 
   return {
     ok:
-      (response.status >= 200 && response.status < 300) ||
-      response.status === 206,
+      ((response.status >= 200 && response.status < 300) ||
+      response.status === 206) && response.body.length > 0,
     status: response.status,
     contentType:
       String(response.headers["content-type"] || "")
@@ -513,6 +513,15 @@ async function probeHls(target, depth = 0) {
     };
   }
 
+  // Public HLS only: never consume encrypted media or license/key endpoints.
+  if (/^#EXT-X-(?:SESSION-)?KEY:(?![^\r\n]*METHOD=NONE(?:,|$))/im.test(text)) {
+    return { ok: false, stage: "protected-playlist", status: response.status };
+  }
+  const initUri = text.match(/^#EXT-X-MAP:.*?URI="([^"]+)"/m)?.[1];
+  if (initUri) {
+    const initProbe = await probeBytes(new URL(initUri, target).toString());
+    if (!initProbe.ok) return { ok: false, stage: "init", status: initProbe.status };
+  }
   const segment = firstMediaSegmentUri(text);
 
   if (segment) {

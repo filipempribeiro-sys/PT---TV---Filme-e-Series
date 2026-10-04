@@ -11,6 +11,7 @@ import { YOUTUBE_PUBLIC_CATALOGS, getYouTubeCatalog, getYouTubeMeta, getYouTubeS
 import { OFFICIAL_PROVIDER_CATALOGS, getOfficialProviderCatalog, getOfficialProviderMeta, getOfficialProviderStreams } from "./official-providers.js";
 
 const VERSION="4.0.0";
+const envRtpTestOnly=()=>typeof process!=="undefined"&&process.env?.PT_HUB_RTP_TEST_ONLY==="1";
 const CONFIG_TOKEN_PREFIX="c2_";
 const CONFIG_STORE_MAX_BYTES=512*1024;
 const M3U_UPLOAD_MAX_BYTES=8*1024*1024;
@@ -237,6 +238,7 @@ const MAX_PARALLEL_STREAM_SOURCES=6;
 async function settleStreamSources(sources,type,id){const settled=[];for(let i=0;i<sources.length;i+=MAX_PARALLEL_STREAM_SOURCES){const batch=sources.slice(i,i+MAX_PARALLEL_STREAM_SOURCES);settled.push(...await Promise.allSettled(batch.map(x=>externalSourceStreams(x,type,id))))}return settled}
 async function externalCacheKey(type,id,config,hostname=""){const built=enabledBuiltIns(config).map(x=>x.id).sort(),custom=customStreamSourceBases(config).slice(0,MAX_CUSTOM_STREAM_SOURCES).sort(),max=maxPerQuality(config),sig=await hashId(JSON.stringify({engine:"magnetio-public+ytztvio+tpb-catalog-v2",built,custom,max})),host=String(hostname||"").trim().toLowerCase()||"pt-hub.invalid";return `https://${host}/__pt_hub_cache/streams/${encodeURIComponent(type)}/${encodeURIComponent(id)}?v=${sig}`}
 async function externalStreams(config,type,id,hostname="",ctx=null){
+ if(envRtpTestOnly())return[];
  const builtins=enabledBuiltIns(config),allCustom=customStreamSourceBases(config),custom=allCustom.slice(0,MAX_CUSTOM_STREAM_SOURCES).map((base,i)=>({id:`custom-${i}`,name:`Custom ${i+1}`,base,enabled:true,timeout:25000,priority:100+i}));
  if(allCustom.length>MAX_CUSTOM_STREAM_SOURCES)console.log(`[PT-HUB][Aggregator] custom sources limited to ${MAX_CUSTOM_STREAM_SOURCES} of ${allCustom.length}`);
  const key=await externalCacheKey(type,id,config,hostname),cache=typeof caches!=="undefined"?caches.default:null;
@@ -1527,6 +1529,7 @@ export default {async fetch(request,env,ctx){
  if(request.method==="GET"&&p==="/api/client-trace-clear"){if(env?.PT_HUB_M3U){await env.PT_HUB_M3U.delete("diag:client-trace");await env.PT_HUB_M3U.delete("diag:last-stream-request");}return json({ok:true,events:[]},200,noCache);}
  if(request.method==="GET"&&p==="/api/trace-selftest"){const marker={route:"selftest",type:"movie",id:"tt0133093",streams:5,durationMs:1,ok:true};await recordClientTrace(env,{kind:"stream",...marker});return json({ok:true,wrote:marker,last:await readStreamTrace(env)},200,noCache);}
  if(request.method==="GET"&&p==="/api/torrent-diagnostics"){
+  if(envRtpTestOnly())return json({ok:true,disabled:true,results:[]},200,noCache);
   const type=String(url.searchParams.get("type")||"movie").toLowerCase();
   const id=String(url.searchParams.get("id")||"tt0133093").trim();
   if(!["movie","series"].includes(type)||!/^tt\d+(?::\d+:\d+)?$/i.test(id))return json({ok:false,error:"Use type=movie|series and an IMDb id such as tt0133093 or tt0903747:1:1"},400,noCache);
