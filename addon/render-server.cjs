@@ -40,14 +40,14 @@ async function createApplication({ env = process.env, client } = {}) {
   const bindings = { ...env, PT_HUB_M3U: new LocalKV(env.PT_HUB_DATA_DIR || path.join(require('node:os').tmpdir(), 'pt-hub-render-data')) };
   rtp.setNodePlaybackResolver(async originalPath => {
     const resolved = await rtp.resolveEpisodePath(originalPath);
-    if (!resolved.episodeId) return { ...resolved, urls: [] };
+    if (!resolved.episodeId) return null;
     try {
       const probe = await probeRtpEpisodePlayback(mobile, resolved.programId, resolved.episodeId);
       console.log('RTP PLAYBACK', JSON.stringify({ programId: resolved.programId, episodeId: resolved.episodeId, playable: probe.playable, assets: probe.assets.length, stage: probe.selected?.stage || probe.attempts.at(-1)?.stage || 'no-public-hls' }));
       return { ...resolved, urls: probe.playable ? [probe.selected.url] : [] };
     } catch (error) {
       console.error('RTP PLAYBACK FAILED', error.message);
-      return { ...resolved, urls: [] };
+      return null; // Preserve the existing public web resolver if mobile auth is unavailable.
     }
   });
   return async function handle(request) {

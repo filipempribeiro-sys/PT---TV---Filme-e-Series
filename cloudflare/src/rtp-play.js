@@ -210,6 +210,7 @@ async function probeRtpHls(url,depth=0){
   const fetched=await fetchProbeText(url);
   if(!fetched||!fetched.text.trimStart().startsWith("#EXTM3U"))return false;
   const text=fetched.text,base=fetched.url||url;
+  if(/^#EXT-X-(?:SESSION-)?KEY:(?![^\r\n]*METHOD=NONE(?:,|$))/im.test(text))return false;
   const segment=firstHlsMediaSegment(text);
   if(segment){
     try{
@@ -226,7 +227,7 @@ async function probeRtpHls(url,depth=0){
 }
 async function probeRtpDash(url){
   const fetched=await fetchProbeText(url);
-  return !!fetched&&/<MPD\b/i.test(fetched.text)
+  return !!fetched&&/<MPD\b/i.test(fetched.text)&&!/<(?:\w+:)?ContentProtection\b/i.test(fetched.text)
 }
 async function probeRtpPlaybackUrl(url){
   const cached=playbackProbeCache.get(url);
@@ -236,7 +237,7 @@ async function probeRtpPlaybackUrl(url){
   return ok
 }
 async function resolveRtpPlaybackUrls(path){
-  if(nodePlaybackResolver)return nodePlaybackResolver(path);
+  if(nodePlaybackResolver){const result=await nodePlaybackResolver(path);if(result)return result;}
   const resolved=await resolveEpisodePath(path);
   const candidates=[];
   if(resolved.programId&&resolved.episodeId){
