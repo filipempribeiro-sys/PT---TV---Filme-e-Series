@@ -13,19 +13,25 @@ test("TVI catalog recovers posters from current card and serialized metadata lay
       '<a href="/programa/a-madrasta/abc123" aria-label="Aceder a: A Madrasta"><span>A Madrasta</span></a>' +
       '</article>' +
       '<script>window.cards=[{"path":"\\/programa\\/dois-as-10\\/def456","imageUrl":"https:\\/\\/static.iol.pt\\/tvi\\/dois-as-10.jpg"}]</script>' +
-      '<a href="/programa/dois-as-10/def456" aria-label="Aceder a: Dois às 10">Dois às 10</a>',
+      '<a href="/programa/dois-as-10/def456" aria-label="Aceder a: Dois às 10">Dois às 10</a>' +
+      '<article><img src="https://static.iol.pt/tvi/outro-programa.jpg"><a href="/programa/outro-programa/ghi789" aria-label="Aceder a: Outro Programa">Outro Programa</a></article>' +
+      '<a href="/programa/sem-cartaz/jkl012" aria-label="Aceder a: Sem Cartaz">Sem Cartaz</a>',
       { headers: { "content-type": "text/html; charset=utf-8" } },
     );
   };
   try {
     const { metas } = await getTviVodCatalog("series", "tvi-vod-programas");
-    assert.equal(metas.length, 2);
+    assert.equal(metas.length, 4);
     const madrasta = metas.find(x => x.name === "A Madrasta");
     const dois = metas.find(x => x.name === "Dois às 10");
     assert.equal(madrasta?.poster, "https://static.iol.pt/tvi/a-madrasta-640.webp");
     assert.equal(madrasta?.background, madrasta.poster);
     assert.equal(dois?.poster, "https://static.iol.pt/tvi/dois-as-10.jpg");
     assert.equal(dois?.background, dois.poster);
+    const outro = metas.find(x => x.name === "Outro Programa");
+    const sem = metas.find(x => x.name === "Sem Cartaz");
+    assert.equal(outro?.poster, "https://static.iol.pt/tvi/outro-programa.jpg");
+    assert.equal(sem?.poster, "https://tviplayer.iol.pt/favicon.ico");
   } finally {
     globalThis.fetch = originalFetch;
   }
