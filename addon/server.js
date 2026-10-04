@@ -7857,6 +7857,91 @@ const rtpPlayMobileClient = createRtpPlayMobileClient({
   apiBase: process.env.RTP_PLAY_API_BASE
 });
 
+async function runRtpRenderStartupTest() {
+  if (String(process.env.PT_HUB_RTP_TEST_ONLY || "").trim() !== "1") {
+    return;
+  }
+
+  const cases = [
+    { name: "#SÓQNÃO", programId: "7844", episodeId: "944972" },
+    { name: "Xutos 45 Anos", programId: "15328", episodeId: "867644" }
+  ];
+
+  console.log("RTP TEST: modo isolado ativo — torrent engine desativado.");
+
+  try {
+    const status = await rtpPlayMobileClient.getStatus();
+    console.log(
+      "RTP TEST AUTH:",
+      JSON.stringify({
+        authenticated: status.authenticated === true,
+        authUser: status.authUser || "",
+        tokenExpiresAt: status.tokenExpiresAt || ""
+      })
+    );
+  } catch (error) {
+    console.error("RTP TEST AUTH FALHOU:", error.message);
+    return;
+  }
+
+  for (const item of cases) {
+    try {
+      const raw = await rtpPlayMobileClient.getEpisode(
+        item.programId,
+        item.episodeId
+      );
+      const summary = summarizeRtpEpisode(raw);
+
+      console.log(
+        "RTP TEST EPISODE:",
+        JSON.stringify({
+          name: item.name,
+          programId: item.programId,
+          episodeId: item.episodeId,
+          assets: summary.assets.map((asset) => ({
+            assetId: asset.assetId,
+            type: asset.type,
+            protected: asset.protected,
+            media: asset.media.map((m) => m.kind),
+            hasRightsApi: Boolean(asset.rightsApi)
+          }))
+        })
+      );
+
+      const probe = await probeRtpEpisodePlayback(
+        rtpPlayMobileClient,
+        item.programId,
+        item.episodeId
+      );
+
+      console.log(
+        "RTP TEST PLAYBACK:",
+        JSON.stringify({
+          name: item.name,
+          playable: probe.playable === true,
+          selectedAssetId: probe.selected?.assetId || "",
+          selectedStage: probe.selected?.stage || "",
+          selectedStatus: probe.selected?.status || 0,
+          attempts: (probe.attempts || []).map((attempt) => ({
+            assetId: attempt.assetId || "",
+            skipped: attempt.skipped === true,
+            reason: attempt.reason || "",
+            ok: attempt.ok === true,
+            stage: attempt.stage || "",
+            status: attempt.status || 0
+          }))
+        })
+      );
+    } catch (error) {
+      console.error(
+        "RTP TEST CASE FALHOU:",
+        item.name,
+        error.message
+      );
+    }
+  }
+}
+
 app.get("/rtp-test/status", async (req, res) => {
   try {
     const status = await rtpPlayMobileClient.getStatus();
@@ -7993,6 +8078,12 @@ app.listen(
     console.log(
       `PT•HUB ${VERSION} iniciado na porta ${PORT}`
     );
+
+    setTimeout(() => {
+      runRtpRenderStartupTest().catch((error) => {
+        console.error("RTP TEST STARTUP:", error.message);
+      });
+    }, 1500);
 
   }
 );
