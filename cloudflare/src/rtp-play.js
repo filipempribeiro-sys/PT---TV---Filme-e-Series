@@ -292,5 +292,6 @@ export async function getRtpVodStreams(type,id){
     streams.push({name:"PT•HUB • RTP Play",title:/\.mpd(?:$|[?#])/i.test(mediaUrl)?"RTP Play • DASH":"RTP Play • HLS",url:mediaUrl,behaviorHints:{notWebReady:true}})
   }
   if(streams.length)return streams;
+  if(typeof process!=="undefined"&&process.env?.PT_HUB_RTP_INTERNAL_ONLY==="1")return[];
   return[{name:"PT•HUB • RTP Play",title:"Abrir na RTP Play",externalUrl:website}]
 }

@@ -40,14 +40,14 @@ async function createApplication({ env = process.env, client } = {}) {
   const bindings = { ...env, PT_HUB_M3U: new LocalKV(env.PT_HUB_DATA_DIR || path.join(require('node:os').tmpdir(), 'pt-hub-render-data')) };
   rtp.setNodePlaybackResolver(async originalPath => {
     const resolved = await rtp.resolveEpisodePath(originalPath);
-    if (!resolved.episodeId) return null;
+    if (!resolved.episodeId) return { ...resolved, urls: [] };
     try {
       const probe = await probeRtpEpisodePlayback(mobile, resolved.programId, resolved.episodeId);
       console.log('RTP PLAYBACK', JSON.stringify({ programId: resolved.programId, episodeId: resolved.episodeId, playable: probe.playable, assets: probe.assets.length, stage: probe.selected?.stage || probe.attempts.at(-1)?.stage || 'no-public-hls' }));
       return { ...resolved, urls: probe.playable ? [probe.selected.url] : [] };
     } catch (error) {
       console.error('RTP PLAYBACK FAILED', error.message);
-      return null; // Preserve the existing public web resolver if mobile auth is unavailable.
+      return { ...resolved, urls: [] }; // API failure must not silently reopen the WebView.
     }
   });
   return async function handle(request) {
@@ -73,6 +73,7 @@ async function createApplication({ env = process.env, client } = {}) {
 async function start() {
   // This Render deployment is a public-provider test, never a torrent resolver.
   process.env.PT_HUB_RTP_TEST_ONLY = '1';
+  process.env.PT_HUB_RTP_INTERNAL_ONLY = '1';
   const handle = await createApplication();
   const server = http.createServer(async (incoming, outgoing) => {
     const controller = new AbortController();

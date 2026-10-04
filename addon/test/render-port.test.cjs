@@ -40,3 +40,16 @@ test('Node storage supports upload values, TTL, JSON, and deletion', async () =>
     assert.equal(await kv.get('expired'), null);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+test('internal-only RTP returns HLS to the player and never substitutes a web page on failure', async () => {
+  const rtp = await import('../../cloudflare/src/rtp-play.js');
+  const id = 'rtpvod:' + Buffer.from('/play/p15328/e867644/xutos').toString('base64url');
+  process.env.PT_HUB_RTP_INTERNAL_ONLY = '1';
+  try {
+    rtp.setNodePlaybackResolver(async () => ({ path: '/play/p15328/e867644/xutos', urls: ['https://streaming-vod.rtp.pt/test/master.m3u8'] }));
+    const streams = await rtp.getRtpVodStreams('music', id);
+    assert.equal(streams[0].url, 'https://streaming-vod.rtp.pt/test/master.m3u8');
+    assert(!streams.some(s => s.externalUrl));
+    rtp.setNodePlaybackResolver(async () => ({ path: '/play/p15328/e867644/xutos', urls: [] }));
+    assert.deepEqual(await rtp.getRtpVodStreams('music', id), []);
+  } finally { rtp.setNodePlaybackResolver(null); delete process.env.PT_HUB_RTP_INTERNAL_ONLY; }
+});

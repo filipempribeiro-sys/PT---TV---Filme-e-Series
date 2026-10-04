@@ -9,10 +9,7 @@ const DEFAULT_API_BASE =
   "https://www.rtp.pt/play/api/1/";
 const DEFAULT_USER_AGENT = "okhttp/4.12.0";
 
-const agent = new https.Agent({
-  keepAlive: true,
-  maxSockets: 8
-});
+// Match the reference client: native Node HTTPS with its default agent.
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,8 +62,6 @@ function requestBuffer(
         port: url.port || 443,
         method: "GET",
         path: url.pathname + url.search,
-        agent,
-        minVersion: "TLSv1.2",
         headers
       },
       (res) => {
