@@ -40,18 +40,22 @@ test('Node storage supports upload values, TTL, JSON, and deletion', async () =>
     assert.equal(await kv.get('expired'), null);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
-test('internal-only RTP returns HLS to the player and never substitutes a web page on failure', async () => {
-  const rtp = await import('../../cloudflare/src/rtp-play.js');
+test('Render RTP stream endpoint opens official page without mobile authentication', async () => {
+  const originalFetch = global.fetch;
   const id = 'rtpvod:' + Buffer.from('/play/p15328/e867644/xutos').toString('base64url');
   process.env.PT_HUB_RTP_INTERNAL_ONLY = '1';
+  let calls = 0;
+  global.fetch = async () => { calls++; throw Error('Unexpected network'); };
   try {
-    rtp.setNodePlaybackResolver(async () => ({ path: '/play/p15328/e867644/xutos', urls: ['https://streaming-vod.rtp.pt/test/master.m3u8'] }));
-    const streams = await rtp.getRtpVodStreams('music', id);
-    assert.equal(streams[0].url, 'https://streaming-vod.rtp.pt/test/master.m3u8');
-    assert(!streams.some(s => s.externalUrl));
-    rtp.setNodePlaybackResolver(async () => ({ path: '/play/p15328/e867644/xutos', urls: [] }));
-    assert.deepEqual(await rtp.getRtpVodStreams('music', id), []);
-  } finally { rtp.setNodePlaybackResolver(null); delete process.env.PT_HUB_RTP_INTERNAL_ONLY; }
+    const app = await createApplication({ env: {}, client: { getEpisode() { throw Error('Mobile API must not run'); } } });
+    const response = await app(new Request('https://pt-hub.test/stream/music/'+id+'.json'));
+    assert.equal(response.status, 200);
+    const { streams } = await response.json();
+    assert.equal(streams.length, 1);
+    assert.equal(streams[0].externalUrl, 'https://www.rtp.pt/play/p15328/e867644/xutos');
+    assert.equal(streams[0].url, undefined);
+    assert.equal(calls, 0);
+  } finally { global.fetch = originalFetch; delete process.env.PT_HUB_RTP_INTERNAL_ONLY; }
 });
 test('RTP API bridge permits signed official API calls and rejects arbitrary targets', async () => {
   const worker = (await import('../../cloudflare/src/index.js')).default;

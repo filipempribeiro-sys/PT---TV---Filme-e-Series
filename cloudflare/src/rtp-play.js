@@ -286,12 +286,8 @@ export async function getRtpVodMeta(type,id){
 export async function getRtpVodStreams(type,id){
   if(!["movie","series","music","podcast"].includes(type))return[];
   const path=decodeId(id);if(!path)return[];
-  const resolved=await resolveRtpPlaybackUrls(path),website=RTP_BASE+resolved.path;
-  const streams=[];
-  for(const mediaUrl of resolved.urls){
-    streams.push({name:"PT•HUB • RTP Play",title:/\.mpd(?:$|[?#])/i.test(mediaUrl)?"RTP Play • DASH":"RTP Play • HLS",url:mediaUrl,behaviorHints:{notWebReady:true}})
-  }
-  if(streams.length)return streams;
-  if(typeof process!=="undefined"&&process.env?.PT_HUB_RTP_INTERNAL_ONLY==="1")return[];
+  // Open the official page, including its own episode selection and DRM flow.
+  // Do not resolve media or authenticate against the mobile API for this route.
+  const website=RTP_BASE+path;
   return[{name:"PT•HUB • RTP Play",title:"Abrir na RTP Play",externalUrl:website}]
 }
