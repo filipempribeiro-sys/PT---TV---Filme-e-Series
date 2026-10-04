@@ -1485,9 +1485,11 @@ export default {async fetch(request,env,ctx){
    for(const key of auth?["RTP-Play-Auth","RTP-Play-Auth-Hash","RTP-Play-Auth-Timestamp"]:["Authorization","RTP-Play-Auth-Timestamp"]){
     const value=supplied.get(key);if(!value||value.length>2048)return json({error:"Autenticação RTP em falta."},400,noCache);headers.set(key,value);
    }
-   const upstream=await fetch(target,{headers,redirect:"error",signal:AbortSignal.timeout(15000)});
+   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+   let upstream;
+   try{upstream=await fetch(target.toString(),{headers,redirect:"manual",signal:controller.signal})}finally{clearTimeout(timer)}
    return new Response(upstream.body,{status:upstream.status,headers:{...noCache,"content-type":upstream.headers.get("content-type")||"application/json"}});
-  }catch{return json({error:"Falha na ligação à API RTP."},502,noCache)}
+  }catch(error){return json({error:"Falha na ligação à API RTP.",reason:String(error?.message||"network-error").slice(0,240)},502,noCache)}
  }
 
  if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});
