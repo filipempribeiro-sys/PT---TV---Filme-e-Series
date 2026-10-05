@@ -41,7 +41,7 @@ test("TVI Player stays an optional official VOD catalog, never a streamer", asyn
   const html = await page.text();
   assert.match(html, /VOD OFICIAL/);
   assert.match(html, /não é streamer externo/);
-  assert.doesNotMatch(html, /TVI Player <span class=\\\"freeBadge\\\">ATIVO/);
+  assert.doesNotMatch(html, /Programas gratuitos • on-demand oficial/);
 });
 
 test("new config tokens use c3 while old c2 install links remain readable", async () => {
