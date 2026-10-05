@@ -23,6 +23,7 @@ test("clean install has a new identity and no implicit streamer selections", asy
   const configuredManifest = await configured.json();
   assert.equal(configuredManifest.catalogs.some(c => STREAMER_IDS.has(c.id)), false);
   assert.equal(configuredManifest.catalogs.some(c => c.id === "pthub-search" || c.id.startsWith("top10--")), false);
+  assert.equal(configuredManifest.catalogs.some(c => ["official-plex-free", "official-rakuten-free"].includes(c.id)), false);
 });
 
 test("TVI Player stays an optional official VOD catalog, never a streamer", async () => {
