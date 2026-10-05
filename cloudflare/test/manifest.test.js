@@ -40,7 +40,7 @@ test("TVI Player stays an optional official VOD catalog, never a streamer", asyn
 
   const page = await worker.fetch(new Request(origin + "/configure"), {}, { waitUntil() {} });
   const html = await page.text();
-  assert.match(html, /const initialConfig=\\{\\};/);
+  assert.ok(html.includes("const initialConfig={}"));
   assert.match(html, /VOD OFICIAL/);
   assert.match(html, /não é streamer externo/);
   assert.doesNotMatch(html, /Programas gratuitos • on-demand oficial/);
