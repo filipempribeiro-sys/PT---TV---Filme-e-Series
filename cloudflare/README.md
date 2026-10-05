@@ -7,6 +7,10 @@ Stremio / Nuvio → PT•HUB Cloudflare Worker → independent stream providers 
 
 Built-in stream sources are Torrentio, TorrentsDB and ThePirateBay+. They are enabled by default for compatible existing configurations and can be disabled individually. A provider failure, timeout, invalid JSON, 429 or 5xx does not fail the global response. Custom Stremio addon manifests remain supported and are kept separate from the built-in source list.
 
+## Instalação limpa e TVI Player
+
+Remove a instalação anterior de PT•HUB no cliente Stremio/Nuvio e volta a abrir `/configure` para criar uma instalação sem seleções guardadas. As configurações antigas ficam dentro do URL do manifest do cliente; não há uma cache central de seleções para apagar remotamente. A instalação limpa usa uma identidade e um token novos. TVI Player é um catálogo VOD oficial opcional, não um streamer externo. O catálogo continua separado dos serviços de streaming da JustWatch.
+
 ## Cloudflare Free design
 - No Render wake-up, polling, Docker, Redis, child processes or permanent timers.
 - Static assets are bundled from `../addon`; `.assetsignore` excludes the legacy Node server and its server-only helpers.
