@@ -1,11 +1,65 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { deflateRawSync } from "node:zlib";
 import worker from "../src/index.js";
+import { STREAMERS } from "../src/catalog-engine.js";
 
 const origin = "https://pt-hub.example";
 const tokenFor = config => Buffer.from(JSON.stringify(config), "utf8").toString("base64url");
 const configuredFetch = (config, resource = "manifest.json") =>
   worker.fetch(new Request(`${origin}/${tokenFor(config)}/${resource}`), {}, { waitUntil() {} });
+
+const STREAMER_IDS = new Set(STREAMERS.map(streamer => streamer.id));
+
+test("clean install has a new identity and no implicit streamer selections", async () => {
+  const response = await worker.fetch(new Request(origin + "/manifest.json"), {}, { waitUntil() {} });
+  assert.equal(response.status, 200);
+  const manifest = await response.json();
+  assert.equal(manifest.id, "pt.filipe.nuvio.tvhub.clean");
+  assert.equal(manifest.version, "4.1.0");
+  assert.equal(manifest.catalogs.some(c => STREAMER_IDS.has(c.id)), false);
+
+  const configured = await configuredFetch({ features: { streamers: true } });
+  const configuredManifest = await configured.json();
+  assert.equal(configuredManifest.catalogs.some(c => STREAMER_IDS.has(c.id)), false);
+  assert.equal(configuredManifest.catalogs.some(c => c.id === "pthub-search" || c.id.startsWith("top10--")), false);
+});
+
+test("TVI Player stays an optional official VOD catalog, never a streamer", async () => {
+  const response = await configuredFetch({ features: {
+    streamers: true,
+    selectedStreamerMovies: ["tvi-player", "netflix"],
+    selectedStreamerSeries: ["tvi-player"],
+    ptContentSources: { tviPlayer: true },
+  } });
+  const manifest = await response.json();
+  assert.ok(manifest.catalogs.some(c => c.type === "movie" && c.id === "netflix"));
+  assert.ok(!manifest.catalogs.some(c => c.id === "tvi-player"));
+  assert.ok(manifest.catalogs.some(c => c.type === "series" && c.id.startsWith("tvi-vod-")));
+
+  const page = await worker.fetch(new Request(origin + "/configure"), {}, { waitUntil() {} });
+  const html = await page.text();
+  assert.match(html, /VOD OFICIAL/);
+  assert.match(html, /não é streamer externo/);
+  assert.doesNotMatch(html, /TVI Player <span class=\\\"freeBadge\\\">ATIVO/);
+});
+
+test("new config tokens use c3 while old c2 install links remain readable", async () => {
+  const saved = await worker.fetch(new Request(origin + "/config-store", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ features: { streamers: true, selectedStreamerMovies: ["netflix"] } }),
+  }), {}, { waitUntil() {} });
+  const payload = await saved.json();
+  assert.equal(saved.status, 200);
+  assert.match(payload.token, /^c3_/);
+
+  const oldConfig = { features: { streamers: true, selectedStreamerMovies: ["netflix"] } };
+  const oldToken = "c2_" + deflateRawSync(Buffer.from(JSON.stringify(oldConfig))).toString("base64url");
+  const oldManifest = await worker.fetch(new Request(origin + "/" + oldToken + "/manifest.json"), {}, { waitUntil() {} });
+  assert.equal(oldManifest.status, 200);
+  assert.ok((await oldManifest.json()).catalogs.some(c => c.type === "movie" && c.id === "netflix"));
+});
+
 
 test("RTP Play live and VOD catalogs can be enabled without Portuguese films and series", async () => {
   const response = await configuredFetch({ features: { ptContentSources: { rtpPlay: true } } });
