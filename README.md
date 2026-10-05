@@ -32,6 +32,8 @@ https://pt---tv---filme-e-series.filipe-m-p-ribeiro.workers.dev
 
 Abre `/configure`, escolhe os conteúdos e instala o manifest gerado no Stremio/Nuvio.
 
+Para uma instalação limpa, remove primeiro a instalação antiga de PT•HUB no Stremio/Nuvio e abre diretamente [`/configure`](https://pt---tv---filme-e-series.filipe-m-p-ribeiro.workers.dev/configure). A página inicia sem seleções. As preferências antigas estão codificadas no URL do manifest guardado pelo cliente; o servidor não consegue apagar esse URL/cache do dispositivo. Instala o novo manifest gerado. A TVI Player aparece como catálogo VOD oficial opcional e não como streamer externo.
+
 ## IPTV
 
 São suportados:
